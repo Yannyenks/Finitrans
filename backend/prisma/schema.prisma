@@ -1,0 +1,843 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                       String                    @id @default(uuid()) @db.Uuid
+  email                    String                    @unique @db.VarChar(255)
+  passwordHash             String                    @map("password_hash") @db.VarChar(255)
+  nom                      String                    @db.VarChar(255)
+  role                     String                    @db.VarChar(255)
+  site                     Site
+  telephone                String?                   @db.VarChar(50)
+  profil                   Profil
+  actif                    Boolean                   @default(true)
+  avatarUrl                String?                   @map("avatar_url") @db.VarChar(500)
+  permDossier              PermissionNiveau          @default(lecture) @map("perm_dossier")
+  permValidation           PermissionNiveau          @default(non) @map("perm_validation")
+  permFinancier            PermissionNiveau          @default(non) @map("perm_financier")
+  permRapports             PermissionNiveau          @default(non) @map("perm_rapports")
+  permAdministration       PermissionNiveau          @default(non) @map("perm_administration")
+  createdAt                DateTime                  @default(now()) @map("created_at")
+  updatedAt                DateTime                  @updatedAt @map("updated_at")
+  compagniesAssignees      String[]                  @default([]) @map("compagnies_assignees")
+  alertesLues              Alerte[]                  @relation("AlerteLuePar")
+  auditEntries             AuditEntry[]
+  bonsKribi                BonKribi[]
+  bonsLivraison            BonLivraison[]
+  commentaires             Commentaire[]
+  comptesRendus            CompteRenduKribi[]        @relation("CompteRenduAuteur")
+  conversationParticipants ConversationParticipant[]
+  conversations            Conversation[]            @relation("CreatorConversation")
+  declarationsImportation  DeclarationImportation[]  @relation("GestionnaireDI")
+  documentsUploades        Document[]
+  dossiersResponsable      Dossier[]                 @relation("ResponsableDossier")
+  etatsCodesSoumis         EtatCodage[]              @relation("EtatCodageSoumis")
+  etatsCodesValides        EtatCodage[]              @relation("EtatCodageValide")
+  gatePassesEmis           GatePass[]                @relation("EmetteurGatePass")
+  interchangesResponsable  Interchange[]             @relation("InterchangeResponsable")
+  messagesEnvoyes          Message[]
+  mouvementsDI             MouvementDI[]             @relation("MouvementDIAuteur")
+  notifications            Notification[]
+  parametresModifies       Parametre[]
+  refreshTokens            RefreshToken[]
+  soumissionsSGS           SoumissionSGS[]           @relation("SGSSoumisPar")
+  vehiculesResponsable     Vehicule[]                @relation("VehiculeResponsable")
+  virements                Virement[]
+  sousEtapesResponsable    SousEtapeDossier[]        @relation("SousEtapeResponsable")
+  sousEtapesValidees       SousEtapeDossier[]        @relation("SousEtapeCompletedBy")
+
+  @@map("users")
+}
+
+model Dossier {
+  id                 String                  @id @default(uuid()) @db.Uuid
+  numero             String                  @unique @db.VarChar(50)
+  client             String                  @db.VarChar(255)
+  compagnie          Compagnie
+  conteneur          String                  @db.VarChar(100)
+  marchandise        String
+  site               Site
+  status             DossierStatus           @default(reception)
+  responsableId      String                  @map("responsable_id") @db.Uuid
+  dateCreation       DateTime                @default(now()) @map("date_creation")
+  dateArrivee        DateTime                @map("date_arrivee")
+  montantTaxes       Decimal?                @map("montant_taxes") @db.Decimal(15, 2)
+  montantHonoraires  Decimal?                @map("montant_honoraires") @db.Decimal(15, 2)
+  montantRedevances  Decimal?                @map("montant_redevances") @db.Decimal(15, 2)
+  dateLimiteSortie   DateTime?               @map("date_limite_sortie")
+  priorite           Priorite                @default(moyenne)
+  numeroDI           String?                 @map("numero_di") @db.VarChar(50)
+  montantDI          Decimal?                @map("montant_di") @db.Decimal(15, 2)
+  notes              String?
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  diId               String?                 @map("di_id") @db.Uuid
+  alertes            Alerte[]
+  auditEntries       AuditEntry[]
+  bonsKribi          BonKribi[]
+  bonsLivraison      BonLivraison[]
+  commentaires       Commentaire[]
+  conversations      Conversation[]
+  detentions         Detention[]
+  documents          Document[]
+  timings            DossierTiming[]
+  di                 DeclarationImportation? @relation("DossierDI", fields: [diId], references: [id])
+  responsable        User                    @relation("ResponsableDossier", fields: [responsableId], references: [id])
+  etatsCodeage       EtatCodage[]
+  factures           Facture[]
+  gatePasses         GatePass[]
+  interchanges       Interchange[]
+  mouvementsDI       MouvementDI[]           @relation("MouvementDIDossier")
+  notifications      Notification[]
+  paiementsCompagnie PaiementCompagnie[]
+  paiementsDouane    PaiementDouane[]
+  soumissionsSGS     SoumissionSGS[]
+  vehicules          Vehicule[]
+  virements          Virement[]
+  sousEtapes         SousEtapeDossier[]
+
+  @@map("dossiers")
+}
+
+model Document {
+  id         String        @id @default(uuid()) @db.Uuid
+  dossierId  String        @map("dossier_id") @db.Uuid
+  nom        String        @db.VarChar(255)
+  type       String        @db.VarChar(50)
+  taille     String        @db.VarChar(50)
+  url        String        @db.VarChar(500)
+  uploadePar String        @map("uploade_par") @db.Uuid
+  etape      DossierStatus
+  createdAt  DateTime      @default(now()) @map("created_at")
+  dossier    Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  uploader   User          @relation(fields: [uploadePar], references: [id])
+
+  @@map("documents")
+}
+
+model Commentaire {
+  id        String   @id @default(uuid()) @db.Uuid
+  dossierId String   @map("dossier_id") @db.Uuid
+  auteurId  String   @map("auteur_id") @db.Uuid
+  message   String
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  auteur    User     @relation(fields: [auteurId], references: [id])
+  dossier   Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("commentaires")
+}
+
+model AuditEntry {
+  id        String   @id @default(uuid()) @db.Uuid
+  dossierId String   @map("dossier_id") @db.Uuid
+  auteurId  String   @map("auteur_id") @db.Uuid
+  action    String   @db.VarChar(255)
+  details   String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  auteur    User     @relation(fields: [auteurId], references: [id])
+  dossier   Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("audit_entries")
+}
+
+model Facture {
+  id           String        @id @default(uuid()) @db.Uuid
+  dossierId    String        @map("dossier_id") @db.Uuid
+  numero       String        @unique @db.VarChar(50)
+  type         StatutFacture @default(proforma)
+  montant      Decimal       @db.Decimal(15, 2)
+  compagnie    String        @db.VarChar(255)
+  dateFacture  DateTime      @map("date_facture")
+  datePaiement DateTime?     @map("date_paiement")
+  description  String
+  createdAt    DateTime      @default(now()) @map("created_at")
+  updatedAt    DateTime      @updatedAt @map("updated_at")
+  dossier      Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("factures")
+}
+
+model Virement {
+  id           String         @id @default(uuid()) @db.Uuid
+  dossierId    String         @map("dossier_id") @db.Uuid
+  montant      Decimal        @db.Decimal(15, 2)
+  source       String         @db.VarChar(255)
+  destination  String         @db.VarChar(255)
+  dateVirement DateTime       @map("date_virement")
+  reference    String         @unique @db.VarChar(100)
+  effectuePar  String         @map("effectue_par") @db.Uuid
+  statut       StatutVirement @default(en_attente)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  dossier      Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable  User           @relation(fields: [effectuePar], references: [id])
+
+  @@map("virements")
+}
+
+model BonLivraison {
+  id           String       @id @default(uuid()) @db.Uuid
+  dossierId    String       @map("dossier_id") @db.Uuid
+  numero       String       @unique @db.VarChar(50)
+  description  String
+  montant      Decimal      @db.Decimal(15, 2)
+  dateEmission DateTime     @map("date_emission")
+  effectuePar  String       @map("effectue_par") @db.Uuid
+  statut       StatutBonLiv @default(en_attente)
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  dossier      Dossier      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable  User         @relation(fields: [effectuePar], references: [id])
+
+  @@map("bons_livraison")
+}
+
+model GatePass {
+  id           String         @id @default(uuid()) @db.Uuid
+  dossierId    String         @map("dossier_id") @db.Uuid
+  numero       String         @unique @db.VarChar(50)
+  conteneur    String         @db.VarChar(100)
+  chauffeur    String         @db.VarChar(255)
+  telephone    String         @db.VarChar(50)
+  destination  String         @db.VarChar(255)
+  dateEmission DateTime       @map("date_emission")
+  emetteurId   String         @map("emetteur_id") @db.Uuid
+  statut       StatutGatePass @default(emis)
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  dossier      Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  emetteur     User           @relation("EmetteurGatePass", fields: [emetteurId], references: [id])
+
+  @@map("gate_passes")
+}
+
+model DossierTiming {
+  id               String        @id @default(uuid()) @db.Uuid
+  dossierId        String        @map("dossier_id") @db.Uuid
+  etape            DossierStatus
+  dateDebut        DateTime      @default(now()) @map("date_debut")
+  dateFin          DateTime?     @map("date_fin")
+  dureePrevueJours Int           @default(2) @map("duree_prevue_jours")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  dossier          Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("dossier_timings")
+}
+
+model Alerte {
+  id        String         @id @default(uuid()) @db.Uuid
+  type      TypeAlerte
+  message   String
+  dossierId String?        @map("dossier_id") @db.Uuid
+  severity  SeveriteAlerte @default(warning)
+  lu        Boolean        @default(false)
+  luPar     String?        @map("lu_par") @db.Uuid
+  luAt      DateTime?      @map("lu_at")
+  createdAt DateTime       @default(now()) @map("created_at")
+  dossier   Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  reader    User?          @relation("AlerteLuePar", fields: [luPar], references: [id])
+
+  @@map("alertes")
+}
+
+model AlerteConfig {
+  id        String   @id @default(uuid()) @db.Uuid
+  type      String   @unique @db.VarChar(100)
+  label     String   @db.VarChar(255)
+  seuil     Int
+  unite     String   @db.VarChar(50)
+  actif     Boolean  @default(true)
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("alerte_configs")
+}
+
+model Conversation {
+  id             String                    @id @default(uuid()) @db.Uuid
+  titre          String                    @db.VarChar(255)
+  dossierId      String?                   @map("dossier_id") @db.Uuid
+  type           TypeConversation          @default(general)
+  dernierMessage String?                   @map("dernier_message")
+  createdBy      String                    @map("created_by") @db.Uuid
+  createdAt      DateTime                  @default(now()) @map("created_at")
+  updatedAt      DateTime                  @updatedAt @map("updated_at")
+  participants   ConversationParticipant[]
+  creator        User                      @relation("CreatorConversation", fields: [createdBy], references: [id])
+  dossier        Dossier?                  @relation(fields: [dossierId], references: [id])
+  messages       Message[]
+
+  @@map("conversations")
+}
+
+model ConversationParticipant {
+  conversationId String       @map("conversation_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  joinedAt       DateTime     @default(now()) @map("joined_at")
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@map("conversation_participants")
+}
+
+model Message {
+  id             String       @id @default(uuid()) @db.Uuid
+  conversationId String       @map("conversation_id") @db.Uuid
+  auteurId       String       @map("auteur_id") @db.Uuid
+  contenu        String
+  lu             Boolean      @default(false)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  auteur         User         @relation(fields: [auteurId], references: [id])
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("messages")
+}
+
+model BonKribi {
+  id            String         @id @default(uuid()) @db.Uuid
+  dossierId     String         @map("dossier_id") @db.Uuid
+  type          TypeBonKribi
+  numero        String         @unique @db.VarChar(50)
+  description   String
+  montant       Decimal?       @db.Decimal(15, 2)
+  dateEmission  DateTime       @default(now()) @map("date_emission")
+  responsableId String         @map("responsable_id") @db.Uuid
+  statut        StatutBonKribi @default(emis)
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  dossier       Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable   User           @relation(fields: [responsableId], references: [id])
+
+  @@map("bons_kribi")
+}
+
+model PaiementDouane {
+  id           String             @id @default(uuid()) @db.Uuid
+  dossierId    String             @map("dossier_id") @db.Uuid
+  type         TypePaiementDouane
+  montant      Decimal            @db.Decimal(15, 2)
+  datePaiement DateTime           @map("date_paiement")
+  statut       StatutPaiement     @default(en_attente)
+  reference    String             @unique @db.VarChar(100)
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
+  dossier      Dossier            @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("paiements_douane")
+}
+
+model PaiementCompagnie {
+  id           String                @id @default(uuid()) @db.Uuid
+  dossierId    String                @map("dossier_id") @db.Uuid
+  compagnie    Compagnie
+  type         TypePaiementCompagnie
+  montant      Decimal               @db.Decimal(15, 2)
+  datePaiement DateTime              @map("date_paiement")
+  statut       StatutPaiement        @default(en_attente)
+  reference    String                @unique @db.VarChar(100)
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
+  dossier      Dossier               @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("paiements_compagnie")
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  token     String    @unique
+  expiresAt DateTime  @map("expires_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  revokedAt DateTime? @map("revoked_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("refresh_tokens")
+}
+
+model Parametre {
+  id          String   @id @default(uuid()) @db.Uuid
+  cle         String   @unique @db.VarChar(100)
+  valeur      Json
+  description String?
+  updatedBy   String?  @map("updated_by") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  editor      User?    @relation(fields: [updatedBy], references: [id])
+
+  @@map("parametres")
+}
+
+model DeclarationImportation {
+  id             String        @id @default(uuid()) @db.Uuid
+  numero         String        @unique @db.VarChar(50)
+  client         String        @db.VarChar(255)
+  montant        Decimal       @db.Decimal(15, 2)
+  soldeActuel    Decimal       @default(0) @map("solde_actuel") @db.Decimal(15, 2)
+  devise         String        @default("XAF") @db.VarChar(10)
+  dateEmission   DateTime      @map("date_emission")
+  dateExpiration DateTime?     @map("date_expiration")
+  statut         StatutDI      @default(actif)
+  gestionnaireId String        @map("gestionnaire_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  compagnie      Compagnie?
+  seuilAlerte1   Int           @default(20) @map("seuil_alerte_1")
+  seuilAlerte2   Int           @default(10) @map("seuil_alerte_2")
+  gestionnaire   User          @relation("GestionnaireDI", fields: [gestionnaireId], references: [id])
+  dossiers       Dossier[]     @relation("DossierDI")
+  mouvements     MouvementDI[]
+
+  @@map("declarations_importation")
+}
+
+model MouvementDI {
+  id        String                 @id @default(uuid()) @db.Uuid
+  diId      String                 @map("di_id") @db.Uuid
+  dossierId String?                @map("dossier_id") @db.Uuid
+  type      TypeMouvementDI
+  montant   Decimal                @db.Decimal(15, 2)
+  motif     String
+  createdBy String                 @map("created_by") @db.Uuid
+  createdAt DateTime               @default(now()) @map("created_at")
+  categorie CategorieMouvementDI?  @default(frais_divers)
+  auteur    User                   @relation("MouvementDIAuteur", fields: [createdBy], references: [id])
+  di        DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
+  dossier   Dossier?               @relation("MouvementDIDossier", fields: [dossierId], references: [id])
+
+  @@map("mouvements_di")
+}
+
+model Detention {
+  id              String          @id @default(uuid()) @db.Uuid
+  dossierId       String          @map("dossier_id") @db.Uuid
+  conteneur       String          @db.VarChar(100)
+  compagnie       Compagnie
+  dateDebut       DateTime        @map("date_debut")
+  dateFin         DateTime?       @map("date_fin")
+  joursDetention  Int             @default(0) @map("jours_detention")
+  tarifJournalier Decimal         @map("tarif_journalier") @db.Decimal(15, 2)
+  montantTotal    Decimal         @default(0) @map("montant_total") @db.Decimal(15, 2)
+  statut          StatutDetention @default(en_cours)
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  dossier         Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@map("detentions")
+}
+
+model EtatCodage {
+  id                    String           @id @default(uuid()) @db.Uuid
+  dossierId             String           @map("dossier_id") @db.Uuid
+  codeDouanier          String           @map("code_douanier") @db.VarChar(20)
+  designation           String
+  tauxDroits            Decimal          @map("taux_droits") @db.Decimal(5, 2)
+  tauxTVA               Decimal          @map("taux_tva") @db.Decimal(5, 2)
+  valeurCIF             Decimal          @map("valeur_cif") @db.Decimal(15, 2)
+  montantDroits         Decimal          @map("montant_droits") @db.Decimal(15, 2)
+  montantTVA            Decimal          @map("montant_tva") @db.Decimal(15, 2)
+  statut                StatutEtatCodage @default(brouillon)
+  soumisParId           String?          @map("soumis_par_id") @db.Uuid
+  valideParId           String?          @map("valide_par_id") @db.Uuid
+  commentaireValidation String?          @map("commentaire_validation")
+  soumisAt              DateTime?        @map("soumis_at")
+  valideAt              DateTime?        @map("valide_at")
+  createdAt             DateTime         @default(now()) @map("created_at")
+  updatedAt             DateTime         @updatedAt @map("updated_at")
+  dossier               Dossier          @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  soumisPar             User?            @relation("EtatCodageSoumis", fields: [soumisParId], references: [id])
+  validePar             User?            @relation("EtatCodageValide", fields: [valideParId], references: [id])
+
+  @@map("etats_codage")
+}
+
+model Vehicule {
+  id              String         @id @default(uuid()) @db.Uuid
+  dossierId       String         @map("dossier_id") @db.Uuid
+  marque          String         @db.VarChar(100)
+  modele          String         @db.VarChar(100)
+  annee           Int
+  numeroSerie     String         @map("numero_serie") @db.VarChar(100)
+  immatriculation String?        @db.VarChar(50)
+  valeurCIF       Decimal        @map("valeur_cif") @db.Decimal(15, 2)
+  statut          StatutVehicule @default(en_attente)
+  responsableId   String         @map("responsable_id") @db.Uuid
+  dateDebut       DateTime       @default(now()) @map("date_debut")
+  dateFin         DateTime?      @map("date_fin")
+  notes           String?
+  createdAt       DateTime       @default(now()) @map("created_at")
+  updatedAt       DateTime       @updatedAt @map("updated_at")
+  dossier         Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable     User           @relation("VehiculeResponsable", fields: [responsableId], references: [id])
+
+  @@map("vehicules")
+}
+
+model Interchange {
+  id            String            @id @default(uuid()) @db.Uuid
+  dossierId     String            @map("dossier_id") @db.Uuid
+  conteneur     String            @db.VarChar(100)
+  compagnie     Compagnie
+  dateEmission  DateTime          @default(now()) @map("date_emission")
+  dateRetour    DateTime?         @map("date_retour")
+  dateLimite    DateTime          @map("date_limite")
+  statut        StatutInterchange @default(emis)
+  responsableId String            @map("responsable_id") @db.Uuid
+  notes         String?
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  dossier       Dossier           @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable   User              @relation("InterchangeResponsable", fields: [responsableId], references: [id])
+
+  @@map("interchanges")
+}
+
+model Notification {
+  id        String           @id @default(uuid()) @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      TypeNotification
+  titre     String           @db.VarChar(255)
+  message   String
+  lu        Boolean          @default(false)
+  luAt      DateTime?        @map("lu_at")
+  dossierId String?          @map("dossier_id") @db.Uuid
+  actionUrl String?          @map("action_url") @db.VarChar(500)
+  createdAt DateTime         @default(now()) @map("created_at")
+  dossier   Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model CompteRenduKribi {
+  id              String   @id @default(uuid()) @db.Uuid
+  date            DateTime
+  site            Site
+  auteurId        String   @map("auteur_id") @db.Uuid
+  contenu         String
+  dossiersTraites Int      @default(0) @map("dossiers_traites")
+  bonsEmis        Int      @default(0) @map("bons_emis")
+  gatePassEmis    Int      @default(0) @map("gate_pass_emis")
+  observations    String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  auteur          User     @relation("CompteRenduAuteur", fields: [auteurId], references: [id])
+
+  @@map("comptes_rendus_kribi")
+}
+
+model SoumissionSGS {
+  id               String              @id @default(uuid()) @db.Uuid
+  dossierId        String              @map("dossier_id") @db.Uuid
+  reference        String              @unique @db.VarChar(100)
+  typeVerification TypeVerificationSGS @map("type_verification")
+  dateDepot        DateTime            @map("date_depot")
+  datePrevueRetour DateTime?           @map("date_prevue_retour")
+  dateRetour       DateTime?           @map("date_retour")
+  statut           StatutSGS           @default(deposee)
+  numeroADV        String?             @map("numero_adv") @db.VarChar(100)
+  valeurDeclaree   Decimal?            @map("valeur_declaree") @db.Decimal(15, 2)
+  resultat         String?
+  observations     String?
+  documentsJoints  String[]            @default([]) @map("documents_joints")
+  soumisParId      String              @map("soumis_par_id") @db.Uuid
+  createdAt        DateTime            @default(now()) @map("created_at")
+  updatedAt        DateTime            @updatedAt @map("updated_at")
+  dossier          Dossier             @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  soumisPar        User                @relation("SGSSoumisPar", fields: [soumisParId], references: [id])
+
+  @@map("soumissions_sgs")
+}
+
+enum DossierStatus {
+  reception
+  codage
+  validation
+  paiement
+  bon_compagnie
+  operations_kribi
+  cloture
+
+  @@map("dossier_status")
+}
+
+enum Priorite {
+  haute
+  moyenne
+  basse
+
+  @@map("priorite_enum")
+}
+
+enum Site {
+  Douala
+  Kribi
+
+  @@map("site_enum")
+}
+
+enum Compagnie {
+  MSC
+  COSCO
+  MAERSK
+  CMA_CGM
+
+  @@map("compagnie_enum")
+}
+
+enum Profil {
+  dg
+  exploitation
+  operations
+  validation
+  administration
+  comptabilite
+  terrain_kribi
+  logistique
+  gestion_sorties
+
+  @@map("profil_enum")
+}
+
+enum PermissionNiveau {
+  complet
+  partiel
+  lecture
+  non
+
+  @@map("permission_niveau")
+}
+
+enum StatutFacture {
+  proforma
+  validee
+  reglee
+
+  @@map("statut_facture")
+}
+
+enum StatutVirement {
+  effectue
+  en_attente
+  annule
+
+  @@map("statut_virement")
+}
+
+enum StatutGatePass {
+  emis
+  transmis
+  utilise
+
+  @@map("statut_gate_pass")
+}
+
+enum StatutBonLiv {
+  valide
+  en_attente
+  annule
+
+  @@map("statut_bon_liv")
+}
+
+enum TypeAlerte {
+  detention
+  paiement
+  blocage
+  document
+  charge
+  di_seuil
+
+  @@map("type_alerte")
+}
+
+enum SeveriteAlerte {
+  critical
+  warning
+  info
+
+  @@map("severite_alerte")
+}
+
+enum TypeConversation {
+  dossier
+  general
+  urgence
+
+  @@map("type_conversation")
+}
+
+enum TypeBonKribi {
+  douane
+  compagnie_pak
+  portuaire_pad
+
+  @@map("type_bon_kribi")
+}
+
+enum StatutBonKribi {
+  emis
+  valide
+  utilise
+  expire
+
+  @@map("statut_bon_kribi")
+}
+
+enum TypePaiementDouane {
+  droits
+  taxes
+  redevances
+  penalite
+
+  @@map("type_paiement_douane")
+}
+
+enum TypePaiementCompagnie {
+  surestaries
+  frais_portuaires
+  manutention
+  terminal
+
+  @@map("type_paiement_compagnie")
+}
+
+enum StatutPaiement {
+  paye
+  en_attente
+  en_retard
+
+  @@map("statut_paiement")
+}
+
+enum StatutDI {
+  actif
+  cloture
+  suspendu
+
+  @@map("statut_di")
+}
+
+enum TypeMouvementDI {
+  credit
+  debit
+
+  @@map("type_mouvement_di")
+}
+
+enum StatutDetention {
+  en_cours
+  resolue
+
+  @@map("statut_detention")
+}
+
+enum StatutEtatCodage {
+  brouillon
+  soumis
+  valide
+  rejete
+
+  @@map("statut_etat_codage")
+}
+
+enum StatutVehicule {
+  en_attente
+  en_cours
+  cloture
+
+  @@map("statut_vehicule")
+}
+
+enum StatutInterchange {
+  emis
+  retourne
+  en_litige
+
+  @@map("statut_interchange")
+}
+
+enum TypeNotification {
+  alerte
+  message
+  dossier
+  action_requise
+
+  @@map("type_notification")
+}
+
+enum StatutSGS {
+  deposee
+  en_cours_inspection
+  inspection_physique
+  resultat_disponible
+  adv_emise
+  rejete
+
+  @@map("statut_sgs")
+}
+
+// ── Sous-étapes dossier ─────────────────────────────────────────────────────
+
+enum SousEtapeStatut {
+  todo
+  en_cours
+  valide
+  rejete
+
+  @@map("sous_etape_statut")
+}
+
+model SousEtapeDossier {
+  id            String          @id @default(uuid()) @db.Uuid
+  dossierId     String          @map("dossier_id") @db.Uuid
+  etape         String          @db.VarChar(50)
+  cle           String          @db.VarChar(50)
+  statut        SousEtapeStatut @default(todo)
+  responsableId String?         @map("responsable_id") @db.Uuid
+  deadline      DateTime?
+  completedAt   DateTime?       @map("completed_at")
+  completedById String?         @map("completed_by_id") @db.Uuid
+  metadata      Json?
+  notes         String?         @db.Text
+
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  dossier       Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable   User?           @relation("SousEtapeResponsable", fields: [responsableId], references: [id])
+  completedBy   User?           @relation("SousEtapeCompletedBy", fields: [completedById], references: [id])
+
+  @@unique([dossierId, etape, cle])
+  @@map("sous_etapes_dossier")
+}
+
+enum TypeVerificationSGS {
+  pre_embarquement
+  a_destination
+  documentaire
+  physique_complet
+
+  @@map("type_verification_sgs")
+}
+
+enum CategorieMouvementDI {
+  droits_douane
+  tva
+  honoraires
+  redevances
+  penalites
+  frais_divers
+  remboursement
+  ouverture
+
+  @@map("categorie_mouvement_di")
+}

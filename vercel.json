@@ -1,0 +1,8 @@
+{
+  "buildCommand": "cd finitrans-buddy-main && npm ci && npm run build",
+  "outputDirectory": "finitrans-buddy-main/dist",
+  "installCommand": "echo skip-root-install",
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
+}
