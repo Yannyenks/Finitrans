@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "vercel-build": "npm --prefix backend install && npm --prefix backend run db:generate && npm --prefix finitrans-buddy-main install && npm --prefix finitrans-buddy-main run build"
+    "vercel-build": "npm --prefix backend install && npm --prefix backend run db:generate && npm --prefix finitrans-buddy-main install --include=dev && npm --prefix finitrans-buddy-main run build"
   },
   "dependencies": {
     "@vercel/sdk": "^1.28.17"
