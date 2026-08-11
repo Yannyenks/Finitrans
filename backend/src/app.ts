@@ -32,7 +32,7 @@ import exportsRoutes       from './routes/exports.routes'
 import sgsRoutes           from './routes/sgs.routes'
 import sousEtapesRoutes    from './routes/sous-etapes.routes'
 
-export async function buildApp(): Promise<FastifyInstance> {
+export async function buildApp(opts: { serverless?: boolean } = {}): Promise<FastifyInstance> {
   const fastify = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -60,11 +60,13 @@ export async function buildApp(): Promise<FastifyInstance> {
     limits: { fileSize: env.MAX_FILE_SIZE_MB * 1_000_000, files: 5 },
   })
 
-  await fastify.register(staticFiles, {
-    root:           path.resolve(process.cwd(), env.UPLOADS_DIR),
-    prefix:         '/uploads/',
-    decorateReply:  false,
-  })
+  if (!opts.serverless) {
+    await fastify.register(staticFiles, {
+      root:           path.resolve(process.cwd(), env.UPLOADS_DIR),
+      prefix:         '/uploads/',
+      decorateReply:  false,
+    })
+  }
 
   await fastify.register(rateLimit, {
     max: 200,
@@ -75,7 +77,9 @@ export async function buildApp(): Promise<FastifyInstance> {
     }),
   })
 
-  await fastify.register(websocket, { options: { maxPayload: 1_048_576 } })
+  if (!opts.serverless) {
+    await fastify.register(websocket, { options: { maxPayload: 1_048_576 } })
+  }
 
   // ─── Décoration globale ───────────────────────────────────
 
@@ -91,17 +95,18 @@ export async function buildApp(): Promise<FastifyInstance> {
 
   // ─── WebSocket global (notifications temps réel) ──────────
 
-  fastify.register(async function wsRoutes(f) {
-    f.get('/ws', { websocket: true }, (connection) => {
-      connection.socket.on('message', (msg: Buffer) => {
-        try {
-          const data = JSON.parse(msg.toString())
-          // Echo ping/pong
-          if (data.type === 'PING') connection.socket.send(JSON.stringify({ type: 'PONG' }))
-        } catch { /* ignorer les messages malformés */ }
+  if (!opts.serverless) {
+    fastify.register(async function wsRoutes(f) {
+      f.get('/ws', { websocket: true }, (connection) => {
+        connection.socket.on('message', (msg: Buffer) => {
+          try {
+            const data = JSON.parse(msg.toString())
+            if (data.type === 'PING') connection.socket.send(JSON.stringify({ type: 'PONG' }))
+          } catch { /* ignorer les messages malformés */ }
+        })
       })
     })
-  })
+  }
 
   // ─── Routes API ───────────────────────────────────────────
 

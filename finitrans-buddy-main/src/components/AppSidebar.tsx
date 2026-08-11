@@ -20,16 +20,16 @@ type NavItem = {
   permKey?: keyof ReturnType<typeof getStoredUser> & string;
 };
 
-// ── Règles de visibilité par profil ──────────────────────────────────────────
+// ── Règles de visibilité par profil (selon organigramme réel) ────────────────
 //
-//  dg              → tout
-//  exploitation    → tableau de bord, exploitation, dossiers, codage, sorties, messagerie, alertes, finance, kribi, reporting
-//  logistique      → tableau de bord, dossiers (lecture), logistique, messagerie, alertes
-//  validation      → tableau de bord, codage, messagerie, alertes
-//  gestion_sorties → tableau de bord, dossiers (lecture), sorties, messagerie, alertes
-//  administratif   → tableau de bord, dossiers, messagerie, alertes, finance, gestion DI
-//  comptabilite    → tableau de bord, comptabilité, finance, reporting, messagerie, alertes
-//  terrain_kribi   → tableau de bord, kribi, messagerie, alertes
+//  dg              → tout (Mr DELBA, coordination générale)
+//  exploitation    → tout sauf comptabilité pure (Mr SOUDI, contrôle et suivi)
+//  logistique      → dossiers, logistique, finance, alertes (Mr YAYA, transport/paiements taxes)
+//  validation      → dossiers, codage, alertes (Mme ODETTE, codage/validation déclarations)
+//  gestion_sorties → dossiers, sorties, finance, alertes (Mr WANDALA/RASOUL, sorties/factures)
+//  administration  → dossiers, administratif, finance, di, alertes (Mme YASMINE, enregistrement/DI)
+//  comptabilite    → comptabilité, finance, di, reporting, alertes (Mr HONORÉ, OHADA)
+//  terrain_kribi   → dossiers (assignés), kribi, finance, alertes (Mr ALIOU/RAPHAEL)
 
 const NAV_ITEMS: NavItem[] = [
   {
@@ -89,7 +89,8 @@ const NAV_ITEMS: NavItem[] = [
     label:   "Gestion DI",
     icon:    Banknote,
     path:    "/di",
-    permKey: "permFinancier",
+    // Yasmine (suivi DI), Honoré (financier), DG, Exploitation
+    profils: ["dg", "exploitation", "administration", "comptabilite"],
   },
   {
     label:   "Comptabilité",
@@ -101,7 +102,7 @@ const NAV_ITEMS: NavItem[] = [
     label:   "Administratif",
     icon:    ClipboardList,
     path:    "/administratif",
-    profils: ["dg", "administratif"],
+    profils: ["dg", "exploitation", "administration"],
   },
   {
     label:   "Employés",
@@ -136,7 +137,7 @@ const PROFIL_LABELS: Record<string, string> = {
   logistique:     "Resp. Logistique",
   validation:     "Resp. Validation",
   gestion_sorties:"Resp. Gestion Sorties",
-  administratif:  "Service Administratif",
+  administration: "Service Administratif",
   comptabilite:   "Comptable",
   terrain_kribi:  "Terrain Kribi",
 };
@@ -161,7 +162,7 @@ const AppSidebar = () => {
 
     // Vérification par permission
     if (item.permKey) {
-      const val = (user as Record<string, string>)[item.permKey];
+      const val = (user as unknown as Record<string, string>)[item.permKey];
       if (val === "non") return false;
     }
 
@@ -172,7 +173,7 @@ const AppSidebar = () => {
   };
 
   const showSettings =
-    !user || (user as Record<string, string>)["permAdministration"] !== "non";
+    !user || (user as unknown as Record<string, string>)["permAdministration"] !== "non";
 
   const profilLabel = user?.profil ? (PROFIL_LABELS[user.profil] ?? user.profil) : "";
 

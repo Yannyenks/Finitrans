@@ -1,0 +1,8 @@
+{
+  "name": "finitrans-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "vercel-build": "cd backend && npm install && npx prisma generate && cd ../finitrans-buddy-main && npm install && npm run build"
+  }
+}

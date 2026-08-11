@@ -1,8 +1,25 @@
 {
-  "buildCommand": "cd finitrans-buddy-main && npm ci && npm run build",
+  "buildCommand": "cd backend && npm install && npx prisma generate && cd ../finitrans-buddy-main && npm install && npm run build",
   "outputDirectory": "finitrans-buddy-main/dist",
-  "installCommand": "echo skip-root-install",
+  "installCommand": "echo skip",
+  "functions": {
+    "api/index.ts": {
+      "memory": 1024,
+      "maxDuration": 30
+    }
+  },
   "rewrites": [
+    { "source": "/api/:path*", "destination": "/api/index" },
     { "source": "/(.*)", "destination": "/index.html" }
+  ],
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Access-Control-Allow-Origin", "value": "*" },
+        { "key": "Access-Control-Allow-Methods", "value": "GET,POST,PUT,PATCH,DELETE,OPTIONS" },
+        { "key": "Access-Control-Allow-Headers", "value": "Content-Type,Authorization" }
+      ]
+    }
   ]
 }
