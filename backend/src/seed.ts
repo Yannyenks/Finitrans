@@ -29,6 +29,10 @@ async function main() {
   await prisma.paiementDouane.deleteMany()
   await prisma.paiementCompagnie.deleteMany()
   await prisma.refreshToken.deleteMany()
+  await prisma.mouvementDI.deleteMany()
+  await prisma.dossier.updateMany({ data: { diId: null } })
+  await prisma.declarationImportation.deleteMany()
+  await prisma.compteRenduKribi.deleteMany()
   await prisma.dossier.deleteMany()
   await prisma.user.deleteMany()
 
