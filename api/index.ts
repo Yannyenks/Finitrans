@@ -1,12 +1,11 @@
 import type { IncomingMessage, ServerResponse } from 'http'
-import type { FastifyInstance } from 'fastify'
+import { buildApp } from '../backend/src/app'
 
-// Singleton — Vercel Lambda containers are reused between requests
-let _app: FastifyInstance | null = null
+// Singleton — Lambda containers are reused between invocations
+let _app: Awaited<ReturnType<typeof buildApp>> | null = null
 
-async function getApp(): Promise<FastifyInstance> {
+async function getApp() {
   if (_app) return _app
-  const { buildApp } = await import('../backend/src/app')
   _app = await buildApp({ serverless: true })
   await _app.ready()
   return _app
