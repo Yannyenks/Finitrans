@@ -7,14 +7,11 @@ import { buildPagination, paginate } from '../utils/pagination'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { DossierStatus } from '@prisma/client'
-import fs from 'fs'
-import path from 'path'
-import { pipeline } from 'stream/promises'
 import { env } from '../config/env'
 
 const STATUS_ORDER: DossierStatus[] = [
-  'reception', 'codage', 'validation', 'paiement',
-  'bon_compagnie', 'operations_kribi', 'cloture',
+  'reception', 'soumission_sgs', 'codage', 'validation',
+  'paiement', 'bon_compagnie', 'operations_kribi', 'cloture',
 ]
 
 const createDossierSchema = z.object({
@@ -212,7 +209,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(updated)
   })
 
-  // ─── Upload document (multipart) ──────────────────────────
+  // ─── Upload document (multipart) — stocké en base de données ─
 
   fastify.post('/:id/upload', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
@@ -230,24 +227,57 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       ? (etapeRaw as DossierStatus)
       : existing.status
 
-    const safeFilename = `${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const uploadDir = path.resolve(process.cwd(), env.UPLOADS_DIR, id)
-    await fs.promises.mkdir(uploadDir, { recursive: true })
-    const filepath = path.join(uploadDir, safeFilename)
-
-    await pipeline(fileStream, fs.createWriteStream(filepath))
-    const stats = await fs.promises.stat(filepath)
-    const taille = stats.size < 1_048_576
-      ? `${Math.round(stats.size / 1024)} Ko`
-      : `${(stats.size / 1_048_576).toFixed(1)} Mo`
+    // Lire le fichier en mémoire pour le stocker en base
+    const chunks: Buffer[] = []
+    for await (const chunk of fileStream) chunks.push(chunk as Buffer)
+    const contenu = Buffer.concat(chunks)
+    const sizeBytes = contenu.length
+    const taille = sizeBytes < 1_048_576
+      ? `${Math.round(sizeBytes / 1024)} Ko`
+      : `${(sizeBytes / 1_048_576).toFixed(1)} Mo`
 
     const doc = await prisma.document.create({
-      data: { dossierId: id, uploadePar: user.id, nom: filename, type: mimetype, taille, url: `/uploads/${id}/${safeFilename}`, etape },
+      data: {
+        dossierId: id,
+        uploadePar: user.id,
+        nom: filename,
+        type: mimetype,
+        taille,
+        contenu,
+        url: `/api/dossiers/${id}/documents/__ID__/content`,
+        etape,
+      },
+      include: { uploader: { select: { nom: true } } },
+    })
+
+    // Mettre à jour l'URL avec l'ID réel du document
+    const updated = await prisma.document.update({
+      where: { id: doc.id },
+      data: { url: `/api/dossiers/${id}/documents/${doc.id}/content` },
       include: { uploader: { select: { nom: true } } },
     })
 
     await logAudit(id, user.id, 'UPLOAD_DOCUMENT', `"${filename}" uploadé (${taille})`)
-    return reply.code(201).send(doc)
+    return reply.code(201).send({ ...updated, contenu: undefined })
+  })
+
+  // ─── Téléchargement d'un document stocké en base ───────────
+
+  fastify.get('/:id/documents/:docId/content', { preHandler }, async (request, reply) => {
+    const { id, docId } = z.object({ id: z.string().uuid(), docId: z.string().uuid() }).parse(request.params)
+
+    const doc = await prisma.document.findFirst({
+      where: { id: docId, dossierId: id },
+      select: { nom: true, type: true, contenu: true },
+    })
+    if (!doc) throw new NotFoundError('Document', docId)
+    if (!doc.contenu) return reply.code(404).send({ error: 'NO_CONTENT', message: 'Contenu non disponible' })
+
+    reply
+      .header('Content-Type', doc.type)
+      .header('Content-Disposition', `inline; filename="${encodeURIComponent(doc.nom)}"`)
+      .header('Content-Length', doc.contenu.length)
+      .send(doc.contenu)
   })
 
   // ─── Documents ────────────────────────────────────────────

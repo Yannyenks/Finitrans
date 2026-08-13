@@ -112,6 +112,7 @@ model Document {
   type       String        @db.VarChar(50)
   taille     String        @db.VarChar(50)
   url        String        @db.VarChar(500)
+  contenu    Bytes?
   uploadePar String        @map("uploade_par") @db.Uuid
   etape      DossierStatus
   createdAt  DateTime      @default(now()) @map("created_at")
@@ -560,6 +561,7 @@ model SoumissionSGS {
 
 enum DossierStatus {
   reception
+  soumission_sgs
   codage
   validation
   paiement
