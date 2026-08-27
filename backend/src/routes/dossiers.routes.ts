@@ -127,7 +127,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     // Démarrer le timing de la première étape
     await prisma.dossierTiming.create({
-      data: { dossierId: dossier.id, etape: 'reception', dateDebut: new Date(), dureePrevueJours: 1 },
+      data: { dossierId: dossier.id, etape: 'reception', dateDebut: new Date(), dureePrevueJours: 1, responsableId: body.responsableId },
     })
 
     await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${numero} créé`)
@@ -142,7 +142,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       where: { id },
       include: {
         responsable: { select: { id: true, nom: true, role: true, email: true } },
-        timings: { orderBy: { dateDebut: 'asc' } },
+        timings: { orderBy: { dateDebut: 'asc' }, include: { responsable: { select: { id: true, nom: true, role: true } } } },
       },
     })
     if (!dossier) throw new NotFoundError('Dossier', id)
@@ -195,10 +195,10 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const dossier = await prisma.dossier.findUnique({ where: { id } })
     if (!dossier) throw new NotFoundError('Dossier', id)
 
-    // Clôturer le timing actuel
+    // Clôturer le timing actuel en enregistrant le responsable qui a terminé l'étape
     await prisma.dossierTiming.updateMany({
       where: { dossierId: id, etape: dossier.status, dateFin: null },
-      data: { dateFin: new Date() },
+      data: { dateFin: new Date(), responsableId: dossier.responsableId },
     })
 
     // Démarrer le timing de la nouvelle étape
@@ -516,7 +516,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       include: {
         responsable:        { select: { id: true, nom: true, role: true, avatarUrl: true } },
         di:                 { select: { numero: true, montant: true, soldeActuel: true, statut: true } },
-        timings:            { orderBy: { dateDebut: 'asc' } },
+        timings:            { orderBy: { dateDebut: 'asc' }, include: { responsable: { select: { id: true, nom: true, role: true } } } },
         documents:          { include: { uploader: { select: { nom: true } } } },
         commentaires:       { include: { auteur: { select: { id: true, nom: true, avatarUrl: true } } } },
         auditEntries:       { include: { auteur: { select: { nom: true } } } },
@@ -549,6 +549,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     dossier.timings.forEach(t => {
       push(t.dateDebut, 'ETAPE_DEBUT', {
         etape: t.etape, dureePrevueJours: t.dureePrevueJours,
+        responsable: (t as any).responsable?.nom ?? null,
       })
       if (t.dateFin) {
         const duree = differenceInDays(t.dateFin, t.dateDebut)
@@ -556,6 +557,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           etape: t.etape,
           dureeReelleJours: duree,
           enRetard: duree > t.dureePrevueJours,
+          responsable: (t as any).responsable?.nom ?? null,
         })
       }
     })
@@ -729,6 +731,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         dureeReelleJours: duree,
         enRetard:         duree !== null ? duree > t.dureePrevueJours : false,
         enCours:          !t.dateFin && dossier.status === t.etape,
+        responsable:      (t as any).responsable ?? null,
       }
     })
 

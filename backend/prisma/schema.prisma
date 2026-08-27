@@ -52,6 +52,7 @@ model User {
   virements                Virement[]
   sousEtapesResponsable    SousEtapeDossier[]        @relation("SousEtapeResponsable")
   sousEtapesValidees       SousEtapeDossier[]        @relation("SousEtapeCompletedBy")
+  timingsResponsable       DossierTiming[]           @relation("TimingResponsable")
 
   @@map("users")
 }
@@ -233,8 +234,10 @@ model DossierTiming {
   dateDebut        DateTime      @default(now()) @map("date_debut")
   dateFin          DateTime?     @map("date_fin")
   dureePrevueJours Int           @default(2) @map("duree_prevue_jours")
+  responsableId    String?       @map("responsable_id") @db.Uuid
   createdAt        DateTime      @default(now()) @map("created_at")
   dossier          Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable      User?         @relation("TimingResponsable", fields: [responsableId], references: [id])
 
   @@map("dossier_timings")
 }

@@ -429,6 +429,10 @@ const DossierDetail = () => {
   const nextStatus      = STATUS_ORDER[currentStepIdx + 1] ?? null;
   const effectiveEtape  = uploadEtape || dossier.status;
   const docs: any[]     = docsData ?? [];
+
+  // Map étape → timing (avec responsable) pour afficher qui a traité chaque étape
+  const timingByStep: Record<string, any> = {};
+  (dossier.timings ?? []).forEach((t: any) => { timingByStep[t.etape] = t; });
   const comments        = commentsData?.data ?? commentsData ?? [];
   const audit           = auditData?.data    ?? auditData    ?? [];
   const timeline        = parcoursData?.timeline ?? [];
@@ -444,7 +448,7 @@ const DossierDetail = () => {
 
   const openHandoffDialog = (targetStatus: string) => {
     setHandoffStatus(targetStatus);
-    setHandoffResponsableId(dossier.responsableId ?? "");
+    setHandoffResponsableId("");
     setHandoffNote("");
     setHandoffDialog(true);
   };
@@ -794,6 +798,18 @@ const DossierDetail = () => {
                           </div>
                           {!isPending && cfg?.description && (
                             <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug pr-4">{cfg.description}</p>
+                          )}
+                          {isCompleted && timingByStep[stepKey]?.responsable?.nom && (
+                            <p className="text-[11px] text-success font-medium mt-0.5 flex items-center gap-1">
+                              <User className="w-2.5 h-2.5" />
+                              Traité par {timingByStep[stepKey].responsable.nom}
+                            </p>
+                          )}
+                          {isCurrent && dossier.responsable?.nom && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                              <User className="w-2.5 h-2.5" />
+                              Responsable : {dossier.responsable.nom}
+                            </p>
                           )}
                         </div>
 
