@@ -107,18 +107,19 @@ model Dossier {
 }
 
 model Document {
-  id         String        @id @default(uuid()) @db.Uuid
-  dossierId  String        @map("dossier_id") @db.Uuid
-  nom        String        @db.VarChar(255)
-  type       String        @db.VarChar(50)
-  taille     String        @db.VarChar(50)
-  url        String        @db.VarChar(500)
-  contenu    Bytes?
-  uploadePar String        @map("uploade_par") @db.Uuid
-  etape      DossierStatus
-  createdAt  DateTime      @default(now()) @map("created_at")
-  dossier    Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  uploader   User          @relation(fields: [uploadePar], references: [id])
+  id           String        @id @default(uuid()) @db.Uuid
+  dossierId    String        @map("dossier_id") @db.Uuid
+  nom          String        @db.VarChar(255)
+  type         String        @db.VarChar(50)
+  taille       String        @db.VarChar(50)
+  url          String        @db.VarChar(500)
+  contenu      Bytes?
+  hashContenu  String?       @map("hash_contenu") @db.VarChar(64)
+  uploadePar   String        @map("uploade_par") @db.Uuid
+  etape        DossierStatus
+  createdAt    DateTime      @default(now()) @map("created_at")
+  dossier      Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  uploader     User          @relation(fields: [uploadePar], references: [id])
 
   @@map("documents")
 }
@@ -402,18 +403,19 @@ model DeclarationImportation {
 }
 
 model MouvementDI {
-  id        String                 @id @default(uuid()) @db.Uuid
-  diId      String                 @map("di_id") @db.Uuid
-  dossierId String?                @map("dossier_id") @db.Uuid
-  type      TypeMouvementDI
-  montant   Decimal                @db.Decimal(15, 2)
-  motif     String
-  createdBy String                 @map("created_by") @db.Uuid
-  createdAt DateTime               @default(now()) @map("created_at")
-  categorie CategorieMouvementDI?  @default(frais_divers)
-  auteur    User                   @relation("MouvementDIAuteur", fields: [createdBy], references: [id])
-  di        DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
-  dossier   Dossier?               @relation("MouvementDIDossier", fields: [dossierId], references: [id])
+  id               String                 @id @default(uuid()) @db.Uuid
+  diId             String                 @map("di_id") @db.Uuid
+  dossierId        String?                @map("dossier_id") @db.Uuid
+  type             TypeMouvementDI
+  montant          Decimal                @db.Decimal(15, 2)
+  motif            String
+  referenceFacture String?                @map("reference_facture") @db.VarChar(100)
+  createdBy        String                 @map("created_by") @db.Uuid
+  createdAt        DateTime               @default(now()) @map("created_at")
+  categorie        CategorieMouvementDI?  @default(frais_divers)
+  auteur           User                   @relation("MouvementDIAuteur", fields: [createdBy], references: [id])
+  di               DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
+  dossier          Dossier?               @relation("MouvementDIDossier", fields: [dossierId], references: [id])
 
   @@map("mouvements_di")
 }

@@ -488,15 +488,35 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.post('/:id/mouvements', { preHandler: writeAccess }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body   = z.object({
-      type:      z.enum(['credit', 'debit']),
-      categorie: z.enum(['droits_douane', 'tva', 'honoraires', 'redevances', 'penalites', 'frais_divers', 'remboursement', 'ouverture']).optional(),
-      montant:   z.number().positive(),
-      motif:     z.string().min(3),
-      dossierId: z.string().uuid().optional(),
+      type:             z.enum(['credit', 'debit']),
+      categorie:        z.enum(['droits_douane', 'tva', 'honoraires', 'redevances', 'penalites', 'frais_divers', 'remboursement', 'ouverture']).optional(),
+      montant:          z.number().positive(),
+      motif:            z.string().min(3),
+      dossierId:        z.string().uuid().optional(),
+      referenceFacture: z.string().optional(),
     }).parse(request.body)
 
     const di = await prisma.declarationImportation.findUnique({ where: { id } })
     if (!di) throw new NotFoundError('DI', id)
+
+    // ── Anti-doublon facture ──────────────────────────────────────
+    if (body.type === 'debit' && body.referenceFacture?.trim()) {
+      const refNorm = body.referenceFacture.trim().toUpperCase()
+      const doublon = await prisma.mouvementDI.findFirst({
+        where: {
+          diId:             id,
+          type:             'debit',
+          referenceFacture: { equals: refNorm, mode: 'insensitive' },
+        },
+        select: { createdAt: true, montant: true },
+      })
+      if (doublon) {
+        return reply.code(409).send({
+          error:   'FACTURE_DUPLIQUEE',
+          message: `La référence "${body.referenceFacture.trim()}" a déjà été enregistrée sur cette DI le ${new Date(doublon.createdAt).toLocaleDateString('fr-FR')} (${Number(doublon.montant).toLocaleString('fr-FR')} FCFA). Cette facture ne peut pas être soumise deux fois.`,
+        })
+      }
+    }
 
     const delta        = body.type === 'credit' ? body.montant : -body.montant
     const nouveauSolde = Number(di.soldeActuel) + delta
@@ -511,16 +531,19 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       })
     }
 
+    const refNormalise = body.referenceFacture?.trim().toUpperCase() || null
+
     const [mouvement] = await prisma.$transaction([
       prisma.mouvementDI.create({
         data: {
-          diId:      id,
-          type:      body.type,
-          categorie: body.categorie ?? (body.type === 'credit' ? 'remboursement' : 'frais_divers'),
-          montant:   body.montant,
-          motif:     body.motif,
-          dossierId: body.dossierId,
-          createdBy: (request.user as any).id,
+          diId:             id,
+          type:             body.type,
+          categorie:        body.categorie ?? (body.type === 'credit' ? 'remboursement' : 'frais_divers'),
+          montant:          body.montant,
+          motif:            body.motif,
+          referenceFacture: refNormalise,
+          dossierId:        body.dossierId,
+          createdBy:        (request.user as any).id,
         },
       }),
       prisma.declarationImportation.update({ where: { id }, data: { soldeActuel: nouveauSolde } }),

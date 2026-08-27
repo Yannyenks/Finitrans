@@ -75,9 +75,9 @@ export function useDI(diId: string | null | undefined) {
   // ── Décrémenter (débit) ──────────────────────────────────────
   const decrement = useMutation({
     mutationFn: ({
-      montant, motif, dossierId, categorie,
+      montant, motif, dossierId, categorie, referenceFacture,
     }: {
-      montant: number; motif: string; dossierId?: string;
+      montant: number; motif: string; dossierId?: string; referenceFacture?: string;
       categorie?: "droits_douane" | "tva" | "honoraires" | "redevances" | "penalites" | "frais_divers";
     }) =>
       api.post<any>(`/api/di/${diId}/mouvements`, {
@@ -85,6 +85,7 @@ export function useDI(diId: string | null | undefined) {
         montant,
         motif,
         dossierId,
+        referenceFacture,
         categorie: categorie ?? "frais_divers",
       }),
     onSuccess: (data) => {
@@ -110,8 +111,14 @@ export function useDI(diId: string | null | undefined) {
         });
       }
     },
-    onError: (err: any) =>
-      toast({ title: "Solde insuffisant ou erreur DI", description: err.message ?? "Opération impossible", variant: "destructive" }),
+    onError: (err: any) => {
+      const isDuplicate = err.message?.includes("déjà été enregistrée") || err.message?.includes("FACTURE_DUPLIQUEE");
+      toast({
+        title:       isDuplicate ? "Facture déjà enregistrée" : "Solde insuffisant ou erreur DI",
+        description: err.message ?? "Opération impossible",
+        variant:     "destructive",
+      });
+    },
   });
 
   // ── Ajustement / recharge ────────────────────────────────────

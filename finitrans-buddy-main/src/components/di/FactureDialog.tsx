@@ -33,12 +33,14 @@ const CATEGORIES = [
 export default function FactureDialog({ open, onClose, diId, dossierId, diNumero, soldeActuel, devise = "XAF" }: Props) {
   const { decrement } = useDI(diId);
 
-  const [file,      setFile]      = useState<File | null>(null);
-  const [montant,   setMontant]   = useState("");
-  const [motif,     setMotif]     = useState("");
-  const [categorie, setCategorie] = useState("frais_divers");
-  const [dragging,  setDragging]  = useState(false);
-  const [uploading, setUploading] = useState(false);
+  const [file,             setFile]             = useState<File | null>(null);
+  const [montant,          setMontant]          = useState("");
+  const [numFacture,       setNumFacture]       = useState("");
+  const [motif,            setMotif]            = useState("");
+  const [categorie,        setCategorie]        = useState("frais_divers");
+  const [dragging,         setDragging]         = useState(false);
+  const [uploading,        setUploading]        = useState(false);
+  const [doublonErreur,    setDoublonErreur]    = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const montantNum     = parseFloat(montant) || 0;
@@ -55,11 +57,15 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
   };
 
   const handleSubmit = async () => {
+    setDoublonErreur(null);
     if (!montantNum || montantNum <= 0) {
       toast({ title: "Montant requis", variant: "destructive" }); return;
     }
+    if (!numFacture.trim()) {
+      toast({ title: "N° de facture requis", description: "Saisissez le numéro de la facture pour éviter les doublons.", variant: "destructive" }); return;
+    }
     if (!motif.trim()) {
-      toast({ title: "Motif / référence requis", variant: "destructive" }); return;
+      toast({ title: "Motif / description requis", variant: "destructive" }); return;
     }
     if (!file) {
       toast({
@@ -74,24 +80,32 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
 
     setUploading(true);
     try {
-      // Upload PDF — obligatoire (enregistré comme document du dossier)
+      // Vérification anti-doublon — envoie d'abord le mouvement (vérifié côté serveur)
+      try {
+        await decrement.mutateAsync({
+          montant:          montantNum,
+          motif:            motif.trim(),
+          referenceFacture: numFacture.trim(),
+          dossierId,
+          categorie:        categorie as any,
+        });
+      } catch (err: any) {
+        if (err.message?.includes("déjà été enregistrée")) {
+          setDoublonErreur(err.message);
+        }
+        setUploading(false);
+        return;
+      }
+
+      // Upload PDF — après validation mouvement
       try {
         const fd = new FormData();
         fd.append("file", file);
         fd.append("etape", "facture_di");
         await uploadFile(`/api/dossiers/${dossierId}/upload`, fd);
       } catch {
-        notif.erreur("Le document n'a pas pu être enregistré. Réessayez.");
-        setUploading(false);
-        return;
+        notif.erreur("Déduction enregistrée mais le document n'a pas pu être joint.");
       }
-
-      await decrement.mutateAsync({
-        montant:   montantNum,
-        motif:     motif.trim(),
-        dossierId,
-        categorie: categorie as any,
-      });
 
       notif.factureAppliquee(montantNum, devise);
 
@@ -101,12 +115,14 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
 
       setFile(null);
       setMontant("");
+      setNumFacture("");
       setMotif("");
+      setDoublonErreur(null);
       setCategorie("frais_divers");
       if (fileRef.current) fileRef.current.value = "";
       onClose();
     } catch {
-      // handled by mutation
+      // handled
     } finally {
       setUploading(false);
     }
@@ -247,13 +263,42 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
             </Select>
           </div>
 
-          {/* ── Motif / référence ─────────────────────────────── */}
+          {/* ── N° de facture (anti-doublon) ─────────────────── */}
           <div className="space-y-1.5">
-            <Label className="text-xs font-medium">Motif / référence facture *</Label>
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <Receipt className="w-3.5 h-3.5 text-secondary" />
+              N° de facture * <span className="text-[10px] text-muted-foreground font-normal">(référence unique — anti-doublon)</span>
+            </Label>
+            <Input
+              value={numFacture}
+              onChange={e => { setNumFacture(e.target.value); setDoublonErreur(null); }}
+              placeholder="Ex : INV-2025-0847"
+              className={`bg-muted/50 font-mono ${doublonErreur ? "border-destructive focus-visible:ring-destructive" : ""}`}
+            />
+          </div>
+
+          {/* Bannière doublon */}
+          {doublonErreur && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="rounded-xl border border-destructive/30 bg-destructive/10 p-3 flex items-start gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-xs font-semibold text-destructive">Facture déjà enregistrée</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">{doublonErreur}</p>
+              </div>
+            </motion.div>
+          )}
+
+          {/* ── Motif / description ───────────────────────────── */}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium">Description / motif *</Label>
             <Input
               value={motif}
               onChange={e => setMotif(e.target.value)}
-              placeholder="Ex : Facture INV-2025-0847 — droits de douane réception"
+              placeholder="Ex : Droits de douane réception — conteneur MSCU7654321"
               className="bg-muted/50"
             />
           </div>
@@ -281,7 +326,7 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
             <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
             <Button
               onClick={handleSubmit}
-              disabled={!montantNum || !motif.trim() || !file || insufficient || isPending}
+              disabled={!montantNum || !numFacture.trim() || !motif.trim() || !file || insufficient || isPending || !!doublonErreur}
               className="bg-secondary text-secondary-foreground gap-2 px-6"
             >
               {isPending && <Loader2 className="w-4 h-4 animate-spin" />}

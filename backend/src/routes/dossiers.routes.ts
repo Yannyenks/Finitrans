@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
+import { createHash } from 'crypto'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
@@ -262,6 +263,19 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       ? `${Math.round(sizeBytes / 1024)} Ko`
       : `${(sizeBytes / 1_048_576).toFixed(1)} Mo`
 
+    // Calcul empreinte SHA-256 — détection doublon sur le dossier
+    const hashContenu = createHash('sha256').update(contenu).digest('hex')
+    const doublon = await prisma.document.findFirst({
+      where: { dossierId: id, hashContenu },
+      select: { nom: true, createdAt: true },
+    })
+    if (doublon) {
+      return reply.code(409).send({
+        error: 'DOCUMENT_DUPLIQUE',
+        message: `Ce fichier a déjà été uploadé pour ce dossier (${doublon.nom} — ${new Date(doublon.createdAt).toLocaleDateString('fr-FR')}).`,
+      })
+    }
+
     const doc = await prisma.document.create({
       data: {
         dossierId: id,
@@ -270,6 +284,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         type: mimetype,
         taille,
         contenu,
+        hashContenu,
         url: `/api/dossiers/${id}/documents/__ID__/content`,
         etape,
       },

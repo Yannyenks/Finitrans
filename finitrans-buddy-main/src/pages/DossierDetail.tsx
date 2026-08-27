@@ -378,8 +378,14 @@ const DossierDetail = () => {
       if (fileInputRef.current) fileInputRef.current.value = "";
       toast({ title: "Document uploadé avec succès" });
     },
-    onError: (err: any) =>
-      toast({ title: "Erreur upload", description: err.message ?? "Échec", variant: "destructive" }),
+    onError: (err: any) => {
+      const isDuplicate = err.message?.includes("déjà été uploadé") || err.message?.includes("DOCUMENT_DUPLIQUE");
+      toast({
+        title: isDuplicate ? "Document déjà enregistré" : "Erreur upload",
+        description: err.message ?? "Échec",
+        variant: "destructive",
+      });
+    },
   });
 
   const advanceStatus = useMutation({
