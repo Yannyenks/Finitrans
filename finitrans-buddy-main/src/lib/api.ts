@@ -18,21 +18,30 @@ export function clearTokens() {
   localStorage.removeItem('ft_user')
 }
 
-async function tryRefresh(): Promise<boolean> {
+// null  = refresh réussi
+// true  = refresh échoué car token invalide/révoqué → déconnecter
+// false = refresh échoué pour raison serveur (5xx/réseau) → garder la session
+async function tryRefresh(): Promise<'ok' | 'invalid' | 'server_error'> {
   const rt = localStorage.getItem('ft_refresh_token')
-  if (!rt) return false
+  if (!rt) return 'invalid'
   try {
     const res = await fetch(`${BASE_URL}/api/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken: rt }),
     })
-    if (!res.ok) return false
-    const data = await res.json()
-    setTokens(data.accessToken, data.refreshToken)
-    return true
+    if (res.ok) {
+      const data = await res.json()
+      setTokens(data.accessToken, data.refreshToken)
+      return 'ok'
+    }
+    // 401 = token révoqué ou expiré → vraie déconnexion
+    if (res.status === 401) return 'invalid'
+    // 5xx ou autre = problème serveur transitoire → ne pas déconnecter
+    return 'server_error'
   } catch {
-    return false
+    // Réseau coupé, timeout → ne pas déconnecter
+    return 'server_error'
   }
 }
 
@@ -49,11 +58,15 @@ async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): P
   const res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
 
   if (res.status === 401) {
-    const refreshed = await tryRefresh()
-    if (refreshed) return apiFetch(path, options)
-    clearTokens()
-    window.location.href = '/'
-    throw new Error('SESSION_EXPIRED')
+    const result = await tryRefresh()
+    if (result === 'ok') return apiFetch(path, options)
+    if (result === 'invalid') {
+      clearTokens()
+      window.location.href = '/'
+      throw new Error('SESSION_EXPIRED')
+    }
+    // server_error → on laisse l'erreur remonter sans déconnecter
+    throw new Error('Erreur serveur temporaire — réessayez')
   }
 
   if (res.status === 204) return undefined as T
@@ -139,11 +152,14 @@ export async function uploadFile<T = unknown>(path: string, formData: FormData):
   const res = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: formData })
 
   if (res.status === 401) {
-    const refreshed = await tryRefresh()
-    if (refreshed) return uploadFile(path, formData)
-    clearTokens()
-    window.location.href = '/'
-    throw new Error('SESSION_EXPIRED')
+    const result = await tryRefresh()
+    if (result === 'ok') return uploadFile(path, formData)
+    if (result === 'invalid') {
+      clearTokens()
+      window.location.href = '/'
+      throw new Error('SESSION_EXPIRED')
+    }
+    throw new Error('Erreur serveur temporaire — réessayez')
   }
 
   if (res.status === 204) return undefined as T

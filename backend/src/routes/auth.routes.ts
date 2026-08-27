@@ -48,14 +48,14 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
 
     const payload = { sub: user.id, email: user.email, profil: user.profil, nom: user.nom }
-    const accessToken  = fastify.jwt.sign(payload, { expiresIn: '15m' })
-    const refreshToken = fastify.jwt.sign({ sub: user.id }, { expiresIn: '7d' })
+    const accessToken  = fastify.jwt.sign(payload, { expiresIn: '8h' })
+    const refreshToken = fastify.jwt.sign({ sub: user.id }, { expiresIn: '30d' })
 
     await prisma.refreshToken.create({
       data: {
         userId:    user.id,
         token:     refreshToken,
-        expiresAt: addDays(new Date(), 7),
+        expiresAt: addDays(new Date(), 30),
       },
     })
 
@@ -91,11 +91,11 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
 
     const payload       = { sub: user.id, email: user.email, profil: user.profil, nom: user.nom }
-    const accessToken   = fastify.jwt.sign(payload, { expiresIn: '15m' })
-    const newRefresh    = fastify.jwt.sign({ sub: user.id }, { expiresIn: '7d' })
+    const accessToken   = fastify.jwt.sign(payload, { expiresIn: '8h' })
+    const newRefresh    = fastify.jwt.sign({ sub: user.id }, { expiresIn: '30d' })
 
     await prisma.refreshToken.create({
-      data: { userId: user.id, token: newRefresh, expiresAt: addDays(new Date(), 7) },
+      data: { userId: user.id, token: newRefresh, expiresAt: addDays(new Date(), 30) },
     })
 
     return reply.send({ accessToken, refreshToken: newRefresh })
