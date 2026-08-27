@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Ship, MapPin, User, Package, Calendar, FileText, Loader2, Banknote } from "lucide-react";
+import { Plus, Ship, MapPin, User, Package, Calendar, FileText, Loader2, Banknote, Building2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
@@ -14,16 +14,37 @@ const COMPAGNIE_MAP: Record<string, string> = {
   MSC: "MSC", COSCO: "COSCO", MAERSK: "MAERSK", CMA_CGM: "CMA-CGM",
 };
 
+// Taux de change vers XAF (approximatifs — à ajuster selon cours du jour)
+const TAUX_CHANGE: Record<string, number> = {
+  XAF: 1,
+  EUR: 655.96,
+  USD: 605,
+};
+
+const FOURNISSEURS_FREQUENTS = [
+  "CHINA SHIPPING", "COSCO SHIPPING", "EVERGREEN", "HAPAG-LLOYD",
+  "MEDITERRANEAN SHIPPING", "MAERSK LINE", "CMA CGM GROUP",
+  "YANG MING", "ONE (Ocean Network Express)", "ZIM INTEGRATED",
+  "BOLLORÉ LOGISTICS", "SDV CAMEROUN", "TRANSITEX", "DHL GLOBAL",
+  "PANALPINA CAMEROUN", "GEODIS WILSON", "KUEHNE+NAGEL",
+];
+
 const NouveauDossierDialog = () => {
   const qc = useQueryClient();
   const user = getStoredUser();
   const [open, setOpen] = useState(false);
+  const [diDevise, setDiDevise] = useState<"XAF" | "EUR" | "USD">("XAF");
   const [form, setForm] = useState({
     client: "", compagnie: "", conteneur: "", marchandise: "",
     site: "Douala", dateArrivee: "", priorite: "moyenne",
     responsableId: "", notes: "",
     montantDI: "",
+    fournisseur: "",
   });
+
+  const montantEnXAF = form.montantDI
+    ? Math.round(parseFloat(form.montantDI) * TAUX_CHANGE[diDevise])
+    : 0;
 
   // Don't render the button if user can only read
   const canCreate = user?.permDossier === "complet" || user?.permDossier === "partiel";
@@ -61,9 +82,10 @@ const NouveauDossierDialog = () => {
     },
     onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ["dossiers"] });
-      toast({ title: "Dossier créé", description: `${res.numero} — ${res.client}${form.montantDI ? ` · DI ${Number(form.montantDI).toLocaleString("fr-FR")} FCFA` : ""}` });
+      toast({ title: "Dossier créé", description: `${res.numero} — ${res.client}${montantEnXAF ? ` · DI ${montantEnXAF.toLocaleString("fr-FR")} FCFA` : ""}` });
       setOpen(false);
-      setForm({ client: "", compagnie: "", conteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "" });
+      setDiDevise("XAF");
+      setForm({ client: "", compagnie: "", conteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "", fournisseur: "" });
     },
     onError: (err: any) => {
       toast({ title: "Erreur", description: err.message ?? "Création échouée", variant: "destructive" });
@@ -86,7 +108,8 @@ const NouveauDossierDialog = () => {
       dateArrivee:   new Date(form.dateArrivee).toISOString(),
       priorite:      form.priorite,
       notes:         form.notes || undefined,
-      montantDI:     form.montantDI ? parseFloat(form.montantDI) : undefined,
+      fournisseur:   form.fournisseur || undefined,
+      montantDI:     montantEnXAF > 0 ? montantEnXAF : undefined,
     });
   };
 
@@ -196,22 +219,57 @@ const NouveauDossierDialog = () => {
             </Select>
           </div>
 
+          {/* Fournisseur */}
+          <div className="space-y-2">
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <Building2 className="w-3.5 h-3.5 text-muted-foreground" /> Fournisseur (optionnel)
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                list="fournisseurs-list"
+                placeholder="Ex : CHINA SHIPPING, MSC..."
+                value={form.fournisseur}
+                onChange={e => setForm({...form, fournisseur: e.target.value})}
+                className="bg-muted/50 flex-1"
+              />
+              <datalist id="fournisseurs-list">
+                {FOURNISSEURS_FREQUENTS.map(f => <option key={f} value={f} />)}
+              </datalist>
+            </div>
+          </div>
+
           {/* Montant DI */}
           <div className="rounded-xl border border-dashed border-secondary/40 bg-secondary/5 p-4 space-y-2">
             <Label className="text-xs font-semibold text-secondary flex items-center gap-1.5">
               <Banknote className="w-3.5 h-3.5" /> Montant DI — Déclaration d'Importation (optionnel)
             </Label>
-            <Input
-              type="number"
-              min={1}
-              placeholder="Ex : 45 000 000"
-              value={form.montantDI}
-              onChange={e => setForm({...form, montantDI: e.target.value})}
-              className="bg-card h-9 text-sm font-mono"
-            />
+            <div className="flex gap-2 items-center">
+              <Select value={diDevise} onValueChange={(v: any) => setDiDevise(v)}>
+                <SelectTrigger className="bg-card h-9 text-sm w-24 flex-shrink-0">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="XAF">FCFA</SelectItem>
+                  <SelectItem value="EUR">EUR €</SelectItem>
+                  <SelectItem value="USD">USD $</SelectItem>
+                </SelectContent>
+              </Select>
+              <Input
+                type="number"
+                min={1}
+                placeholder={diDevise === "XAF" ? "Ex : 45 000 000" : diDevise === "EUR" ? "Ex : 68 600" : "Ex : 74 300"}
+                value={form.montantDI}
+                onChange={e => setForm({...form, montantDI: e.target.value})}
+                className="bg-card h-9 text-sm font-mono flex-1"
+              />
+            </div>
+            {form.montantDI && diDevise !== "XAF" && montantEnXAF > 0 && (
+              <p className="text-[11px] text-secondary font-semibold">
+                ≈ {montantEnXAF.toLocaleString("fr-FR")} FCFA (taux : 1 {diDevise} = {TAUX_CHANGE[diDevise]} XAF)
+              </p>
+            )}
             <p className="text-[11px] text-muted-foreground leading-tight">
-              Budget enveloppe autorisé pour ce dossier (FCFA). Une alerte sera déclenchée à 20% restant.
-              Ce montant peut être ajusté ultérieurement depuis la fiche dossier.
+              Budget enveloppe autorisé pour ce dossier — stocké en FCFA. Une alerte sera déclenchée à 20% restant.
             </p>
           </div>
 

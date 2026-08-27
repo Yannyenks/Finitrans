@@ -105,6 +105,8 @@ const getSLAStatus = (
   return { elapsedH: Math.round(elapsedH), slaH, pct, status };
 };
 
+const TAUX_CHANGE: Record<string, number> = { XAF: 1, EUR: 655.96, USD: 605 };
+
 // ── Formulaire création DI inline ─────────────────────────────────────────────
 const CreateDIInline = ({
   dossier,
@@ -117,13 +119,16 @@ const CreateDIInline = ({
 }) => {
   const qc = useQueryClient();
   const [montant,  setMontant]  = useState("");
+  const [devise,   setDevise]   = useState<"XAF" | "EUR" | "USD">("XAF");
   const [diFile,   setDiFile]   = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  const montantXAF = montant ? Math.round(parseFloat(montant) * TAUX_CHANGE[devise]) : 0;
+
   const handleCreate = async () => {
-    const m = parseFloat(montant);
+    const m = montantXAF;
     if (!m || m <= 0) {
       toast({ title: "Montant invalide", variant: "destructive" });
       return;
@@ -163,6 +168,8 @@ const CreateDIInline = ({
       }
       qc.invalidateQueries({ queryKey: ["dossier", dossier.id] });
       toast({ title: "DI créée", description: `Enveloppe ${m.toLocaleString("fr-FR")} FCFA — document joint` });
+      setMontant("");
+      setDevise("XAF");
       onCreated();
     } catch (err: any) {
       toast({ title: "Erreur", description: err.message, variant: "destructive" });
@@ -177,17 +184,32 @@ const CreateDIInline = ({
         Définissez le montant enveloppe autorisé pour ce dossier. Le document DI est obligatoire.
       </p>
 
-      <div className="flex gap-2 items-end">
-        <div className="flex-1 space-y-1">
-          <Label className="text-xs">Montant DI (FCFA) *</Label>
+      <div className="space-y-1">
+        <Label className="text-xs">Montant DI *</Label>
+        <div className="flex gap-2 items-center">
+          <Select value={devise} onValueChange={(v: any) => setDevise(v)}>
+            <SelectTrigger className="bg-muted/40 h-9 text-sm w-24 flex-shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="XAF">FCFA</SelectItem>
+              <SelectItem value="EUR">EUR €</SelectItem>
+              <SelectItem value="USD">USD $</SelectItem>
+            </SelectContent>
+          </Select>
           <Input
             type="number" min={1}
-            placeholder="Ex : 45 000 000"
+            placeholder={devise === "XAF" ? "45 000 000" : devise === "EUR" ? "68 600" : "74 300"}
             value={montant}
             onChange={e => setMontant(e.target.value)}
-            className="h-9 text-sm bg-muted/40 font-mono"
+            className="h-9 text-sm bg-muted/40 font-mono flex-1"
           />
         </div>
+        {montant && devise !== "XAF" && montantXAF > 0 && (
+          <p className="text-[11px] text-secondary font-medium">
+            ≈ {montantXAF.toLocaleString("fr-FR")} FCFA
+          </p>
+        )}
       </div>
 
       {/* Zone upload document */}
@@ -227,7 +249,7 @@ const CreateDIInline = ({
       </div>
 
       <div className="flex gap-2">
-        <Button onClick={handleCreate} disabled={creating || !montant || !diFile}
+        <Button onClick={handleCreate} disabled={creating || !montant || montantXAF <= 0 || !diFile}
           className="flex-1 h-9 gap-1.5 bg-secondary text-secondary-foreground hover:opacity-90 text-sm">
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
           Créer la DI
@@ -270,6 +292,12 @@ const DossierDetail = () => {
   const [retardMotif, setRetardMotif]     = useState("");
   const [retardAutre, setRetardAutre]     = useState("");
   const [pendingAdvance, setPendingAdvance] = useState<string | null>(null);
+
+  // Passation de responsable
+  const [handoffDialog, setHandoffDialog]         = useState(false);
+  const [handoffStatus, setHandoffStatus]         = useState<string | null>(null);
+  const [handoffResponsableId, setHandoffResponsableId] = useState("");
+  const [handoffNote, setHandoffNote]             = useState("");
 
   const toggleStep = (stepKey: string) =>
     setExpandedSteps(prev => { const s = new Set(prev); s.has(stepKey) ? s.delete(stepKey) : s.add(stepKey); return s; });
@@ -355,15 +383,16 @@ const DossierDetail = () => {
   });
 
   const advanceStatus = useMutation({
-    mutationFn: (newStatus: string) =>
-      api.patch(`/api/dossiers/${id}/status`, { status: newStatus }),
-    onSuccess: (_data, newStatus) => {
+    mutationFn: ({ status, responsableId, note }: { status: string; responsableId?: string; note?: string }) =>
+      api.patch(`/api/dossiers/${id}/status`, { status, responsableId: responsableId || undefined, note: note || undefined }),
+    onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["dossier", id] });
       qc.invalidateQueries({ queryKey: ["dossier-parcours", id] });
+      qc.invalidateQueries({ queryKey: ["dossier-comments", id] });
       qc.invalidateQueries({ queryKey: ["dossiers"] });
       notif.dossierAvance(
         STATUS_LABELS[dossier?.status ?? ""] ?? dossier?.status ?? "",
-        STATUS_LABELS[newStatus] ?? newStatus,
+        STATUS_LABELS[vars.status] ?? vars.status,
       );
     },
     onError: (err: any) => notif.erreur(err.message ?? "Échec avancement"),
@@ -407,6 +436,25 @@ const DossierDetail = () => {
   const currentStepDocs = docs.filter((d: any) => d.etape === dossier.status);
   const hasProofForCurrentStep = currentStepDocs.length > 0;
 
+  const openHandoffDialog = (targetStatus: string) => {
+    setHandoffStatus(targetStatus);
+    setHandoffResponsableId(dossier.responsableId ?? "");
+    setHandoffNote("");
+    setHandoffDialog(true);
+  };
+
+  const confirmHandoff = () => {
+    if (!handoffStatus) return;
+    advanceStatus.mutate({
+      status: handoffStatus,
+      responsableId: handoffResponsableId || undefined,
+      note: handoffNote || undefined,
+    });
+    setHandoffDialog(false);
+    setHandoffStatus(null);
+    setHandoffNote("");
+  };
+
   const handleAdvanceClick = () => {
     if (!nextStatus) return;
 
@@ -426,12 +474,13 @@ const DossierDetail = () => {
         setExpandedSteps(prev => { const s = new Set(prev); s.add(dossier.status); return s; });
       return;
     }
+
     const sla = getSLAStatus(dossier.status, timeline, dossier.dateCreation);
     if (sla && sla.status === "critical") {
       setPendingAdvance(nextStatus);
       setRetardDialog(true);
     } else {
-      advanceStatus.mutate(nextStatus);
+      openHandoffDialog(nextStatus);
     }
   };
 
@@ -442,10 +491,11 @@ const DossierDetail = () => {
       toast({ title: "Veuillez sélectionner un motif de retard", variant: "destructive" });
       return;
     }
-    advanceStatus.mutate(pendingAdvance);
     setRetardDialog(false);
     setRetardMotif("");
     setRetardAutre("");
+    // Ouvrir le dialog de passation après confirmation du retard
+    openHandoffDialog(pendingAdvance);
     setPendingAdvance(null);
   };
 
@@ -526,6 +576,78 @@ const DossierDetail = () => {
                 Confirmer et avancer
               </Button>
               <Button variant="outline" onClick={() => setRetardDialog(false)} className="px-4">
+                Annuler
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ── Dialog Passation de responsable ──────────────────── */}
+      {handoffDialog && handoffStatus && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border"
+          >
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-secondary/15 flex items-center justify-center">
+                  <User className="w-5 h-5 text-secondary" />
+                </div>
+                <div>
+                  <h3 className="font-display font-bold text-foreground">Passation du dossier</h3>
+                  <p className="text-xs text-muted-foreground">
+                    {STATUS_LABELS[dossier.status]} → <strong>{STATUS_LABELS[handoffStatus]}</strong>
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setHandoffDialog(false)} className="text-muted-foreground hover:text-foreground">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-5">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Responsable pour l'étape suivante *</Label>
+                <Select value={handoffResponsableId} onValueChange={setHandoffResponsableId}>
+                  <SelectTrigger className="bg-muted/40 h-9 text-sm">
+                    <SelectValue placeholder="Choisir le prochain responsable..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {usersList.map((u: any) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        <span className="font-medium">{u.nom}</span>
+                        {u.profil && <span className="text-muted-foreground ml-1">— {u.profil}</span>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Note de passation (optionnelle)</Label>
+                <Textarea
+                  placeholder={`Ex : Dossier transmis à ${STATUS_LABELS[handoffStatus]} le ${new Date().toLocaleDateString("fr-FR")} — documents complets`}
+                  value={handoffNote}
+                  onChange={e => setHandoffNote(e.target.value)}
+                  className="bg-muted/40 h-24 text-sm resize-none"
+                />
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={confirmHandoff}
+                disabled={!handoffResponsableId || advanceStatus.isPending}
+                className="flex-1 bg-secondary text-secondary-foreground gap-1.5"
+              >
+                {advanceStatus.isPending
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <ChevronRight className="w-4 h-4" />}
+                Confirmer la passation
+              </Button>
+              <Button variant="outline" onClick={() => setHandoffDialog(false)} className="px-4">
                 Annuler
               </Button>
             </div>
@@ -812,6 +934,23 @@ const DossierDetail = () => {
                                 ? "Aucune preuve — cliquez sur ↑ pour en ajouter une"
                                 : "Cliquez sur ↑ pour joindre un document de preuve"}
                             </p>
+                          )}
+
+                          {/* Bouton avancer — visible dans le contenu de l'étape courante */}
+                          {isCurrent && canAdvance && nextStatus && (
+                            <div className="pt-2 border-t border-border/10 mt-2">
+                              <Button
+                                size="sm"
+                                onClick={handleAdvanceClick}
+                                disabled={advanceStatus.isPending}
+                                className="w-full gap-2 bg-secondary text-secondary-foreground hover:opacity-90 text-sm h-9"
+                              >
+                                {advanceStatus.isPending
+                                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                                  : <ChevronRight className="w-4 h-4" />}
+                                Passer à : {STATUS_LABELS[nextStatus]}
+                              </Button>
+                            </div>
                           )}
                         </div>
                       )}
@@ -1136,6 +1275,7 @@ const DossierDetail = () => {
               { icon: FileText,      label: "Conteneur",     value: dossier.conteneur },
               { icon: MapPin,        label: "Site",          value: dossier.site },
               { icon: User,          label: "Responsable",   value: dossier.responsable?.nom ?? "—" },
+              { icon: Package,       label: "Fournisseur",   value: dossier.fournisseur },
               { icon: Calendar,      label: "Création",      value: new Date(dossier.dateCreation).toLocaleDateString("fr-FR") },
               { icon: Calendar,      label: "Arrivée",       value: new Date(dossier.dateArrivee).toLocaleDateString("fr-FR") },
               ...(dossier.dateLimiteSortie ? [{

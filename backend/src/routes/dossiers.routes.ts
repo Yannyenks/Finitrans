@@ -29,6 +29,7 @@ const createDossierSchema = z.object({
   priorite:          z.enum(['haute', 'moyenne', 'basse']).default('moyenne'),
   numeroDI:          z.string().optional(),
   montantDI:         z.number().positive().optional(),
+  fournisseur:       z.string().optional(),
   notes:             z.string().optional(),
 })
 
@@ -176,10 +177,14 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.code(204).send()
   })
 
-  // PATCH /api/dossiers/:id/status — Avancer l'étape
+  // PATCH /api/dossiers/:id/status — Avancer l'étape (+ passation responsable optionnelle)
   fastify.patch('/:id/status', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
-    const { id }     = z.object({ id: z.string().uuid() }).parse(request.params)
-    const { status } = z.object({ status: z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]) }).parse(request.body)
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body   = z.object({
+      status:        z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]),
+      responsableId: z.string().uuid().optional(),
+      note:          z.string().optional(),
+    }).parse(request.body)
     const user = request.user as any
 
     const dossier = await prisma.dossier.findUnique({ where: { id } })
@@ -197,15 +202,36 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     await prisma.dossierTiming.create({
       data: {
         dossierId: id,
-        etape: status,
+        etape: body.status,
         dateDebut: new Date(),
-        dureePrevueJours: sla[status] ?? 2,
+        dureePrevueJours: sla[body.status] ?? 2,
       },
     })
 
-    const updated = await prisma.dossier.update({ where: { id }, data: { status } })
+    const updateData: any = { status: body.status }
+    if (body.responsableId) updateData.responsableId = body.responsableId
 
-    await logAudit(id, user.id, 'CHANGEMENT_STATUT', `${dossier.status} → ${status}`)
+    const updated = await prisma.dossier.update({
+      where: { id },
+      data: updateData,
+      include: { responsable: { select: { id: true, nom: true, role: true } } },
+    })
+
+    // Note de passation → commentaire
+    if (body.note?.trim()) {
+      await prisma.commentaire.create({
+        data: {
+          dossierId: id,
+          auteurId:  user.id,
+          message:   `📋 Passation (${dossier.status} → ${body.status}) : ${body.note.trim()}`,
+        },
+      })
+    }
+
+    await logAudit(id, user.id, 'CHANGEMENT_STATUT',
+      body.responsableId
+        ? `${dossier.status} → ${body.status} (nouveau responsable assigné)`
+        : `${dossier.status} → ${body.status}`)
     return reply.send(updated)
   })
 
