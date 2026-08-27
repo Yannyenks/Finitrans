@@ -190,6 +190,18 @@ const codageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }))
   })
 
+  // DELETE /api/codage/:id — supprimer un brouillon
+  fastify.delete('/:id', { preHandler: writeAccess }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const existing = await prisma.etatCodage.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('État de codage', id)
+    if (existing.statut !== 'brouillon') {
+      return reply.code(422).send({ error: 'NON_EDITABLE', message: 'Seule une position en brouillon peut être supprimée' })
+    }
+    await prisma.etatCodage.delete({ where: { id } })
+    return reply.code(204).send()
+  })
+
   // GET /api/codage/stats/resume
   fastify.get('/stats/resume', { preHandler: readAccess }, async (request, reply) => {
     const stats = await prisma.etatCodage.groupBy({
