@@ -58,7 +58,14 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
 }
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: {
+    queries: {
+      retry: 3,
+      // Délai progressif pour laisser Neon (DB serverless) se réveiller
+      retryDelay: (attempt) => Math.min(2_000 * (attempt + 1), 8_000),
+      staleTime: 30_000,
+    },
+  },
 });
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
