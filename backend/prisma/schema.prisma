@@ -76,6 +76,7 @@ model Dossier {
   numeroDI           String?                 @map("numero_di") @db.VarChar(50)
   montantDI          Decimal?                @map("montant_di") @db.Decimal(15, 2)
   fournisseur        String?                 @db.VarChar(255)
+  numeroBL           String?                 @map("numero_bl") @db.VarChar(100)
   notes              String?
   updatedAt          DateTime                @updatedAt @map("updated_at")
   diId               String?                 @map("di_id") @db.Uuid

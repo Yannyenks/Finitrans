@@ -1279,6 +1279,7 @@ const DossierDetail = () => {
               { icon: Package,       label: "Marchandise",   value: dossier.marchandise },
               { icon: Ship,          label: "Compagnie",     value: dossier.compagnie?.replace("_", "-") },
               { icon: FileText,      label: "Conteneur",     value: dossier.conteneur },
+              { icon: FileText,      label: "N° de BL",      value: dossier.numeroBL },
               { icon: MapPin,        label: "Site",          value: dossier.site },
               { icon: User,          label: "Responsable",   value: dossier.responsable?.nom ?? "—" },
               { icon: Package,       label: "Fournisseur",   value: dossier.fournisseur },

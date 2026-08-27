@@ -31,6 +31,7 @@ const createDossierSchema = z.object({
   numeroDI:          z.string().optional(),
   montantDI:         z.number().positive().optional(),
   fournisseur:       z.string().optional(),
+  numeroBL:          z.string().optional(),
   notes:             z.string().optional(),
 })
 

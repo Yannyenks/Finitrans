@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Ship, MapPin, User, Package, Calendar, FileText, Loader2, Banknote, Building2 } from "lucide-react";
+import { Plus, Ship, MapPin, User, Package, Calendar, FileText, Loader2, Banknote, Building2, Hash } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
@@ -40,6 +40,7 @@ const NouveauDossierDialog = () => {
     responsableId: "", notes: "",
     montantDI: "",
     fournisseur: "",
+    numeroBL: "",
   });
 
   const montantEnXAF = form.montantDI
@@ -85,7 +86,7 @@ const NouveauDossierDialog = () => {
       toast({ title: "Dossier créé", description: `${res.numero} — ${res.client}${montantEnXAF ? ` · DI ${montantEnXAF.toLocaleString("fr-FR")} FCFA` : ""}` });
       setOpen(false);
       setDiDevise("XAF");
-      setForm({ client: "", compagnie: "", conteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "", fournisseur: "" });
+      setForm({ client: "", compagnie: "", conteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "", fournisseur: "", numeroBL: "" });
     },
     onError: (err: any) => {
       toast({ title: "Erreur", description: err.message ?? "Création échouée", variant: "destructive" });
@@ -109,6 +110,7 @@ const NouveauDossierDialog = () => {
       priorite:      form.priorite,
       notes:         form.notes || undefined,
       fournisseur:   form.fournisseur || undefined,
+      numeroBL:      form.numeroBL || undefined,
       montantDI:     montantEnXAF > 0 ? montantEnXAF : undefined,
     });
   };
@@ -160,6 +162,18 @@ const NouveauDossierDialog = () => {
               </Label>
               <Input placeholder="Ex: Matériaux de construction" value={form.marchandise} onChange={e => setForm({...form, marchandise: e.target.value})} className="bg-muted/50" />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <Hash className="w-3.5 h-3.5 text-muted-foreground" /> N° de BL — Bill of Lading (optionnel)
+            </Label>
+            <Input
+              placeholder="Ex: MSC123456789"
+              value={form.numeroBL}
+              onChange={e => setForm({...form, numeroBL: e.target.value})}
+              className="bg-muted/50 font-mono"
+            />
           </div>
 
           <div className="grid grid-cols-3 gap-4">
