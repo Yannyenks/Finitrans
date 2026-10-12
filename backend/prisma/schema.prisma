@@ -53,6 +53,13 @@ model User {
   sousEtapesResponsable    SousEtapeDossier[]        @relation("SousEtapeResponsable")
   sousEtapesValidees       SousEtapeDossier[]        @relation("SousEtapeCompletedBy")
   timingsResponsable       DossierTiming[]           @relation("TimingResponsable")
+  ficheRH                  FicheRH?
+  conges                   Conge[]                   @relation("CongeEmploye")
+  congesDecides            Conge[]                   @relation("CongeDecideur")
+  activites                ActivityLog[]
+  ecrituresCreees          EcritureComptable[]       @relation("EcritureCreateur")
+  ecrituresValidees        EcritureComptable[]       @relation("EcritureValideur")
+  diDocuments              DIDocument[]
 
   @@map("users")
 }
@@ -107,6 +114,7 @@ model Dossier {
   vehicules          Vehicule[]
   virements          Virement[]
   sousEtapes         SousEtapeDossier[]
+  ecritures          EcritureComptable[]
 
   @@map("dossiers")
 }
@@ -166,6 +174,9 @@ model Facture {
   dateFacture  DateTime      @map("date_facture")
   datePaiement DateTime?     @map("date_paiement")
   description  String
+  // Ventilation comptable (optionnelle) : montant = HT honoraires + TVA + débours refacturés
+  montantTVA     Decimal?    @map("montant_tva") @db.Decimal(15, 2)
+  montantDebours Decimal?    @map("montant_debours") @db.Decimal(15, 2)
   createdAt    DateTime      @default(now()) @map("created_at")
   updatedAt    DateTime      @updatedAt @map("updated_at")
   dossier      Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
@@ -175,7 +186,9 @@ model Facture {
 
 model Virement {
   id           String         @id @default(uuid()) @db.Uuid
-  dossierId    String         @map("dossier_id") @db.Uuid
+  dossierId    String?        @map("dossier_id") @db.Uuid
+  motif        String?
+  type         String?        @db.VarChar(50)
   montant      Decimal        @db.Decimal(15, 2)
   source       String         @db.VarChar(255)
   destination  String         @db.VarChar(255)
@@ -185,7 +198,7 @@ model Virement {
   statut       StatutVirement @default(en_attente)
   createdAt    DateTime       @default(now()) @map("created_at")
   updatedAt    DateTime       @updatedAt @map("updated_at")
-  dossier      Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  dossier      Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   responsable  User           @relation(fields: [effectuePar], references: [id])
 
   @@map("virements")
@@ -405,6 +418,7 @@ model DeclarationImportation {
   gestionnaire   User          @relation("GestionnaireDI", fields: [gestionnaireId], references: [id])
   dossiers       Dossier[]     @relation("DossierDI")
   mouvements     MouvementDI[]
+  documents      DIDocument[]
 
   @@map("declarations_importation")
 }
@@ -853,4 +867,249 @@ enum CategorieMouvementDI {
   ouverture
 
   @@map("categorie_mouvement_di")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Documents attachés à une DI (justificatifs, factures)
+// ════════════════════════════════════════════════════════════════════════════
+
+model DIDocument {
+  id          String                 @id @default(uuid()) @db.Uuid
+  diId        String                 @map("di_id") @db.Uuid
+  nom         String                 @db.VarChar(255)
+  type        String                 @db.VarChar(100)
+  taille      String                 @db.VarChar(50)
+  contenu     Bytes?
+  hashContenu String?                @map("hash_contenu") @db.VarChar(64)
+  categorie   String?                @db.VarChar(50)
+  motif       String?
+  uploadePar  String                 @map("uploade_par") @db.Uuid
+  createdAt   DateTime               @default(now()) @map("created_at")
+  di          DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
+  uploader    User                   @relation(fields: [uploadePar], references: [id])
+
+  @@map("di_documents")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Journal d'activité global (actions hors dossier : rôles, comptes, compta…)
+// ════════════════════════════════════════════════════════════════════════════
+
+model ActivityLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(100)
+  entite    String   @db.VarChar(50)
+  entiteId  String?  @map("entite_id") @db.VarChar(64)
+  details   String?
+  metadata  Json?
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@map("activity_logs")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Ressources humaines
+// ════════════════════════════════════════════════════════════════════════════
+
+enum TypeContrat {
+  CDI
+  CDD
+  stage
+  consultant
+  interim
+
+  @@map("type_contrat")
+}
+
+model FicheRH {
+  id             String      @id @default(uuid()) @db.Uuid
+  userId         String      @unique @map("user_id") @db.Uuid
+  matricule      String?     @db.VarChar(50)
+  poste          String?     @db.VarChar(255)
+  departement    String?     @db.VarChar(100)
+  typeContrat    TypeContrat @default(CDI) @map("type_contrat")
+  dateEmbauche   DateTime?   @map("date_embauche")
+  dateFinContrat DateTime?   @map("date_fin_contrat")
+  salaireBase    Decimal     @default(0) @map("salaire_base") @db.Decimal(15, 2)
+  primes         Decimal     @default(0) @db.Decimal(15, 2)
+  numeroCNPS     String?     @map("numero_cnps") @db.VarChar(50)
+  banque         String?     @db.VarChar(100)
+  rib            String?     @db.VarChar(100)
+  adresse        String?
+  contactUrgence String?     @map("contact_urgence") @db.VarChar(255)
+  joursCongesAn  Int         @default(18) @map("jours_conges_an")
+  notes          String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("fiches_rh")
+}
+
+enum TypeConge {
+  annuel
+  maladie
+  maternite
+  paternite
+  sans_solde
+  exceptionnel
+
+  @@map("type_conge")
+}
+
+enum StatutConge {
+  demande
+  approuve
+  refuse
+  annule
+
+  @@map("statut_conge")
+}
+
+model Conge {
+  id                  String      @id @default(uuid()) @db.Uuid
+  userId              String      @map("user_id") @db.Uuid
+  type                TypeConge   @default(annuel)
+  dateDebut           DateTime    @map("date_debut")
+  dateFin             DateTime    @map("date_fin")
+  jours               Int
+  motif               String?
+  statut              StatutConge @default(demande)
+  decideParId         String?     @map("decide_par_id") @db.Uuid
+  decideAt            DateTime?   @map("decide_at")
+  commentaireDecision String?     @map("commentaire_decision")
+  createdAt           DateTime    @default(now()) @map("created_at")
+  updatedAt           DateTime    @updatedAt @map("updated_at")
+  user                User        @relation("CongeEmploye", fields: [userId], references: [id], onDelete: Cascade)
+  decidePar           User?       @relation("CongeDecideur", fields: [decideParId], references: [id])
+
+  @@map("conges")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Comptabilité générale SYSCOHADA (partie double)
+// ════════════════════════════════════════════════════════════════════════════
+
+enum TypeCompte {
+  actif
+  passif
+  charge
+  produit
+  mixte
+
+  @@map("type_compte")
+}
+
+model CompteComptable {
+  id        String          @id @default(uuid()) @db.Uuid
+  numero    String          @unique @db.VarChar(20)
+  libelle   String          @db.VarChar(255)
+  classe    Int
+  type      TypeCompte
+  actif     Boolean         @default(true)
+  systeme   Boolean         @default(false)
+  createdAt DateTime        @default(now()) @map("created_at")
+  lignes    LigneEcriture[]
+
+  @@map("comptes_comptables")
+}
+
+enum TypeJournal {
+  achats
+  ventes
+  banque
+  caisse
+  operations_diverses
+  paie
+
+  @@map("type_journal")
+}
+
+model JournalComptable {
+  id        String              @id @default(uuid()) @db.Uuid
+  code      String              @unique @db.VarChar(10)
+  libelle   String              @db.VarChar(255)
+  type      TypeJournal
+  actif     Boolean             @default(true)
+  ecritures EcritureComptable[]
+
+  @@map("journaux_comptables")
+}
+
+enum StatutExercice {
+  ouvert
+  cloture
+
+  @@map("statut_exercice")
+}
+
+model ExerciceComptable {
+  id           String              @id @default(uuid()) @db.Uuid
+  code         String              @unique @db.VarChar(20)
+  dateDebut    DateTime            @map("date_debut")
+  dateFin      DateTime            @map("date_fin")
+  statut       StatutExercice      @default(ouvert)
+  resultat     Decimal?            @db.Decimal(15, 2)
+  clotureAt    DateTime?           @map("cloture_at")
+  clotureParId String?             @map("cloture_par_id") @db.Uuid
+  createdAt    DateTime            @default(now()) @map("created_at")
+  ecritures    EcritureComptable[]
+
+  @@map("exercices_comptables")
+}
+
+enum StatutEcriture {
+  brouillon
+  validee
+
+  @@map("statut_ecriture")
+}
+
+model EcritureComptable {
+  id               String            @id @default(uuid()) @db.Uuid
+  numero           String            @unique @db.VarChar(40)
+  journalId        String            @map("journal_id") @db.Uuid
+  exerciceId       String            @map("exercice_id") @db.Uuid
+  date             DateTime
+  libelle          String            @db.VarChar(255)
+  piece            String?           @db.VarChar(100)
+  dossierId        String?           @map("dossier_id") @db.Uuid
+  statut           StatutEcriture    @default(brouillon)
+  sourceType       String?           @map("source_type") @db.VarChar(50)
+  sourceId         String?           @map("source_id") @db.VarChar(64)
+  contrepasseeDeId String?           @map("contrepassee_de_id") @db.Uuid
+  createdById      String            @map("created_by_id") @db.Uuid
+  valideeParId     String?           @map("validee_par_id") @db.Uuid
+  valideeAt        DateTime?         @map("validee_at")
+  createdAt        DateTime          @default(now()) @map("created_at")
+  updatedAt        DateTime          @updatedAt @map("updated_at")
+  journal          JournalComptable  @relation(fields: [journalId], references: [id])
+  exercice         ExerciceComptable @relation(fields: [exerciceId], references: [id])
+  dossier          Dossier?          @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+  createdBy        User              @relation("EcritureCreateur", fields: [createdById], references: [id])
+  valideePar       User?             @relation("EcritureValideur", fields: [valideeParId], references: [id])
+  lignes           LigneEcriture[]
+
+  @@unique([sourceType, sourceId])
+  @@index([date])
+  @@map("ecritures_comptables")
+}
+
+model LigneEcriture {
+  id         String            @id @default(uuid()) @db.Uuid
+  ecritureId String            @map("ecriture_id") @db.Uuid
+  compteId   String            @map("compte_id") @db.Uuid
+  libelle    String?           @db.VarChar(255)
+  debit      Decimal           @default(0) @db.Decimal(15, 2)
+  credit     Decimal           @default(0) @db.Decimal(15, 2)
+  tiers      String?           @db.VarChar(255)
+  ordre      Int               @default(0)
+  ecriture   EcritureComptable @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
+  compte     CompteComptable   @relation(fields: [compteId], references: [id])
+
+  @@index([compteId])
+  @@map("lignes_ecriture")
 }

@@ -4,7 +4,7 @@ import {
   CheckCircle2, Clock, AlertTriangle, UserCheck, Calendar,
   ChevronDown, ChevronRight, FileText, Loader2, Edit3,
   XCircle, PlayCircle, AlertCircle, Receipt, Stamp, Upload,
-  Paperclip, ExternalLink, Timer,
+  Paperclip, ExternalLink, Timer, Hand,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,7 +15,9 @@ import {
 } from "@/components/ui/select";
 import { notif } from "@/hooks/useNotification";
 import { useSousEtapes, SousEtape, SousEtapeStatut } from "@/hooks/useSousEtapes";
-import { getStoredUser } from "@/lib/api";
+import { api, getStoredUser, openDocument } from "@/lib/api";
+import { isSupervisor } from "@/lib/permissions";
+import { useQuery } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -40,6 +42,8 @@ export type SousEtapeConfig = {
   hasImmatriculation?: boolean;
   outputLabel?:        string;
   fields?:             FieldDef[];
+  /** Sites où la sous-étape s'applique (toutes si absent) */
+  sites?:              ("Douala" | "Kribi")[];
 };
 
 export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
@@ -186,8 +190,8 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       ],
     },
     {
-      cle: "facturation_terminal", label: "Facturation & paiement (redevance portuaire)",
-      description: "Règlement des redevances portuaires auprès du terminal (KCT Kribi ou RTC Douala)", partie: "B", partieLabel: "Terminal Portuaire (KCT / RTC)",
+      cle: "facturation_terminal", label: "Facturation & paiement (redevance portuaire)", sites: ["Douala"],
+      description: "Règlement des redevances portuaires auprès du terminal RTC de Douala (à Kribi : étape Opérations Kribi)", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
       fields: [
         { key: "term_facture_numero", label: "N° Facture terminal", type: "text",   placeholder: "Ex : KCT-INV-2025-0042" },
         { key: "term_montant",        label: "Montant (XAF)",       type: "number", placeholder: "0" },
@@ -195,8 +199,8 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       ],
     },
     {
-      cle: "bon_livraison", label: "Bon de livraison",
-      description: "Obtention du bon de livraison terminal autorisant l'enlèvement physique de la marchandise", partie: "B", partieLabel: "Terminal Portuaire (KCT / RTC)",
+      cle: "bon_livraison", label: "Bon de livraison", sites: ["Douala"],
+      description: "Obtention du bon de livraison terminal autorisant l'enlèvement physique de la marchandise", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
       fields: [
         { key: "bl_term_numero",    label: "N° Bon de livraison",  type: "text", placeholder: "Ex : BL-T-2025-0042" },
         { key: "bl_term_date",      label: "Date d'obtention",     type: "date" },
@@ -204,8 +208,8 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       ],
     },
     {
-      cle: "gate_pass", label: "Gate Pass — Ticket de sortie",
-      description: "Récupération du gate pass et enregistrement de l'immatriculation du véhicule", partie: "B", partieLabel: "Terminal Portuaire (KCT / RTC)",
+      cle: "gate_pass", label: "Gate Pass — Ticket de sortie", sites: ["Douala"],
+      description: "Récupération du gate pass et enregistrement de l'immatriculation du véhicule", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
       hasImmatriculation: true,
       fields: [
         { key: "gp_chauffeur",  label: "Nom du chauffeur",     type: "text", placeholder: "Ex : M. DUPONT Jean" },
@@ -252,6 +256,11 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
     },
   ],
 };
+
+/** Sous-étapes applicables à un site (la partie terminal de Kribi est traitée en « Opérations Kribi »). */
+export function applicableConfigs(etape: string, site?: string): SousEtapeConfig[] {
+  return (SOUS_ETAPES_CONFIG[etape] ?? []).filter(c => !c.sites || !site || c.sites.includes(site as "Douala" | "Kribi"));
+}
 
 // ── Icônes de statut ─────────────────────────────────────────────────────────
 const StatutIcon = ({ statut, size = "w-4 h-4" }: { statut: SousEtapeStatut; size?: string }) => {
@@ -509,14 +518,13 @@ const StepInfoSection = ({
   isPending: boolean;
 }) => {
   const fields = config.fields ?? [];
-  if (fields.length === 0) return null;
-
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     fields.forEach(f => { init[f.key] = (meta[f.key] as string) ?? ""; });
     return init;
   });
   const [dirty, setDirty] = useState(false);
+  if (fields.length === 0) return null;
 
   const set = (key: string, val: string) => {
     setValues(v => ({ ...v, [key]: val }));
@@ -601,7 +609,7 @@ const PreuveSection = ({
       { etape, cle, file: f },
       {
         onSuccess: () => notif.preuveJointe(cfgLabel, f.name),
-        onError:   () => notif.erreur("Le fichier n'a pas pu être envoyé. Réessayez."),
+        onError:   (e: any) => notif.erreur(e?.message ?? "Le fichier n'a pas pu être envoyé. Réessayez."),
       }
     );
   };
@@ -616,14 +624,13 @@ const PreuveSection = ({
         <div className="flex items-center gap-2 text-xs">
           <FileText className="w-4 h-4 text-success flex-shrink-0" />
           <span className="flex-1 truncate text-foreground font-medium">{preuveNom ?? "Fichier joint"}</span>
-          <a
-            href={preuveUrl}
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
+            onClick={() => openDocument(preuveUrl).catch((e: Error) => notif.erreur(e.message))}
             className="flex items-center gap-1 text-secondary hover:underline font-medium"
           >
             <ExternalLink className="w-3 h-3" /> Ouvrir
-          </a>
+          </button>
           {canEdit && (
             <button
               className="text-[10px] text-muted-foreground hover:text-secondary underline"
@@ -754,6 +761,7 @@ const SousEtapeCard = ({
   users,
   canManage,
   dossierId,
+  peutPrendre,
 }: {
   etape:      string;
   config:     SousEtapeConfig;
@@ -761,9 +769,10 @@ const SousEtapeCard = ({
   users:      { id: string; nom: string; profil: string }[];
   canManage:  boolean;
   dossierId:  string;
+  peutPrendre: boolean;
 }) => {
   const currentUser  = getStoredUser();
-  const { update }   = useSousEtapes(dossierId);
+  const { update, prendre } = useSousEtapes(dossierId);
   const isResponsable = data?.responsableId === currentUser?.id;
   const canEdit      = canManage || isResponsable;
 
@@ -777,7 +786,8 @@ const SousEtapeCard = ({
   const [notes,        setNotes]        = useState(data?.notes ?? "");
 
   const statut    = data?.statut ?? "todo";
-  const isPending = update.isPending;
+  const isPending = update.isPending || prendre.isPending;
+  const onErr = { onError: (e: any) => notif.erreur(e?.message ?? "Opération impossible") };
   const isRetard  = data?.deadline && data.statut !== "valide" && isAfter(new Date(), new Date(data.deadline));
   const meta      = (data?.metadata ?? {}) as Record<string, string>;
 
@@ -787,7 +797,7 @@ const SousEtapeCard = ({
     if (config.hasImmatriculation)  { setShowGatePass(true); return; }
     update.mutate(
       { etape, cle: config.cle, data: { statut: "valide" } },
-      { onSuccess: () => notif.sousEtapeValidee(config.label) }
+      { onSuccess: () => notif.sousEtapeValidee(config.label), ...onErr }
     );
   };
 
@@ -958,7 +968,7 @@ const SousEtapeCard = ({
                 )}
 
                 {/* Timing — responsable peut définir son propre délai */}
-                {isResponsable && !canManage && statut !== "valide" && (
+                {isResponsable && statut !== "valide" && (
                   <TimingSection
                     key={data?.deadline ?? "no-dl"}
                     data={data}
@@ -1063,61 +1073,78 @@ const SousEtapeCard = ({
                   </motion.div>
                 )}
 
-                {/* Boutons de progression */}
-                <div className="flex items-center gap-2 pt-1">
-                  {/* Responsable: peut Démarrer sa propre étape */}
-                  {statut === "todo" && isResponsable && !canManage && (
+                {/* Boutons de progression — chaque titulaire termine lui-même sa tâche */}
+                <div className="flex items-center gap-2 pt-1 flex-wrap">
+                  {/* Tâche non attribuée relevant de mon profil : je la prends en charge */}
+                  {!data?.responsableId && peutPrendre && !canManage && statut !== "valide" && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
+                      disabled={isPending}
+                      onClick={() => prendre.mutate(
+                        { etape, cle: config.cle },
+                        { onSuccess: () => notif.sousEtapeDemarree(config.label), ...onErr }
+                      )}>
+                      {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <Hand className="w-3 h-3" />}
+                      Prendre en charge
+                    </Button>
+                  )}
+
+                  {statut === "todo" && isResponsable && (
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
                       disabled={isPending}
                       onClick={() => update.mutate(
                         { etape, cle: config.cle, data: { statut: "en_cours" } },
-                        { onSuccess: () => notif.sousEtapeDemarree(config.label) }
+                        { onSuccess: () => notif.sousEtapeDemarree(config.label), ...onErr }
                       )}>
                       {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <PlayCircle className="w-3 h-3" />}
                       Démarrer
                     </Button>
                   )}
 
-                  {/* DG/Exploitation: peut Valider directement */}
-                  {(statut === "todo" || statut === "en_cours") && canManage && (
+                  {/* Le titulaire (ou la Direction) termine la tâche */}
+                  {(statut === "todo" || statut === "en_cours") && canEdit && (
                     <Button size="sm"
                       className="h-7 text-xs gap-1 bg-success text-white hover:bg-success/90"
                       disabled={isPending}
                       onClick={handleValidate}
                     >
                       {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <CheckCircle2 className="w-3 h-3" />}
-                      Valider
+                      {canManage && !isResponsable ? "Valider (Direction)" : "Terminer la tâche"}
                     </Button>
                   )}
 
-                  {/* Responsable en cours: info sur qui valide */}
-                  {statut === "en_cours" && isResponsable && !canManage && (
-                    <span className="text-[10px] text-muted-foreground italic flex items-center gap-1">
-                      <AlertCircle className="w-3 h-3" />
-                      Validation par le DG / Exploitation
-                    </span>
+                  {/* Le titulaire peut signaler un blocage */}
+                  {statut === "en_cours" && isResponsable && !config.hasPvcResult && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-destructive"
+                      disabled={isPending}
+                      onClick={() => update.mutate(
+                        { etape, cle: config.cle, data: { statut: "rejete" } },
+                        { onSuccess: () => notif.sousEtapeRejetee(config.label), ...onErr }
+                      )}>
+                      <XCircle className="w-3 h-3" />
+                      Signaler un blocage
+                    </Button>
                   )}
 
-                  {/* DG/Exploitation: peut Réviser une étape validée */}
-                  {statut === "valide" && canManage && (
+                  {/* Correction d'une tâche validée : titulaire ou Direction */}
+                  {statut === "valide" && canEdit && (
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-muted-foreground"
                       disabled={isPending}
                       onClick={() => update.mutate(
                         { etape, cle: config.cle, data: { statut: "en_cours" } },
-                        { onSuccess: () => notif.sousEtapeRevisee(config.label) }
+                        { onSuccess: () => notif.sousEtapeRevisee(config.label), ...onErr }
                       )}>
                       <Edit3 className="w-3 h-3" />
                       Réviser
                     </Button>
                   )}
 
-                  {/* Responsable ou DG/Exploitation: peut Relancer une étape rejetée */}
-                  {statut === "rejete" && (canManage || isResponsable) && (
+                  {/* Relancer une tâche rejetée */}
+                  {statut === "rejete" && canEdit && (
                     <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
                       disabled={isPending}
                       onClick={() => update.mutate(
                         { etape, cle: config.cle, data: { statut: "en_cours" } },
-                        { onSuccess: () => notif.sousEtapeRelancee(config.label) }
+                        { onSuccess: () => notif.sousEtapeRelancee(config.label), ...onErr }
                       )}>
                       <ChevronRight className="w-3 h-3" />
                       Relancer
@@ -1148,14 +1175,25 @@ export default function SousEtapesPanel({
   etape,
   dossierId,
   users,
+  site,
 }: {
   etape:     string;
   dossierId: string;
   users:     { id: string; nom: string; profil: string }[];
+  site?:     string;
 }) {
   const user       = getStoredUser();
-  const canManage  = user?.profil === "dg" || user?.profil === "exploitation";
-  const { query, byEtape, allValidated } = useSousEtapes(dossierId);
+  const canManage  = isSupervisor(user);
+  const { query, byEtape } = useSousEtapes(dossierId);
+
+  // Qui traite quoi (Administration → Attribution des étapes)
+  const { data: attribution } = useQuery({
+    queryKey: ["roles-attribution"],
+    queryFn:  () => api.get<any>("/api/roles/attribution"),
+    staleTime: 5 * 60_000,
+  });
+  const profilDe = (cle: string): string | undefined =>
+    attribution?.etapes?.find((e: any) => e.etape === etape)?.sousEtapes?.find((x: any) => x.cle === cle)?.profil;
 
   // Détection des retards à chaque chargement des données
   useEffect(() => {
@@ -1181,9 +1219,9 @@ export default function SousEtapesPanel({
     }
   }, [query.data, etape, dossierId]);
 
-  const configs = SOUS_ETAPES_CONFIG[etape] ?? [];
+  const configs = applicableConfigs(etape, site);
   const rows    = byEtape(etape);
-  const isDone  = allValidated(etape, configs.length);
+  const isDone  = configs.length > 0 && configs.every(c => rows.find(r => r.cle === c.cle)?.statut === "valide");
 
   if (configs.length === 0) return null;
 
@@ -1209,6 +1247,7 @@ export default function SousEtapesPanel({
         users={users}
         canManage={canManage}
         dossierId={dossierId}
+        peutPrendre={!!user && profilDe(cfg.cle) === user.profil}
       />
     );
   };
@@ -1217,16 +1256,16 @@ export default function SousEtapesPanel({
     <div className="space-y-2.5 mt-3 pt-3 border-t border-border/10">
       <div className="flex items-center justify-between mb-1">
         <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
-          Sous-étapes ({rows.filter(r => r.statut === "valide").length}/{configs.length} validées)
+          Sous-étapes ({configs.filter(c => rows.find(r => r.cle === c.cle)?.statut === "valide").length}/{configs.length} validées)
         </p>
         {isDone && (
           <span className="text-[10px] font-bold text-success bg-success/10 border border-success/20 px-2 py-0.5 rounded-full flex items-center gap-1">
             <CheckCircle2 className="w-2.5 h-2.5" /> Toutes validées
           </span>
         )}
-        {!isDone && !canManage && (
-          <span className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-            <AlertCircle className="w-2.5 h-2.5" /> En attente validation DG / Exploitation
+        {!isDone && rows.some(r => r.responsableId === user?.id && r.statut !== "valide") && (
+          <span className="text-[10px] text-secondary bg-secondary/10 border border-secondary/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+            <AlertCircle className="w-2.5 h-2.5" /> Des tâches vous attendent
           </span>
         )}
       </div>

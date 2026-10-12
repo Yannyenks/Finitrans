@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { differenceInDays, isPast, isAfter } from 'date-fns'
 
 // ── Délais SLA SGS par type de vérification (jours ouvrés) ──
@@ -128,8 +129,6 @@ const sgsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const dossier = await prisma.dossier.findUnique({ where: { id: body.dossierId } })
     if (!dossier) throw new NotFoundError('Dossier', body.dossierId)
 
-    const count     = await prisma.soumissionSGS.count()
-    const reference = `SGS-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`
 
     const slaJours          = SLA_SGS[body.typeVerification] ?? 5
     const dateDepot          = new Date(body.dateDepot)
@@ -137,20 +136,25 @@ const sgsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       ? new Date(body.datePrevueRetour)
       : new Date(dateDepot.getTime() + slaJours * 86_400_000)
 
-    const userId = (request.user as any).id
-    const sgs = await prisma.soumissionSGS.create({
-      data: {
-        ...body,
-        reference,
-        dateDepot,
-        datePrevueRetour,
-        soumisParId: userId,
-      },
-      include: {
-        dossier:   { select: { numero: true, client: true } },
-        soumisPar: { select: { nom: true } },
-      },
+    const userId = request.user.id
+    const sgs = await withUniqueRetry(async () => {
+      const reference = await nextSequence(`SGS-${new Date().getFullYear()}-`, async prefix =>
+        (await prisma.soumissionSGS.findFirst({ where: { reference: { startsWith: prefix } }, orderBy: { reference: 'desc' }, select: { reference: true } }))?.reference)
+      return prisma.soumissionSGS.create({
+        data: {
+          ...body,
+          reference,
+          dateDepot,
+          datePrevueRetour,
+          soumisParId: userId,
+        },
+        include: {
+          dossier:   { select: { numero: true, client: true } },
+          soumisPar: { select: { nom: true } },
+        },
+      })
     })
+    const reference = sgs.reference
 
     // Audit sur le dossier
     await prisma.auditEntry.create({

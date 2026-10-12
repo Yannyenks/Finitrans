@@ -2,7 +2,8 @@ import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, getStoredUser, uploadFile } from "@/lib/api";
+import { api, getStoredUser, openDocument, uploadFile } from "@/lib/api";
+import { can, isSupervisor } from "@/lib/permissions";
 import {
   ArrowLeft, Ship, MapPin, Calendar, User, Package, FileText,
   MessageSquare, CheckCircle2, History, Send, ClipboardList,
@@ -106,6 +107,17 @@ const getSLAStatus = (
 };
 
 const TAUX_CHANGE: Record<string, number> = { XAF: 1, EUR: 655.96, USD: 605 };
+
+const EVENT_LABELS: Record<string, string> = {
+  ETAPE_DEBUT: "Début d'étape", ETAPE_FIN: "Fin d'étape", DOCUMENT: "Document joint",
+  COMMENTAIRE: "Commentaire", PAIEMENT_DOUANE: "Paiement douane", PAIEMENT_COMPAGNIE: "Paiement compagnie",
+  VIREMENT: "Virement", FACTURE: "Facture", ALERTE: "Alerte", BON_LIVRAISON: "Bon de livraison",
+  BON_KRIBI: "Bon Kribi", GATE_PASS: "Gate pass", ETAT_CODAGE_CREE: "État de codage créé",
+  ETAT_CODAGE_SOUMIS: "État de codage soumis", ETAT_CODAGE_VALIDE: "État de codage validé",
+  ETAT_CODAGE_REJETE: "État de codage rejeté", DETENTION_DEBUT: "Début de détention",
+  DETENTION_FIN: "Fin de détention", INTERCHANGE_EMIS: "Interchange émis",
+  INTERCHANGE_RETOURNE: "Conteneur retourné", SGS_DEPOT: "Dépôt SGS", SGS_RESULTAT: "Résultat SGS",
+};
 
 // ── Formulaire création DI inline ─────────────────────────────────────────────
 const CreateDIInline = ({
@@ -269,10 +281,10 @@ const DossierDetail = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const user = getStoredUser();
-  const canAdvance      = user?.permDossier   === "complet" || user?.permDossier   === "partiel";
-  const canReadFinance  = user?.permFinancier !== "non";
-  const canEditFinance  = user?.permFinancier === "complet" || user?.permFinancier === "partiel";
-  const canRechargeFinance = user?.permFinancier === "complet";
+  const superviseur     = isSupervisor(user);
+  const canReadFinance  = can(user, "permFinancier", "lecture");
+  const canEditFinance  = can(user, "permFinancier", "partiel");
+  const canRechargeFinance = can(user, "permFinancier", "complet");
 
   const [newComment, setNewComment]       = useState("");
   const [activeTab, setActiveTab]         = useState("commentaires");
@@ -285,7 +297,7 @@ const DossierDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showFactureDialog, setShowFactureDialog] = useState(false);
-  const { allValidated } = useSousEtapes(id ?? "");
+  const { query: sousEtapesQuery } = useSousEtapes(id ?? "");
 
   // Retard / SLA state
   const [retardDialog, setRetardDialog]   = useState(false);
@@ -332,9 +344,10 @@ const DossierDetail = () => {
     enabled:  !!id,
   });
 
-  const { data: conteneursData } = useQuery({
-    queryKey: ["dossier-conteneurs", id],
-    queryFn:  () => api.get<any[]>(`/api/dossiers/${id}/conteneurs`).catch(() => []),
+  // Prochaine étape, responsable pressenti et droits de l'utilisateur (calculés par le serveur)
+  const { data: nextStep } = useQuery({
+    queryKey: ["dossier-next", id],
+    queryFn:  () => api.get<any>(`/api/dossiers/${id}/next-step`),
     enabled:  !!id,
   });
 
@@ -344,9 +357,9 @@ const DossierDetail = () => {
     queryFn:  () => api.get<any>("/api/employes").catch(() => ({ data: [] })),
     staleTime: 5 * 60_000,
   });
-  const usersList = (Array.isArray(usersData) ? usersData : (usersData?.data ?? [])).map(
-    (u: any) => ({ id: u.id, nom: u.nom, profil: u.profil })
-  );
+  const usersList = (Array.isArray(usersData) ? usersData : (usersData?.data ?? []))
+    .filter((u: any) => u.actif !== false)
+    .map((u: any) => ({ id: u.id, nom: u.nom, profil: u.profil, role: u.role }));
 
   // DI data for FactureDialog (lazy — only when diId is known after dossier loads)
   const { data: diInfo } = useQuery({
@@ -374,6 +387,7 @@ const DossierDetail = () => {
     },
     onSuccess: () => {
       refetchDocs();
+      qc.invalidateQueries({ queryKey: ["dossier-next", id] });
       setSelectedFile(null);
       if (fileInputRef.current) fileInputRef.current.value = "";
       toast({ title: "Document uploadé avec succès" });
@@ -396,6 +410,9 @@ const DossierDetail = () => {
       qc.invalidateQueries({ queryKey: ["dossier-parcours", id] });
       qc.invalidateQueries({ queryKey: ["dossier-comments", id] });
       qc.invalidateQueries({ queryKey: ["dossiers"] });
+      qc.invalidateQueries({ queryKey: ["dossier-next", id] });
+      qc.invalidateQueries({ queryKey: ["sous-etapes", id] });
+      qc.invalidateQueries({ queryKey: ["mes-taches"] });
       notif.dossierAvance(
         STATUS_LABELS[dossier?.status ?? ""] ?? dossier?.status ?? "",
         STATUS_LABELS[vars.status] ?? vars.status,
@@ -425,8 +442,16 @@ const DossierDetail = () => {
     );
   }
 
-  const currentStepIdx  = STATUS_ORDER.indexOf(dossier.status);
-  const nextStatus      = STATUS_ORDER[currentStepIdx + 1] ?? null;
+  // Parcours propre au site : l'étape Kribi n'existe que pour les dossiers Kribi
+  const parcours: string[] = dossier.parcoursEtapes ?? nextStep?.parcours ?? STATUS_ORDER;
+  const currentStepIdx  = Math.max(0, parcours.indexOf(dossier.status));
+  const nextStatus: string | null = nextStep ? nextStep.etapeSuivante : (parcours[currentStepIdx + 1] ?? null);
+
+  // Implication de l'utilisateur : responsable du dossier ou titulaire d'une tâche
+  const mesTaches = (sousEtapesQuery.data ?? []).filter(t => t.responsableId === user?.id);
+  const impliqueEtapeCourante = dossier.responsableId === user?.id || mesTaches.some(t => t.etape === dossier.status);
+  const canAdvance = superviseur || impliqueEtapeCourante;
+  const canUpload  = superviseur || can(user, "permDossier", "partiel") || dossier.responsableId === user?.id || mesTaches.length > 0;
   const effectiveEtape  = uploadEtape || dossier.status;
   const docs: any[]     = docsData ?? [];
 
@@ -438,8 +463,8 @@ const DossierDetail = () => {
   const timeline        = parcoursData?.timeline ?? [];
   const finance         = parcoursData?.finance  ?? {};
   const diId            = dossier.diId as string | undefined;
-  const conteneurs: any[] = Array.isArray(conteneursData) ? conteneursData
-    : dossier.conteneur ? [{ id: "main", numero: dossier.conteneur, statut: dossier.status }]
+  const conteneurs: any[] = dossier.conteneur
+    ? String(dossier.conteneur).split(/[,;\s]+/).filter(Boolean).map((numero: string, i: number) => ({ id: `${i}`, numero, statut: dossier.status }))
     : [];
 
   // Preuves obligatoires — docs de l'étape courante
@@ -448,7 +473,7 @@ const DossierDetail = () => {
 
   const openHandoffDialog = (targetStatus: string) => {
     setHandoffStatus(targetStatus);
-    setHandoffResponsableId("");
+    setHandoffResponsableId(targetStatus === nextStatus && nextStep?.responsableSuggere?.id ? nextStep.responsableSuggere.id : "");
     setHandoffNote("");
     setHandoffDialog(true);
   };
@@ -457,7 +482,7 @@ const DossierDetail = () => {
     if (!handoffStatus) return;
     advanceStatus.mutate({
       status: handoffStatus,
-      responsableId: handoffResponsableId || undefined,
+      responsableId: handoffResponsableId && handoffResponsableId !== "__auto__" ? handoffResponsableId : undefined,
       note: handoffNote || undefined,
     });
     setHandoffDialog(false);
@@ -468,16 +493,15 @@ const DossierDetail = () => {
   const handleAdvanceClick = () => {
     if (!nextStatus) return;
 
-    // Vérifier que toutes les sous-étapes de l'étape courante sont validées
-    const stepConfigs = SOUS_ETAPES_CONFIG[dossier.status] ?? [];
-    if (stepConfigs.length > 0 && !allValidated(dossier.status, stepConfigs.length)) {
+    // Les superviseurs (DG / Exploitation) gardent le contrôle total et peuvent forcer
+    if (!superviseur && nextStep && !nextStep.completion?.allDone) {
       notif.avancementBloque(STATUS_LABELS[dossier.status] ?? dossier.status);
       if (!expandedSteps.has(dossier.status))
         setExpandedSteps(prev => { const s = new Set(prev); s.add(dossier.status); return s; });
       return;
     }
 
-    if (!hasProofForCurrentStep) {
+    if (!hasProofForCurrentStep && !superviseur) {
       notif.erreur(`Veuillez joindre au moins un document de preuve pour l'étape "${STATUS_LABELS[dossier.status]}" avant de continuer.`);
       setInlineUploadStep(dossier.status);
       if (!expandedSteps.has(dossier.status))
@@ -620,12 +644,15 @@ const DossierDetail = () => {
 
             <div className="space-y-4 mb-5">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Responsable pour l'étape suivante *</Label>
-                <Select value={handoffResponsableId} onValueChange={setHandoffResponsableId}>
+                <Label className="text-xs font-semibold">Responsable de l'étape « {STATUS_LABELS[handoffStatus]} »</Label>
+                <Select value={handoffResponsableId || "__auto__"} onValueChange={setHandoffResponsableId}>
                   <SelectTrigger className="bg-muted/40 h-9 text-sm">
-                    <SelectValue placeholder="Choisir le prochain responsable..." />
+                    <SelectValue placeholder="Attribution automatique" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="__auto__">
+                      Attribution automatique{nextStep?.responsableSuggere && handoffStatus === nextStatus ? ` (${nextStep.responsableSuggere.nom})` : ""}
+                    </SelectItem>
                     {usersList.map((u: any) => (
                       <SelectItem key={u.id} value={u.id}>
                         <span className="font-medium">{u.nom}</span>
@@ -649,7 +676,7 @@ const DossierDetail = () => {
             <div className="flex gap-2">
               <Button
                 onClick={confirmHandoff}
-                disabled={!handoffResponsableId || advanceStatus.isPending}
+                disabled={advanceStatus.isPending}
                 className="flex-1 bg-secondary text-secondary-foreground gap-1.5"
               >
                 {advanceStatus.isPending
@@ -687,13 +714,25 @@ const DossierDetail = () => {
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {dossier.status === "cloture"
                     ? "Dossier clôturé avec succès"
-                    : `Étape ${currentStepIdx + 1} / ${STATUS_ORDER.length} — ${Math.round((currentStepIdx / (STATUS_ORDER.length - 1)) * 100)}% accompli`}
+                    : `Étape ${currentStepIdx + 1} / ${parcours.length} — ${Math.round((currentStepIdx / (parcours.length - 1)) * 100)}% accompli`}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <span className={`status-badge ${STATUS_COLORS[dossier.status] ?? "bg-gray-100 text-gray-600"}`}>
                   {STATUS_LABELS[dossier.status] ?? dossier.status}
                 </span>
+                {superviseur && (
+                  <Select value="" onValueChange={v => v && openHandoffDialog(v)}>
+                    <SelectTrigger className="h-7 text-xs w-[150px]" title="Contrôle total : déplacer le dossier vers n'importe quelle étape">
+                      <SelectValue placeholder="Changer d'étape…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {parcours.filter(s => s !== dossier.status).map(s => (
+                        <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 {canAdvance && nextStatus && (
                   <div className="flex items-center gap-1.5">
                     {!hasProofForCurrentStep && (
@@ -722,14 +761,14 @@ const DossierDetail = () => {
               <motion.div
                 className="h-full rounded-full bg-gradient-to-r from-secondary via-accent to-success"
                 initial={{ width: 0 }}
-                animate={{ width: `${dossier.status === "cloture" ? 100 : Math.round((currentStepIdx / (STATUS_ORDER.length - 1)) * 100)}%` }}
+                animate={{ width: `${dossier.status === "cloture" ? 100 : Math.round((currentStepIdx / (parcours.length - 1)) * 100)}%` }}
                 transition={{ duration: 1.4, ease: "easeOut", delay: 0.2 }}
               />
             </div>
 
             {/* Étapes */}
             <div className="space-y-2">
-              {STATUS_ORDER.map((stepKey, i) => {
+              {parcours.map((stepKey, i) => {
                 const isCompleted    = i < currentStepIdx;
                 const isCurrent      = i === currentStepIdx;
                 const isPending      = i > currentStepIdx;
@@ -852,7 +891,7 @@ const DossierDetail = () => {
 
                         {/* Actions droite */}
                         <div className="flex items-center gap-1 flex-shrink-0">
-                          {(isCompleted || isCurrent) && canAdvance && (
+                          {(isCompleted || isCurrent) && canUpload && (
                             <button
                               title="Ajouter une preuve"
                               className="w-7 h-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-secondary transition-colors"
@@ -881,13 +920,11 @@ const DossierDetail = () => {
                                 const isPdf = doc.type?.includes("pdf");
                                 const isImg = doc.type?.startsWith("image/");
                                 return (
-                                  <a
+                                  <button
+                                    type="button"
                                     key={doc.id}
-                                    href={`${doc.url}`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex items-center gap-2.5 p-2.5 rounded-lg bg-muted/40 hover:bg-muted transition-colors group"
-                                    onClick={e => e.stopPropagation()}
+                                    className="flex items-center gap-2.5 p-2.5 rounded-lg bg-muted/40 hover:bg-muted transition-colors group text-left"
+                                    onClick={e => { e.stopPropagation(); openDocument(doc.url).catch((err: Error) => notif.erreur(err.message)); }}
                                   >
                                     <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${isPdf ? "bg-red-100" : isImg ? "bg-blue-100" : "bg-muted"}`}>
                                       {isPdf ? <FileText className="w-3.5 h-3.5 text-red-600" /> : isImg ? <ImageIcon className="w-3.5 h-3.5 text-blue-600" /> : <FileText className="w-3.5 h-3.5 text-muted-foreground" />}
@@ -899,7 +936,7 @@ const DossierDetail = () => {
                                         {doc.uploader?.nom ? ` · ${doc.uploader.nom}` : ""}
                                       </p>
                                     </div>
-                                  </a>
+                                  </button>
                                 );
                               })}
                             </div>
@@ -911,6 +948,7 @@ const DossierDetail = () => {
                               etape={stepKey}
                               dossierId={id!}
                               users={usersList}
+                              site={dossier.site}
                             />
                           )}
 
@@ -959,6 +997,12 @@ const DossierDetail = () => {
                           )}
 
                           {/* Bouton avancer — visible dans le contenu de l'étape courante */}
+                          {isCurrent && canAdvance && nextStatus && !superviseur && nextStep && !nextStep.peutAvancer && nextStep.raisons?.length > 0 && (
+                            <div className="rounded-lg bg-amber-50 border border-amber-200 p-2.5 text-[11px] text-amber-800 space-y-0.5">
+                              <p className="font-semibold">Avant de passer à « {STATUS_LABELS[nextStatus]} » :</p>
+                              {nextStep.raisons.map((r: string) => <p key={r}>• {r}</p>)}
+                            </div>
+                          )}
                           {isCurrent && canAdvance && nextStatus && (
                             <div className="pt-2 border-t border-border/10 mt-2">
                               <Button
@@ -1097,14 +1141,16 @@ const DossierDetail = () => {
                 Parcours du dossier ({timeline.length} événements)
               </h3>
               <div className="space-y-3 max-h-80 overflow-y-auto">
-                {timeline.map((evt: any) => (
-                  <div key={evt.id} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
+                {timeline.map((evt: any, idx: number) => (
+                  <div key={`${evt.type}-${idx}`} className="flex items-start gap-3 p-3 rounded-lg bg-muted/50">
                     <div className="w-2 h-2 rounded-full bg-secondary mt-1.5 flex-shrink-0" />
                     <div className="flex-1">
-                      <p className="text-sm font-medium text-foreground">{evt.label ?? evt.action ?? evt.type}</p>
-                      {evt.details && <p className="text-xs text-secondary mt-0.5">{evt.details}</p>}
+                      <p className="text-sm font-medium text-foreground">{EVENT_LABELS[evt.type] ?? evt.label ?? evt.action ?? evt.type}{evt.etape ? ` — ${STATUS_LABELS[evt.etape] ?? evt.etape}` : ""}</p>
+                      {(evt.details || evt.message || evt.nom || evt.reference || evt.numero) && (
+                        <p className="text-xs text-secondary mt-0.5">{evt.details ?? evt.message ?? evt.nom ?? evt.reference ?? evt.numero}</p>
+                      )}
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {evt.auteur?.nom ?? ""} • {new Date(evt.date ?? evt.createdAt).toLocaleString("fr-FR")}
+                        {[evt.responsable, evt.auteur?.nom ?? evt.auteur, evt.uploadePar, evt.emetteur, evt.effectuePar].find((x: any) => typeof x === "string") ?? ""} • {new Date(evt.date ?? evt.createdAt).toLocaleString("fr-FR")}
                       </p>
                     </div>
                   </div>
@@ -1171,7 +1217,7 @@ const DossierDetail = () => {
 
               {/* Documents */}
               <TabsContent value="documents">
-                {canAdvance && (
+                {canUpload && (
                   <div className="mb-4 p-4 rounded-lg border border-dashed border-border bg-muted/30">
                     <p className="text-xs font-medium text-muted-foreground mb-3 flex items-center gap-1.5">
                       <Upload className="w-3.5 h-3.5" /> Ajouter un scan ou document
@@ -1182,7 +1228,7 @@ const DossierDetail = () => {
                         <Select value={effectiveEtape} onValueChange={setUploadEtape}>
                           <SelectTrigger className="bg-card h-9 text-sm"><SelectValue /></SelectTrigger>
                           <SelectContent>
-                            {STATUS_ORDER.map(s => (
+                            {parcours.map(s => (
                               <SelectItem key={s} value={s}>{STATUS_LABELS[s]}</SelectItem>
                             ))}
                           </SelectContent>
@@ -1218,12 +1264,11 @@ const DossierDetail = () => {
                     const isPdf = doc.type?.includes("pdf");
                     const isImg = doc.type?.startsWith("image/");
                     return (
-                      <a
+                      <button
+                        type="button"
                         key={doc.id}
-                        href={`${doc.url}`}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors group"
+                        onClick={() => openDocument(doc.url).catch((err: Error) => notif.erreur(err.message))}
+                        className="w-full text-left flex items-center gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors group"
                       >
                         <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
                           isPdf ? "bg-red-100" : isImg ? "bg-blue-100" : "bg-muted"
@@ -1247,7 +1292,7 @@ const DossierDetail = () => {
                         <span className="text-xs text-muted-foreground flex-shrink-0">
                           {new Date(doc.createdAt).toLocaleDateString("fr-FR")}
                         </span>
-                      </a>
+                      </button>
                     );
                   })}
                   {docs.length === 0 && (

@@ -270,7 +270,6 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
           select: { status: true, dateLimiteSortie: true },
         },
       },
-      take: 8,
     })
 
     const tauxRetardParEmploye = performanceEmployes.map(u => {
@@ -354,9 +353,14 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
     const now   = new Date()
     const debut = new Date(now); debut.setHours(0, 0, 0, 0)
 
+    // Agents terrain : uniquement leurs compagnies (MSC/COSCO ou MAERSK/CMA)
+    const u = request.user
+    const scope = u.profil === 'terrain_kribi' && u.compagniesAssignees.length > 0 && u.compagniesAssignees.length < 4
+      ? { compagnie: { in: u.compagniesAssignees as ('MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM')[] } }
+      : {}
     const [dossiersKribi, bonsJour, gatePassJour, interchangesRetard, compteRenduHier] = await Promise.all([
       prisma.dossier.findMany({
-        where: { site: 'Kribi', status: { not: 'cloture' } },
+        where: { site: 'Kribi', status: { not: 'cloture' }, ...scope },
         orderBy: [{ priorite: 'asc' }, { dateLimiteSortie: 'asc' }],
         include: { responsable: { select: { nom: true } } },
       }),

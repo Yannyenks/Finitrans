@@ -9,6 +9,7 @@ import { Plus, Ship, MapPin, User, Package, Calendar, FileText, Loader2, Banknot
 import { toast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
+import { can } from "@/lib/permissions";
 
 const COMPAGNIE_MAP: Record<string, string> = {
   MSC: "MSC", COSCO: "COSCO", MAERSK: "MAERSK", CMA_CGM: "CMA-CGM",
@@ -47,15 +48,13 @@ const NouveauDossierDialog = () => {
     ? Math.round(parseFloat(form.montantDI) * TAUX_CHANGE[diDevise])
     : 0;
 
-  // Don't render the button if user can only read
-  const canCreate = user?.permDossier === "complet" || user?.permDossier === "partiel";
-  if (!canCreate) return null;
+  const canCreate = can(user, "permDossier", "partiel");
 
-  // Pre-fetch at component mount so data is ready when dialog opens
   const { data: empData, isLoading: empLoading } = useQuery({
-    queryKey: ["employes-list"],
-    queryFn: () => api.get<any>("/api/employes?limit=50&actif=true"),
+    queryKey: ["employes-actifs"],
+    queryFn: () => api.get<any>("/api/employes?limit=100&actif=true"),
     staleTime: 5 * 60_000,
+    enabled: canCreate && open,
   });
   const employes: any[] = empData?.data ?? [];
 
@@ -93,9 +92,12 @@ const NouveauDossierDialog = () => {
     },
   });
 
+  // Bouton masqué pour les comptes en lecture seule (après les hooks : ordre des hooks constant)
+  if (!canCreate) return null;
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.client || !form.compagnie || !form.conteneur || !form.marchandise || !form.responsableId || !form.dateArrivee) {
+    if (!form.client || !form.compagnie || !form.conteneur || !form.marchandise || !form.dateArrivee) {
       toast({ title: "Champs requis", description: "Veuillez remplir tous les champs obligatoires", variant: "destructive" });
       return;
     }
@@ -105,7 +107,7 @@ const NouveauDossierDialog = () => {
       conteneur:     form.conteneur,
       marchandise:   form.marchandise,
       site:          form.site,
-      responsableId: form.responsableId,
+      responsableId: form.responsableId && form.responsableId !== "__auto__" ? form.responsableId : undefined,
       dateArrivee:   new Date(form.dateArrivee).toISOString(),
       priorite:      form.priorite,
       notes:         form.notes || undefined,
@@ -209,17 +211,21 @@ const NouveauDossierDialog = () => {
           </div>
 
           <div className="space-y-2">
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Les tâches de chaque étape sont attribuées automatiquement aux comptes concernés (selon le rôle, le site et la compagnie).
+            </p>
             <Label className="text-xs font-medium flex items-center gap-1.5">
-              <User className="w-3.5 h-3.5 text-muted-foreground" /> Responsable *
+              <User className="w-3.5 h-3.5 text-muted-foreground" /> Responsable de la réception
             </Label>
             <Select value={form.responsableId} onValueChange={v => setForm({...form, responsableId: v})}>
               <SelectTrigger className="bg-muted/50">
                 {empLoading
                   ? <span className="text-muted-foreground text-sm flex items-center gap-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Chargement...</span>
-                  : <SelectValue placeholder="Assigner un responsable..." />
+                  : <SelectValue placeholder="Attribution automatique (Service administratif)" />
                 }
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value="__auto__">Attribution automatique selon les rôles</SelectItem>
                 {employes.map((e: any) => (
                   <SelectItem key={e.id} value={e.id}>
                     <span className="font-medium">{e.nom}</span>

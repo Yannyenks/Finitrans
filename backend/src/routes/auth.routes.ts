@@ -1,40 +1,44 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import bcrypt from 'bcryptjs'
+import { randomUUID } from 'crypto'
 import { prisma } from '../config/prisma'
+import { env } from '../config/env'
 import { authenticate } from '../middleware/authenticate'
-import { ConflictError, UnauthorizedError } from '../utils/errors'
+import { UnauthorizedError } from '../utils/errors'
+import { logActivity } from '../utils/audit'
+import { buildSessionUser, createUser, createUserSchema } from '../services/users'
 import { addDays } from 'date-fns'
 
 const loginSchema = z.object({
-  email:    z.string().email(),
+  email:    z.string().email().transform(e => e.trim().toLowerCase()),
   password: z.string().min(6),
-})
-
-const registerSchema = z.object({
-  email:     z.string().email(),
-  password:  z.string().min(8),
-  nom:       z.string().min(2),
-  role:      z.string().min(2),
-  site:      z.enum(['Douala', 'Kribi']),
-  telephone: z.string().optional(),
-  profil:    z.enum(['dg', 'exploitation', 'operations', 'validation', 'administration', 'comptabilite', 'terrain_kribi']),
-  permDossier:        z.enum(['complet', 'partiel', 'lecture', 'non']).optional(),
-  permValidation:     z.enum(['complet', 'partiel', 'lecture', 'non']).optional(),
-  permFinancier:      z.enum(['complet', 'partiel', 'lecture', 'non']).optional(),
-  permRapports:       z.enum(['complet', 'partiel', 'lecture', 'non']).optional(),
-  permAdministration: z.enum(['complet', 'partiel', 'lecture', 'non']).optional(),
 })
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1),
-  newPassword:     z.string().min(8),
+  newPassword:     z.string().min(8, 'Le nouveau mot de passe doit contenir au moins 8 caractères'),
 })
+
+const ACCESS_EXPIRES  = env.JWT_ACCESS_EXPIRES
+const REFRESH_DAYS    = 30
 
 const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
-  // POST /api/auth/login
-  fastify.post('/login', async (request, reply) => {
+  async function issueTokens(userId: string) {
+    // jti aléatoire : deux jetons émis dans la même seconde restent distincts (contrainte d'unicité)
+    const accessToken  = fastify.jwt.sign({ sub: userId, jti: randomUUID() } as never, { expiresIn: ACCESS_EXPIRES })
+    const refreshToken = fastify.jwt.sign({ sub: userId, typ: 'refresh', jti: randomUUID() } as never, { expiresIn: `${REFRESH_DAYS}d` })
+    await prisma.refreshToken.create({
+      data: { userId, token: refreshToken, expiresAt: addDays(new Date(), REFRESH_DAYS) },
+    })
+    return { accessToken, refreshToken }
+  }
+
+  // POST /api/auth/login — limité contre le bruteforce
+  fastify.post('/login', {
+    config: { rateLimit: { max: env.NODE_ENV === 'test' ? 1000 : 30, timeWindow: '1 minute' } },
+  }, async (request, reply) => {
     const body = loginSchema.parse(request.body)
 
     const user = await prisma.user.findUnique({ where: { email: body.email } })
@@ -47,20 +51,10 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       throw new UnauthorizedError('Identifiants incorrects')
     }
 
-    const payload = { sub: user.id, email: user.email, profil: user.profil, nom: user.nom }
-    const accessToken  = fastify.jwt.sign(payload, { expiresIn: '8h' })
-    const refreshToken = fastify.jwt.sign({ sub: user.id }, { expiresIn: '30d' })
-
-    await prisma.refreshToken.create({
-      data: {
-        userId:    user.id,
-        token:     refreshToken,
-        expiresAt: addDays(new Date(), 30),
-      },
-    })
-
-    const { passwordHash: _, ...safeUser } = user
-    return reply.code(200).send({ accessToken, refreshToken, user: safeUser })
+    const tokens = await issueTokens(user.id)
+    const sessionUser = await buildSessionUser(user.id)
+    await logActivity(user.id, 'CONNEXION', 'user', user.id)
+    return reply.code(200).send({ ...tokens, user: sessionUser })
   })
 
   // POST /api/auth/refresh
@@ -90,15 +84,8 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       data: { revokedAt: new Date() },
     })
 
-    const payload       = { sub: user.id, email: user.email, profil: user.profil, nom: user.nom }
-    const accessToken   = fastify.jwt.sign(payload, { expiresIn: '8h' })
-    const newRefresh    = fastify.jwt.sign({ sub: user.id }, { expiresIn: '30d' })
-
-    await prisma.refreshToken.create({
-      data: { userId: user.id, token: newRefresh, expiresAt: addDays(new Date(), 30) },
-    })
-
-    return reply.send({ accessToken, refreshToken: newRefresh })
+    const tokens = await issueTokens(user.id)
+    return reply.send({ ...tokens, user: await buildSessionUser(user.id) })
   })
 
   // POST /api/auth/logout
@@ -106,31 +93,32 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { refreshToken } = z.object({ refreshToken: z.string().optional() }).parse(request.body ?? {})
     if (refreshToken) {
       await prisma.refreshToken.updateMany({
-        where: { token: refreshToken, revokedAt: null },
+        where: { token: refreshToken, userId: request.user.id, revokedAt: null },
         data: { revokedAt: new Date() },
       })
     }
     return reply.code(204).send()
   })
 
-  // GET /api/auth/me
+  // GET /api/auth/me — profil + modules accessibles
   fastify.get('/me', { preHandler: [authenticate] }, async (request, reply) => {
-    const user = await prisma.user.findUnique({
-      where: { id: (request.user as any).id },
-      select: {
-        id: true, email: true, nom: true, role: true, site: true, telephone: true,
-        profil: true, actif: true, avatarUrl: true, createdAt: true,
-        permDossier: true, permValidation: true, permFinancier: true,
-        permRapports: true, permAdministration: true,
-      },
-    })
-    return reply.send(user)
+    return reply.send(await buildSessionUser(request.user.id))
+  })
+
+  // PATCH /api/auth/me — l'utilisateur met à jour ses coordonnées
+  fastify.patch('/me', { preHandler: [authenticate] }, async (request, reply) => {
+    const body = z.object({
+      telephone: z.string().max(50).optional(),
+      avatarUrl: z.string().url().max(500).optional(),
+    }).parse(request.body)
+    await prisma.user.update({ where: { id: request.user.id }, data: body })
+    return reply.send(await buildSessionUser(request.user.id))
   })
 
   // PATCH /api/auth/me/password
   fastify.patch('/me/password', { preHandler: [authenticate] }, async (request, reply) => {
     const body = changePasswordSchema.parse(request.body)
-    const user = await prisma.user.findUniqueOrThrow({ where: { id: (request.user as any).id } })
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: request.user.id } })
 
     const valid = await bcrypt.compare(body.currentPassword, user.passwordHash)
     if (!valid) throw new UnauthorizedError('Mot de passe actuel incorrect')
@@ -143,43 +131,16 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       where: { userId: user.id, revokedAt: null },
       data: { revokedAt: new Date() },
     })
+    await logActivity(user.id, 'MOT_DE_PASSE_MODIFIE', 'user', user.id)
 
     return reply.code(204).send()
   })
 
-  // POST /api/auth/register (admin seulement)
+  // POST /api/auth/register — création de compte (Direction / Exploitation)
   fastify.post('/register', { preHandler: [authenticate] }, async (request, reply) => {
-    const user = request.user as any
-    if (user.permAdministration !== 'complet' && user.profil !== 'dg') {
-      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Réservé aux administrateurs' })
-    }
-
-    const body = registerSchema.parse(request.body)
-    const exists = await prisma.user.findUnique({ where: { email: body.email } })
-    if (exists) throw new ConflictError('Cet email est déjà utilisé')
-
-    const passwordHash = await bcrypt.hash(body.password, 12)
-    const newUser = await prisma.user.create({
-      data: {
-        email: body.email,
-        passwordHash,
-        nom: body.nom,
-        role: body.role,
-        site: body.site,
-        telephone: body.telephone,
-        profil: body.profil,
-        permDossier: body.permDossier ?? 'lecture',
-        permValidation: body.permValidation ?? 'non',
-        permFinancier: body.permFinancier ?? 'non',
-        permRapports: body.permRapports ?? 'non',
-        permAdministration: body.permAdministration ?? 'non',
-      },
-      select: {
-        id: true, email: true, nom: true, role: true, site: true,
-        profil: true, createdAt: true,
-      },
-    })
-
+    const body = createUserSchema.parse(request.body)
+    const newUser = await createUser(request.user, body)
+    await logActivity(request.user.id, 'COMPTE_CREE', 'user', newUser.id, `${newUser.nom} (${newUser.profil})`)
     return reply.code(201).send(newUser)
   })
 }

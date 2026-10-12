@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { NotFoundError } from '../utils/errors'
 import { subDays, differenceInDays, startOfMonth, endOfMonth } from 'date-fns'
+import { SOUS_ETAPES_CONFIG, loadAttribution, nextStage, stageCompletion } from '../services/workflow'
 
 const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
@@ -74,6 +75,75 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
   })
 
+  // GET /api/employe/mes-taches — tout ce que le compte doit faire lui-même
+  fastify.get('/mes-taches', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user
+    const now  = new Date()
+    const attribution = await loadAttribution()
+
+    const [mesTaches, mesDossiers] = await Promise.all([
+      prisma.sousEtapeDossier.findMany({
+        where: { responsableId: user.id, statut: { not: 'valide' }, dossier: { status: { not: 'cloture' } } },
+        include: {
+          dossier: { select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true, dateLimiteSortie: true } },
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      prisma.dossier.findMany({
+        where: { responsableId: user.id, status: { not: 'cloture' } },
+        select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true },
+      }),
+    ])
+
+    // Tâches non attribuées relevant de mon profil sur l'étape en cours d'un dossier
+    const cles = Object.entries(attribution).flatMap(([etape, cfg]) =>
+      SOUS_ETAPES_CONFIG[etape as keyof typeof SOUS_ETAPES_CONFIG]
+        .filter(se => (cfg.sousEtapes[se.cle] ?? cfg.owner) === user.profil)
+        .map(se => ({ etape, cle: se.cle })))
+    const aPrendre = cles.length === 0 ? [] : await prisma.sousEtapeDossier.findMany({
+      where: {
+        responsableId: null,
+        statut: { not: 'valide' },
+        OR: cles.map(c => ({ etape: c.etape, cle: c.cle })),
+        ...(['gestion_sorties', 'terrain_kribi'].includes(user.profil) && user.compagniesAssignees.length > 0
+          ? { dossier: { compagnie: { in: user.compagniesAssignees as ('MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM')[] } } }
+          : {}),
+      },
+      include: { dossier: { select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true } } },
+      take: 50,
+    })
+
+    const label = (etape: string, cle: string) =>
+      SOUS_ETAPES_CONFIG[etape as keyof typeof SOUS_ETAPES_CONFIG]?.find(s => s.cle === cle)?.label ?? cle
+    const toTask = (t: (typeof mesTaches)[number] | (typeof aPrendre)[number]) => ({
+      id: t.id, etape: t.etape, cle: t.cle, label: label(t.etape, t.cle), statut: t.statut,
+      deadline: t.deadline, notes: t.notes, dossier: t.dossier,
+      actionnable: t.dossier.status === t.etape,
+      enRetard: !!t.deadline && t.deadline < now,
+    })
+
+    // Étapes dont je suis responsable et qui sont prêtes à être clôturées
+    const pretesAAvancer = []
+    for (const d of mesDossiers) {
+      const c = await stageCompletion(d.id, d.status, d.site)
+      if (c.allDone) pretesAAvancer.push({ ...d, etapeSuivante: nextStage(d.status, d.site) })
+    }
+
+    const taches = mesTaches.map(toTask)
+    return reply.send({
+      taches,
+      aPrendre: aPrendre.filter(t => t.dossier.status === t.etape).map(toTask),
+      pretesAAvancer,
+      resume: {
+        total:       taches.length,
+        actionnables: taches.filter(t => t.actionnable).length,
+        enRetard:    taches.filter(t => t.enRetard).length,
+        aPrendre:    aPrendre.length,
+        pretesAAvancer: pretesAAvancer.length,
+      },
+    })
+  })
+
   // GET /api/employe/mes-dossiers — dossiers filtrés par rôle/compagnie
   fastify.get('/mes-dossiers', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user as any
@@ -88,7 +158,10 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (['gestion_sorties', 'terrain_kribi'].includes(user.profil) && user.compagniesAssignees?.length > 0) {
       where.compagnie = { in: user.compagniesAssignees }
     } else if (!['dg', 'exploitation', 'administration', 'comptabilite'].includes(user.profil)) {
-      where.responsableId = user.id
+      where.OR = [
+        { responsableId: user.id },
+        { sousEtapes: { some: { responsableId: user.id } } },
+      ]
     }
 
     if (user.site !== 'Douala') where.site = user.site

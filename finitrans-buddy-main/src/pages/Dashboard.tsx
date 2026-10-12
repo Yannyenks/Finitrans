@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
+import { can } from "@/lib/permissions";
 import { useDIStats } from "@/hooks/useDI";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -87,16 +88,22 @@ const Dashboard = () => {
 
   const { data: kpis,   isLoading: kpisLoading } = useQuery({ queryKey: ["dashboard-kpis"],    queryFn: () => api.get<any>("/api/dashboard/kpis") });
   const { data: charts }                          = useQuery({ queryKey: ["dashboard-charts"],   queryFn: () => api.get<any>("/api/dashboard/charts") });
-  const { data: heatmap }                         = useQuery({ queryKey: ["dashboard-heatmap"],  queryFn: () => api.get<any>("/api/dashboard/heatmap") });
+  // Sections adaptées au rôle : la charge de l'équipe et les DI ne sont visibles qu'avec les droits correspondants
+  const voitRapports = can(user, "permRapports", "lecture");
+  const voitFinance  = can(user, "permFinancier", "lecture");
+  const { data: heatmap }                         = useQuery({ queryKey: ["dashboard-heatmap"],  queryFn: () => api.get<any>("/api/dashboard/heatmap"), enabled: voitRapports });
+  const { data: mesTaches }                       = useQuery({ queryKey: ["mes-taches"], queryFn: () => api.get<any>("/api/employe/mes-taches"), enabled: !voitRapports });
   const { data: recent }                          = useQuery({ queryKey: ["dashboard-recent"],   queryFn: () => api.get<any>("/api/dashboard/recent") });
-  const { data: diStats }                         = useDIStats();
+  const { data: diStats }                         = useDIStats(voitFinance);
 
   const statCards = [
     { label: "Dossiers actifs",   value: kpis?.dossiersActifs      ?? 0, icon: FolderOpen,   color: "text-secondary",   bg: "bg-secondary/10",   gradient: "from-orange-500/10 to-transparent" },
     { label: "Clôturés ce mois",  value: kpis?.dossiersClotures30j ?? 0, icon: CheckCircle,  color: "text-success",     bg: "bg-success/10",     gradient: "from-green-500/10 to-transparent" },
     { label: "En retard",         value: kpis?.dossiersEnRetard    ?? 0, icon: Clock,         color: "text-warning",     bg: "bg-warning/10",     gradient: "from-amber-500/10 to-transparent" },
     { label: "Alertes critiques", value: kpis?.alertesNonLues      ?? 0, icon: AlertTriangle, color: "text-destructive", bg: "bg-destructive/10", gradient: "from-red-500/10 to-transparent" },
-    { label: "DI en alerte",      value: diStats?.diEnAlerte       ?? 0, icon: Banknote,      color: "text-warning",     bg: "bg-warning/10",     gradient: "from-amber-500/10 to-transparent" },
+    voitFinance
+      ? { label: "DI en alerte",      value: diStats?.diEnAlerte       ?? 0, icon: Banknote,      color: "text-warning",     bg: "bg-warning/10",     gradient: "from-amber-500/10 to-transparent" }
+      : { label: "Mes tâches à traiter", value: mesTaches?.resume?.actionnables ?? 0, icon: Banknote, color: "text-warning", bg: "bg-warning/10", gradient: "from-amber-500/10 to-transparent" },
   ];
 
   const pieData     = (charts?.parCompagnie ?? []).map((c: any) => ({ name: c.compagnie, value: c.count, color: COMPAGNIE_COLORS[c.compagnie] ?? "#6b7280" }));
@@ -205,9 +212,21 @@ const Dashboard = () => {
               className="stat-card"
             >
               <h3 className="font-display font-semibold text-foreground mb-1 flex items-center gap-2">
-                <BarChart3 className="w-4 h-4 text-secondary" /> Charge par employé
+                <BarChart3 className="w-4 h-4 text-secondary" /> {voitRapports ? "Charge par employé" : "Mes tâches en cours"}
               </h3>
-              <p className="text-xs text-muted-foreground mb-4">Nombre de dossiers par étape</p>
+              <p className="text-xs text-muted-foreground mb-4">{voitRapports ? "Nombre de dossiers par étape" : "Tâches qui vous sont attribuées sur les étapes en cours"}</p>
+              {!voitRapports ? (
+                <div className="space-y-2">
+                  {(mesTaches?.taches ?? []).filter((t: any) => t.actionnable).slice(0, 8).map((t: any) => (
+                    <a key={t.id} href={`/dossiers/${t.dossier.id}`} className="flex items-center justify-between p-2.5 rounded-lg bg-muted/40 hover:bg-muted text-xs">
+                      <span className="font-medium text-foreground">{t.label}</span>
+                      <span className="text-muted-foreground">{t.dossier.numero}</span>
+                    </a>
+                  ))}
+                  {(mesTaches?.resume?.actionnables ?? 0) === 0 && <p className="text-xs text-muted-foreground text-center py-6">Aucune tâche en attente</p>}
+                  <a href="/mon-espace" className="block text-xs text-secondary hover:underline text-right">Voir tout mon espace →</a>
+                </div>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -248,6 +267,7 @@ const Dashboard = () => {
                   </tbody>
                 </table>
               </div>
+              )}
             </motion.div>
 
             <motion.div

@@ -5,6 +5,8 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { logActivity } from '../utils/audit'
+import { createHash } from 'crypto'
 import { differenceInDays, subDays, format, eachDayOfInterval } from 'date-fns'
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -665,6 +667,84 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
 
     return reply.code(201).send({ ...clone, ...enrichDI(clone) })
+  })
+
+  // ── POST /api/di/:id/factures — joindre un justificatif (multipart) ─
+
+  fastify.post('/:id/factures', { preHandler: writeAccess }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const di = await prisma.declarationImportation.findUnique({ where: { id }, select: { id: true, numero: true } })
+    if (!di) throw new NotFoundError('DI', id)
+
+    const file = await request.file()
+    if (!file) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
+
+    const contenu = await file.toBuffer()
+    const hashContenu = createHash('sha256').update(contenu).digest('hex')
+    const doublon = await prisma.dIDocument.findFirst({ where: { diId: id, hashContenu }, select: { nom: true } })
+    if (doublon) {
+      return reply.code(409).send({ error: 'DOCUMENT_DUPLIQUE', message: `Ce fichier est déjà joint à la DI (${doublon.nom}).` })
+    }
+    const fields = file.fields as Record<string, { value?: string } | undefined>
+    const taille = contenu.length < 1_048_576
+      ? `${Math.max(1, Math.round(contenu.length / 1024))} Ko`
+      : `${(contenu.length / 1_048_576).toFixed(1)} Mo`
+
+    const doc = await prisma.dIDocument.create({
+      data: {
+        diId: id, nom: file.filename, type: file.mimetype, taille, contenu, hashContenu,
+        categorie: fields.categorie?.value ?? null, motif: fields.motif?.value ?? null,
+        uploadePar: request.user.id,
+      },
+      select: { id: true, nom: true, type: true, taille: true, categorie: true, motif: true, createdAt: true },
+    })
+    return reply.code(201).send({ ...doc, url: `/api/di/${id}/documents/${doc.id}/content` })
+  })
+
+  // ── GET /api/di/:id/documents ─────────────────────────────
+
+  fastify.get('/:id/documents', { preHandler: readAccess }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const docs = await prisma.dIDocument.findMany({
+      where: { diId: id },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, nom: true, type: true, taille: true, categorie: true, motif: true, createdAt: true, uploader: { select: { nom: true } } },
+    })
+    return reply.send(docs.map(d => ({ ...d, url: `/api/di/${id}/documents/${d.id}/content` })))
+  })
+
+  fastify.get('/:id/documents/:docId/content', { preHandler: readAccess }, async (request, reply) => {
+    const { id, docId } = z.object({ id: z.string().uuid(), docId: z.string().uuid() }).parse(request.params)
+    const doc = await prisma.dIDocument.findFirst({ where: { id: docId, diId: id }, select: { nom: true, type: true, contenu: true } })
+    if (!doc?.contenu) throw new NotFoundError('Document DI', docId)
+    reply
+      .header('Content-Type', doc.type)
+      .header('Content-Disposition', `inline; filename="${encodeURIComponent(doc.nom)}"`)
+      .header('Content-Length', doc.contenu.length)
+    return reply.send(doc.contenu)
+  })
+
+  // ── DELETE /api/di/:id — supprimer une DI sans consommation ─
+
+  fastify.delete('/:id', { preHandler: adminAccess }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const di = await prisma.declarationImportation.findUnique({
+      where: { id },
+      include: { _count: { select: { mouvements: { where: { type: 'debit' } } } } },
+    })
+    if (!di) throw new NotFoundError('DI', id)
+    if (di._count.mouvements > 0) {
+      return reply.code(422).send({
+        error: 'DI_UTILISEE',
+        message: 'Cette DI a déjà été consommée : clôturez-la ou suspendez-la au lieu de la supprimer.',
+      })
+    }
+    await prisma.$transaction([
+      prisma.dossier.updateMany({ where: { diId: id }, data: { diId: null } }),
+      prisma.declarationImportation.delete({ where: { id } }),
+    ])
+    await logActivity(request.user.id, 'DI_SUPPRIMEE', 'di', id, di.numero)
+    return reply.code(204).send()
   })
 
   // ── GET /api/di/:id/export-ohada — export comptable ───────

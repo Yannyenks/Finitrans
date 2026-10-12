@@ -49,7 +49,11 @@ export function useSousEtapes(dossierId: string) {
   const update = useMutation({
     mutationFn: ({ etape, cle, data }: { etape: string; cle: string; data: UpdateSousEtapeInput }) =>
       api.put<SousEtape>(`/api/dossiers/${dossierId}/sous-etapes/${etape}/${cle}`, data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key })
+      qc.invalidateQueries({ queryKey: ['mes-taches'] })
+      qc.invalidateQueries({ queryKey: ['dossier-next', dossierId] })
+    },
   })
 
   const uploadPreuve = useMutation({
@@ -58,7 +62,21 @@ export function useSousEtapes(dossierId: string) {
       fd.append('file', file)
       return uploadFile<SousEtape>(`/api/dossiers/${dossierId}/sous-etapes/${etape}/${cle}/preuve`, fd)
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: key }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key })
+      qc.invalidateQueries({ queryKey: ['dossier-docs', dossierId] })
+      qc.invalidateQueries({ queryKey: ['dossier-next', dossierId] })
+    },
+  })
+
+  // Se positionner sur une tâche non attribuée relevant de son profil
+  const prendre = useMutation({
+    mutationFn: ({ etape, cle }: { etape: string; cle: string }) =>
+      api.post<SousEtape>(`/api/dossiers/${dossierId}/sous-etapes/${etape}/${cle}/prendre`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: key })
+      qc.invalidateQueries({ queryKey: ['mes-taches'] })
+    },
   })
 
   const byEtape = (etape: string): SousEtape[] =>
@@ -70,5 +88,5 @@ export function useSousEtapes(dossierId: string) {
     return done >= total
   }
 
-  return { query, update, uploadPreuve, byEtape, allValidated }
+  return { query, update, uploadPreuve, prendre, byEtape, allValidated }
 }

@@ -4,7 +4,23 @@ import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { NotFoundError } from '../utils/errors'
+import { AuthUser } from '../types'
 import { buildPagination, paginate } from '../utils/pagination'
+import { nextSequence, withUniqueRetry } from '../utils/sequence'
+import { logAudit } from '../utils/audit'
+
+type Compagnie = 'MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM'
+const COMPAGNIES: Compagnie[] = ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']
+
+/** Périmètre compagnies : filtre demandé, sinon compagnies assignées d'un agent terrain. */
+function perimetreCompagnies(user: AuthUser, demande?: string): Compagnie[] | null {
+  const voulues = demande?.split(',').map(c => c.trim()).filter((c): c is Compagnie => COMPAGNIES.includes(c as Compagnie))
+  if (voulues?.length) return voulues
+  if (user.profil === 'terrain_kribi' && user.compagniesAssignees.length > 0 && user.compagniesAssignees.length < 4) {
+    return user.compagniesAssignees as Compagnie[]
+  }
+  return null
+}
 
 const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess  = [authenticate, authorize('permDossier', 'lecture')]
@@ -18,12 +34,15 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       type:      z.string().optional(),
       statut:    z.string().optional(),
       dossierId: z.string().uuid().optional(),
+      compagnie: z.string().optional(),
     }).parse(request.query)
 
     const where: Record<string, unknown> = {}
     if (q.type)      where.type      = q.type
     if (q.statut)    where.statut    = q.statut
     if (q.dossierId) where.dossierId = q.dossierId
+    const compagnies = perimetreCompagnies(request.user, q.compagnie)
+    if (compagnies) where.dossier = { compagnie: { in: compagnies } }
 
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
     const [data, total] = await Promise.all([
@@ -53,7 +72,9 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       dateEmission: z.string().datetime().optional(),
     }).parse(request.body)
 
-    const userId = (request.user as any).id
+    const userId = request.user.id
+    const dossierBon = await prisma.dossier.findUnique({ where: { id: body.dossierId }, select: { id: true } })
+    if (!dossierBon) throw new NotFoundError('Dossier', body.dossierId)
     const bon = await prisma.bonKribi.create({
       data: {
         ...body,
@@ -131,9 +152,11 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       page:   z.coerce.number().default(1),
       limit:  z.coerce.number().default(20),
       statut: z.string().optional(),
+      compagnie: z.string().optional(),
     }).parse(request.query)
 
-    const where: Record<string, unknown> = { dossier: { site: 'Kribi' } }
+    const compagnies = perimetreCompagnies(request.user, q.compagnie)
+    const where: Record<string, unknown> = { dossier: { site: 'Kribi', ...(compagnies ? { compagnie: { in: compagnies } } : {}) } }
     if (q.statut) where.statut = q.statut
 
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
@@ -164,22 +187,27 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       dateEmission: z.string().datetime().optional(),
     }).parse(request.body)
 
-    const userId  = (request.user as any).id
-    const counter = await prisma.gatePass.count()
-    const numero  = `GP-KRB-${String(counter + 1).padStart(4, '0')}`
+    const userId  = request.user.id
+    const dossier = await prisma.dossier.findUnique({ where: { id: body.dossierId }, select: { id: true } })
+    if (!dossier) throw new NotFoundError('Dossier', body.dossierId)
 
-    const gp = await prisma.gatePass.create({
-      data: {
-        ...body,
-        numero,
-        emetteurId:  userId,
-        dateEmission: body.dateEmission ? new Date(body.dateEmission) : new Date(),
-      },
-      include: {
-        dossier:  { select: { numero: true, client: true, conteneur: true } },
-        emetteur: { select: { nom: true } },
-      },
+    const gp = await withUniqueRetry(async () => {
+      const numero = await nextSequence('GP-KRB-', async prefix =>
+        (await prisma.gatePass.findFirst({ where: { numero: { startsWith: prefix } }, orderBy: { numero: 'desc' }, select: { numero: true } }))?.numero)
+      return prisma.gatePass.create({
+        data: {
+          ...body,
+          numero,
+          emetteurId:  userId,
+          dateEmission: body.dateEmission ? new Date(body.dateEmission) : new Date(),
+        },
+        include: {
+          dossier:  { select: { numero: true, client: true, conteneur: true } },
+          emetteur: { select: { nom: true } },
+        },
+      })
     })
+    await logAudit(body.dossierId, userId, 'GATE_PASS', `Gate Pass ${gp.numero} émis`)
     return reply.code(201).send(gp)
   })
 

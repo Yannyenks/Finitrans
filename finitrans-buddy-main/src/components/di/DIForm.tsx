@@ -250,7 +250,7 @@ function RechargeForm({
       setErrors(errs);
       return;
     }
-    const data = await recharge.mutateAsync(parsed.data).catch(() => null);
+    const data = await recharge.mutateAsync({ montant: parsed.data.montant as number, motif: parsed.data.motif as string }).catch(() => null);
     if (data !== null) onSuccess?.(data);
   };
 

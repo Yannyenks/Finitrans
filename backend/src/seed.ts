@@ -7,12 +7,37 @@ import 'dotenv/config'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
+// Garde-fou : ce seed EFFACE toute la base. Interdit sur une base distante (prod Neon)
+// sauf confirmation explicite ALLOW_DESTRUCTIVE_SEED=1.
+const dbUrl = process.env.DATABASE_URL ?? ''
+if (!/localhost|127\.0\.0\.1/.test(dbUrl) && process.env.ALLOW_DESTRUCTIVE_SEED !== '1') {
+  console.error('⛔ Seed refusé : DATABASE_URL ne pointe pas vers une base locale.')
+  console.error('   Ce script supprime toutes les données. Définissez ALLOW_DESTRUCTIVE_SEED=1 pour forcer.')
+  process.exit(1)
+}
+
 const prisma = new PrismaClient()
 
 async function main() {
   console.log('🌱 Nettoyage de la base...')
 
   // Suppression dans l'ordre des dépendances FK
+  await prisma.ligneEcriture.deleteMany()
+  await prisma.ecritureComptable.deleteMany()
+  await prisma.exerciceComptable.deleteMany()
+  await prisma.activityLog.deleteMany()
+  await prisma.conge.deleteMany()
+  await prisma.ficheRH.deleteMany()
+  await prisma.dIDocument.deleteMany()
+  await prisma.notification.deleteMany()
+  await prisma.sousEtapeDossier.deleteMany()
+  await prisma.etatCodage.deleteMany()
+  await prisma.detention.deleteMany()
+  await prisma.vehicule.deleteMany()
+  await prisma.interchange.deleteMany()
+  await prisma.soumissionSGS.deleteMany()
+  await prisma.parametre.updateMany({ data: { updatedBy: null } })
+  await prisma.parametre.deleteMany({ where: { cle: { in: ['roles_config', 'attribution_etapes'] } } })
   await prisma.message.deleteMany()
   await prisma.conversationParticipant.deleteMany()
   await prisma.conversation.deleteMany()
@@ -182,11 +207,11 @@ async function main() {
           profil: 'administration',
           compagniesAssignees: ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM'],
           // Enregistrement dossiers, transferts fonds, suivi DI, factures proforma
-          permDossier:        'lecture',
+          permDossier:        'partiel',
           permValidation:     'non',
           permFinancier:      'partiel',
           permRapports:       'non',
-          permAdministration: 'complet',
+          permAdministration: 'partiel',
         },
       }),
 
@@ -254,6 +279,20 @@ async function main() {
     ])
 
   console.log('✅ 10 utilisateurs créés (organigramme complet)')
+
+  // Fiches RH (postes ; salaires à renseigner par la Direction)
+  const postes: [typeof delba, string, string][] = [
+    [delba, 'Directeur Général', 'Direction'], [soudi, 'Responsable Exploitation', 'Exploitation'],
+    [yaya, 'Responsable Logistique', 'Logistique'], [odette, 'Responsable Validation', 'Exploitation'],
+    [wandala, 'Responsable Gestion des Sorties', 'Exploitation'], [rasoul, 'Responsable Gestion des Sorties', 'Exploitation'],
+    [yasmine, 'Responsable Administrative', 'Administration'], [honore, 'Comptable', 'Finance'],
+    [aliou, 'Responsable Douanier Kribi', 'Kribi'], [raphael, 'Responsable Douanier Kribi', 'Kribi'],
+  ]
+  await prisma.ficheRH.createMany({
+    data: postes.map(([u, poste, departement], i) => ({
+      userId: u.id, poste, departement, matricule: `FT-${String(i + 1).padStart(3, '0')}`,
+    })),
+  })
 
   // ============================================================
   // DOSSIERS — Données réalistes avec les vrais responsables

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
@@ -45,13 +46,14 @@ const PaiementDialog = ({ dossier, open, onClose }: { dossier: any; open: boolea
       dossierId:    dossier.id,
       type:         form.type,
       montant:      parseFloat(form.montant),
-      reference:    form.reference,
+      reference:    form.reference.trim() || `QIT-${dossier.numero}-${Date.now().toString(36).toUpperCase()}`,
       datePaiement: new Date(form.datePaiement).toISOString(),
       statut:       "paye",
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dossiers-logistique"] });
       qc.invalidateQueries({ queryKey: ["paiements-douane"] });
+      qc.invalidateQueries({ queryKey: ["paiements-douane-logistique"] });
       toast({ title: "Paiement enregistré", description: `${dossier.numero} — ${Number(form.montant).toLocaleString("fr-FR")} FCFA` });
       onClose();
     },
@@ -91,7 +93,7 @@ const PaiementDialog = ({ dossier, open, onClose }: { dossier: any; open: boolea
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">N° Quittance / Référence</Label>
               <Input value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })}
-                placeholder="Ex: QIT-2025-0047" className="bg-muted/50 font-mono text-sm" />
+                placeholder="Auto si vide" className="bg-muted/50 font-mono text-sm" />
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Date de paiement</Label>
@@ -113,12 +115,75 @@ const PaiementDialog = ({ dossier, open, onClose }: { dossier: any; open: boolea
   );
 };
 
+// ── Dialog véhicule (dédouanement véhicules) ────────────────────────────────
+const VEHICULE_STATUTS: Record<string, { label: string; cls: string; suivant?: string; action?: string }> = {
+  en_attente: { label: "En attente", cls: "bg-amber-100 text-amber-700", suivant: "en_cours", action: "Démarrer le dédouanement" },
+  en_cours:   { label: "Dédouanement en cours", cls: "bg-blue-100 text-blue-700", suivant: "cloture", action: "Marquer dédouané" },
+  cloture:    { label: "Dédouané", cls: "bg-green-100 text-green-700" },
+};
+
+const VehiculeDialog = ({ dossiers, open, onClose }: { dossiers: any[]; open: boolean; onClose: () => void }) => {
+  const qc = useQueryClient();
+  const vide = { dossierId: "", marque: "", modele: "", annee: String(new Date().getFullYear()), numeroSerie: "", immatriculation: "", valeurCIF: "", notes: "" };
+  const [form, setForm] = useState(vide);
+  const add = useMutation({
+    mutationFn: () => api.post("/api/vehicules", {
+      dossierId: form.dossierId, marque: form.marque.trim(), modele: form.modele.trim(), annee: Number(form.annee),
+      numeroSerie: form.numeroSerie.trim(), immatriculation: form.immatriculation.trim() || undefined,
+      valeurCIF: Number(form.valeurCIF), notes: form.notes || undefined,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vehicules-logistique"] });
+      toast({ title: "Véhicule enregistré", description: `${form.marque} ${form.modele}` });
+      setForm(vide);
+      onClose();
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+  const valide = form.dossierId && form.marque.trim().length >= 2 && form.modele.trim() && form.numeroSerie.trim().length >= 5 && Number(form.valeurCIF) > 0;
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="bg-card sm:max-w-[480px]">
+        <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Truck className="w-4 h-4 text-secondary" /> Nouveau véhicule à dédouaner</DialogTitle></DialogHeader>
+        <div className="space-y-3 mt-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Dossier *</Label>
+            <Select value={form.dossierId} onValueChange={v => setForm({ ...form, dossierId: v })}>
+              <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Choisir le dossier..." /></SelectTrigger>
+              <SelectContent>{dossiers.map(d => <SelectItem key={d.id} value={d.id}>{d.numero} — {d.client}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5"><Label className="text-xs">Marque *</Label><Input value={form.marque} onChange={e => setForm({ ...form, marque: e.target.value })} className="bg-muted/50" /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Modèle *</Label><Input value={form.modele} onChange={e => setForm({ ...form, modele: e.target.value })} className="bg-muted/50" /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Année *</Label><Input type="number" value={form.annee} onChange={e => setForm({ ...form, annee: e.target.value })} className="bg-muted/50" /></div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label className="text-xs">N° de série (VIN) *</Label><Input value={form.numeroSerie} onChange={e => setForm({ ...form, numeroSerie: e.target.value.toUpperCase() })} className="bg-muted/50 font-mono text-sm" /></div>
+            <div className="space-y-1.5"><Label className="text-xs">Immatriculation</Label><Input value={form.immatriculation} onChange={e => setForm({ ...form, immatriculation: e.target.value.toUpperCase() })} className="bg-muted/50 font-mono text-sm" /></div>
+          </div>
+          <div className="space-y-1.5"><Label className="text-xs">Valeur CIF (FCFA) *</Label><Input type="number" value={form.valeurCIF} onChange={e => setForm({ ...form, valeurCIF: e.target.value })} className="bg-muted/50 font-mono" /></div>
+          <div className="space-y-1.5"><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-muted/50" /></div>
+          <div className="flex justify-end gap-2 pt-1 border-t border-border">
+            <Button variant="outline" onClick={onClose}>Annuler</Button>
+            <Button onClick={() => add.mutate()} disabled={!valide || add.isPending} className="gap-2 bg-secondary text-secondary-foreground">
+              {add.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // ── Page principale ─────────────────────────────────────────────────────────
 const Logistique = () => {
   const user = getStoredUser();
   const qc   = useQueryClient();
+  const navigate = useNavigate();
   const [search, setSearch]       = useState("");
   const [paiementDossier, setPaiementDossier] = useState<any>(null);
+  const [vehiculeOpen, setVehiculeOpen] = useState(false);
 
   const { data: dossiersData, isLoading } = useQuery({
     queryKey: ["dossiers-logistique"],
@@ -132,17 +197,14 @@ const Logistique = () => {
   });
   const { data: vehiculesData } = useQuery({
     queryKey: ["vehicules-logistique"],
-    queryFn:  () => api.get<any>("/api/logistique/vehicules?limit=50"),
+    queryFn:  () => api.get<any>("/api/vehicules?limit=100"),
     staleTime: 30_000,
   });
 
-  const advanceStatus = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.patch(`/api/dossiers/${id}/status`, { status }),
-    onSuccess: (_d, { status }) => {
-      qc.invalidateQueries({ queryKey: ["dossiers-logistique"] });
-      toast({ title: "Étape avancée", description: `→ ${STATUS_LABELS[status]}` });
-    },
+  const majVehicule = useMutation({
+    mutationFn: ({ id, statut }: { id: string; statut: string }) =>
+      api.patch(`/api/vehicules/${id}`, { statut, ...(statut === "cloture" ? { dateFin: new Date().toISOString() } : {}) }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicules-logistique"] }); toast({ title: "Véhicule mis à jour" }); },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
@@ -237,10 +299,9 @@ const Logistique = () => {
                         <Landmark className="w-3.5 h-3.5" /> Enregistrer paiement
                       </Button>
                       <Button size="sm" variant="outline"
-                        onClick={() => advanceStatus.mutate({ id: d.id, status: "bon_compagnie" })}
-                        disabled={advanceStatus.isPending}
+                        onClick={() => navigate(`/dossiers/${d.id}`)}
                         className="gap-1.5 text-xs h-8">
-                        <ChevronRight className="w-3.5 h-3.5" /> Bon compagnie
+                        <ChevronRight className="w-3.5 h-3.5" /> Terminer l'étape
                       </Button>
                     </div>
                   </div>
@@ -303,33 +364,40 @@ const Logistique = () => {
         {/* ── Véhicules ───────────────────────────────────────── */}
         <TabsContent value="vehicules">
           <div className="space-y-3 max-w-3xl">
+            <Button size="sm" className="gap-1.5 bg-secondary text-secondary-foreground" onClick={() => setVehiculeOpen(true)}>
+              <Plus className="w-3.5 h-3.5" /> Ajouter un véhicule
+            </Button>
             {vehicules.length === 0 ? (
               <div className="text-center py-16 text-muted-foreground">
                 <Truck className="w-10 h-10 mx-auto mb-3 opacity-20" />
                 <p className="font-medium">Aucun véhicule enregistré</p>
-                <Button size="sm" className="mt-4 gap-1.5 bg-secondary text-secondary-foreground"
-                  onClick={() => toast({ title: "Fonctionnalité à venir", description: "Enregistrement de véhicules" })}>
-                  <Plus className="w-3.5 h-3.5" /> Ajouter un véhicule
-                </Button>
               </div>
-            ) : vehicules.map((v: any, i: number) => (
-              <motion.div key={v.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.05 }} className="stat-card">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <Truck className="w-4 h-4 text-secondary" />
-                    <span className="font-semibold text-foreground font-mono">{v.immatriculation}</span>
+            ) : vehicules.map((v: any) => {
+              const st = VEHICULE_STATUTS[v.statut] ?? VEHICULE_STATUTS.en_attente;
+              return (
+                <div key={v.id} className="stat-card">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      <Truck className="w-4 h-4 text-secondary" />
+                      <span className="font-semibold text-foreground">{v.marque} {v.modele} ({v.annee})</span>
+                      {v.immatriculation && <span className="font-mono text-xs text-muted-foreground">{v.immatriculation}</span>}
+                    </div>
+                    <span className={`status-badge ${st.cls}`}>{st.label}</span>
                   </div>
-                  <span className={`status-badge ${v.statut === "dedouane" ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-700"}`}>
-                    {v.statut === "dedouane" ? "Dédouané" : "En attente"}
-                  </span>
+                  <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                    <span>VIN : <strong className="text-foreground font-mono">{v.numeroSerie}</strong></span>
+                    <span>Dossier : <strong className="text-foreground">{v.dossier?.numero}</strong> · {v.dossier?.client}</span>
+                    <span>Valeur CIF : <strong className="text-foreground">{Number(v.valeurCIF).toLocaleString("fr-FR")} FCFA</strong></span>
+                  </div>
+                  {st.suivant && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs mt-2 gap-1" disabled={majVehicule.isPending}
+                      onClick={() => majVehicule.mutate({ id: v.id, statut: st.suivant! })}>
+                      <CheckCircle2 className="w-3 h-3" /> {st.action}
+                    </Button>
+                  )}
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                  <span>Marque : <strong className="text-foreground">{v.marque}</strong></span>
-                  <span>Modèle : <strong className="text-foreground">{v.modele}</strong></span>
-                  <span>Client : <strong className="text-foreground">{v.client}</strong></span>
-                </div>
-              </motion.div>
-            ))}
+              );
+            })}
           </div>
         </TabsContent>
 
@@ -374,6 +442,7 @@ const Logistique = () => {
       {paiementDossier && (
         <PaiementDialog dossier={paiementDossier} open={!!paiementDossier} onClose={() => setPaiementDossier(null)} />
       )}
+      <VehiculeDialog dossiers={dossiers} open={vehiculeOpen} onClose={() => setVehiculeOpen(false)} />
     </AppLayout>
   );
 };

@@ -147,10 +147,11 @@ const messagerieRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       data: { dernierMessage: contenu.substring(0, 100) },
     })
 
-    // Broadcast via WebSocket
-    if (fastify.websocketServer) {
-      const evt = JSON.stringify({ type: 'NEW_MESSAGE', payload: { conversationId: id, message } })
-      fastify.websocketServer.clients.forEach(client => {
+    // Signal temps réel (sans contenu : le socket n'est pas authentifié, le client recharge via l'API)
+    const wss = (fastify as unknown as { websocketServer?: { clients: Set<{ readyState: number; send: (d: string) => void }> } }).websocketServer
+    if (wss) {
+      const evt = JSON.stringify({ type: 'NEW_MESSAGE', payload: { conversationId: id } })
+      wss.clients.forEach(client => {
         if (client.readyState === 1) client.send(evt)
       })
     }

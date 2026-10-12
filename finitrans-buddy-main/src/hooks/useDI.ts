@@ -218,11 +218,12 @@ export function useDIList(params?: {
 
 // ── Hook stats DI ────────────────────────────────────────────────────────────
 
-export function useDIStats() {
+export function useDIStats(enabled = true) {
   return useQuery<any>({
     queryKey: ["di-stats-resume"],
     queryFn:  () => api.get("/api/di/stats/resume"),
     staleTime: 30_000,
+    enabled,
   });
 }
 

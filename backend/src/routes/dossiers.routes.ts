@@ -1,19 +1,19 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { createHash } from 'crypto'
+import { DossierStatus, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
-import { DossierStatus } from '@prisma/client'
-import { env } from '../config/env'
-
-const STATUS_ORDER: DossierStatus[] = [
-  'reception', 'soumission_sgs', 'codage', 'validation',
-  'paiement', 'bon_compagnie', 'operations_kribi', 'cloture',
-]
+import { nextSequence, withUniqueRetry } from '../utils/sequence'
+import { AuthUser } from '../types'
+import {
+  STATUS_ORDER, STATUS_LABELS, assignStage, initSousEtapes, loadAttribution, nextStage,
+  notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
+} from '../services/workflow'
 
 const createDossierSchema = z.object({
   client:            z.string().min(2),
@@ -21,15 +21,15 @@ const createDossierSchema = z.object({
   conteneur:         z.string().min(3),
   marchandise:       z.string().min(2),
   site:              z.enum(['Douala', 'Kribi']),
-  responsableId:     z.string().uuid(),
+  responsableId:     z.string().uuid().optional(),
   dateArrivee:       z.string().datetime(),
-  montantTaxes:      z.number().positive().optional(),
-  montantHonoraires: z.number().positive().optional(),
-  montantRedevances: z.number().positive().optional(),
+  montantTaxes:      z.number().nonnegative().optional(),
+  montantHonoraires: z.number().nonnegative().optional(),
+  montantRedevances: z.number().nonnegative().optional(),
   dateLimiteSortie:  z.string().datetime().optional(),
   priorite:          z.enum(['haute', 'moyenne', 'basse']).default('moyenne'),
   numeroDI:          z.string().optional(),
-  montantDI:         z.number().positive().optional(),
+  montantDI:         z.number().nonnegative().optional(),
   fournisseur:       z.string().optional(),
   numeroBL:          z.string().optional(),
   numDeclaration:    z.string().optional(),
@@ -38,7 +38,9 @@ const createDossierSchema = z.object({
   notes:             z.string().optional(),
 })
 
-const updateDossierSchema = createDossierSchema.partial()
+const updateDossierSchema = createDossierSchema.partial().extend({
+  priorite: z.enum(['haute', 'moyenne', 'basse']).optional(),
+})
 
 const listQuerySchema = z.object({
   page:        z.coerce.number().default(1),
@@ -54,6 +56,18 @@ const listQuerySchema = z.object({
 
 const commentSchema = z.object({ message: z.string().min(1) })
 
+/** Profils qui voient l'ensemble des dossiers (enregistrement, finance) en plus des superviseurs. */
+const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration']
+
+/** Le compte est-il impliqué dans le dossier (responsable ou titulaire d'une sous-étape) ? */
+async function isInvolved(actor: AuthUser, dossier: { id: string; responsableId: string }, etape?: DossierStatus) {
+  if (dossier.responsableId === actor.id) return true
+  const count = await prisma.sousEtapeDossier.count({
+    where: { dossierId: dossier.id, responsableId: actor.id, ...(etape ? { etape } : {}) },
+  })
+  return count > 0
+}
+
 const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const preHandler = [authenticate, authorize('permDossier', 'lecture')]
 
@@ -61,39 +75,42 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.get('/', { preHandler }, async (request, reply) => {
     const q = listQuerySchema.parse(request.query)
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
-    const actor = request.user as any
-    const canSeeAll = actor.profil === 'dg' || actor.profil === 'exploitation' || actor.profil === 'comptabilite' || actor.profil === 'admin'
+    const actor = request.user
+    const canSeeAll = actor.superviseur || VOIT_TOUS_LES_DOSSIERS.includes(actor.profil)
 
-    const where: Record<string, unknown> = {}
-    if (q.status)      where.status      = q.status
-    if (q.site)        where.site        = q.site
-    if (q.compagnie)   where.compagnie   = q.compagnie
-    if (q.priorite)    where.priorite    = q.priorite
-    if (q.responsable) where.responsableId = q.responsable
+    const and: Prisma.DossierWhereInput[] = []
+    const where: Prisma.DossierWhereInput = { AND: and }
+    if (q.status) {
+      // Plusieurs étapes possibles : ?status=paiement,bon_compagnie
+      const statuts = q.status.split(',').map(x => x.trim()).filter((x): x is DossierStatus => STATUS_ORDER.includes(x as DossierStatus))
+      if (statuts.length === 0) return reply.code(400).send({ error: 'BAD_REQUEST', message: `Étape inconnue : ${q.status}` })
+      and.push({ status: { in: statuts } })
+    }
+    if (q.site && ['Douala', 'Kribi'].includes(q.site)) and.push({ site: q.site as 'Douala' | 'Kribi' })
+    if (q.compagnie) {
+      const compagnies = q.compagnie.split(',').filter((c): c is 'MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM' => ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM'].includes(c))
+      if (compagnies.length) and.push({ compagnie: { in: compagnies } })
+    }
+    if (q.priorite && ['haute', 'moyenne', 'basse'].includes(q.priorite)) and.push({ priorite: q.priorite as 'haute' | 'moyenne' | 'basse' })
+    if (q.responsable) and.push({ responsableId: q.responsable })
     if (q.search) {
-      where.OR = [
-        { client: { contains: q.search, mode: 'insensitive' } },
-        { numero: { contains: q.search, mode: 'insensitive' } },
+      and.push({ OR: [
+        { client:    { contains: q.search, mode: 'insensitive' } },
+        { numero:    { contains: q.search, mode: 'insensitive' } },
         { conteneur: { contains: q.search, mode: 'insensitive' } },
-      ]
+        { numeroBL:  { contains: q.search, mode: 'insensitive' } },
+      ] })
     }
     if (q.retardOnly) {
-      where.dateLimiteSortie = { lt: new Date() }
-      where.status = { not: 'cloture' }
+      and.push({ dateLimiteSortie: { lt: new Date() }, status: { not: 'cloture' } })
     }
 
-    // Responsables only see dossiers assigned to them (as main responsable or sous-étape responsable)
-    if (!canSeeAll && !q.responsable) {
-      const assignedSousEtapes = await prisma.sousEtapeDossier.findMany({
-        where: { responsableId: actor.id },
-        select: { dossierId: true },
-        distinct: ['dossierId'],
-      })
-      const assignedIds = assignedSousEtapes.map((s: { dossierId: string }) => s.dossierId)
-      where.OR = [
+    // Les autres comptes ne voient que les dossiers où ils interviennent
+    if (!canSeeAll) {
+      and.push({ OR: [
         { responsableId: actor.id },
-        { id: { in: assignedIds } },
-      ]
+        { sousEtapes: { some: { responsableId: actor.id } } },
+      ] })
     }
 
     const [data, total] = await Promise.all([
@@ -110,27 +127,55 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(paginate(data, total, page, limit))
   })
 
-  // POST /api/dossiers
+  // POST /api/dossiers — enregistrement + attribution automatique des tâches
   fastify.post('/', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const body = createDossierSchema.parse(request.body)
-    const user = request.user as any
+    const user = request.user
 
-    // Générer le numéro automatiquement
-    const year  = new Date().getFullYear()
-    const count = await prisma.dossier.count()
-    const numero = `DOS-${year}-${String(count + 1).padStart(4, '0')}`
+    let responsableId = body.responsableId
+    if (responsableId) {
+      const resp = await prisma.user.findUnique({ where: { id: responsableId }, select: { actif: true } })
+      if (!resp?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
+    } else {
+      const attribution = await loadAttribution()
+      responsableId = (await resolveAssignee(attribution.reception.owner, body)) ?? user.id
+    }
 
-    const dossier = await prisma.dossier.create({
-      data: { ...body, numero, dateArrivee: new Date(body.dateArrivee), dateLimiteSortie: body.dateLimiteSortie ? new Date(body.dateLimiteSortie) : undefined },
-      include: { responsable: { select: { id: true, nom: true, role: true } } },
+    const year = new Date().getFullYear()
+    const dossier = await withUniqueRetry(async () => {
+      const numero = await nextSequence(`DOS-${year}-`, async prefix =>
+        (await prisma.dossier.findFirst({ where: { numero: { startsWith: prefix } }, orderBy: { numero: 'desc' }, select: { numero: true } }))?.numero)
+      return prisma.dossier.create({
+        data: {
+          ...body,
+          responsableId: responsableId!,
+          numero,
+          dateArrivee: new Date(body.dateArrivee),
+          dateLimiteSortie: body.dateLimiteSortie ? new Date(body.dateLimiteSortie) : undefined,
+        },
+        include: { responsable: { select: { id: true, nom: true, role: true } } },
+      })
     })
 
     // Démarrer le timing de la première étape
     await prisma.dossierTiming.create({
-      data: { dossierId: dossier.id, etape: 'reception', dateDebut: new Date(), dureePrevueJours: 1, responsableId: body.responsableId },
+      data: { dossierId: dossier.id, etape: 'reception', dateDebut: new Date(), dureePrevueJours: 1, responsableId },
     })
 
-    await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${numero} créé`)
+    await initSousEtapes(dossier.id)
+    await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
+
+    const receptionTasks = await prisma.sousEtapeDossier.findMany({
+      where: { dossierId: dossier.id, etape: 'reception' }, select: { responsableId: true },
+    })
+    await notify([responsableId, ...receptionTasks.map(t => t.responsableId)].filter(u => u !== user.id), {
+      type: 'action_requise',
+      titre: 'Nouveau dossier à traiter',
+      message: `${dossier.numero} — ${dossier.client} : des tâches de réception vous sont attribuées`,
+      dossierId: dossier.id,
+      actionUrl: `/dossiers/${dossier.id}`,
+    })
+
     return reply.code(201).send(dossier)
   })
 
@@ -146,17 +191,63 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       },
     })
     if (!dossier) throw new NotFoundError('Dossier', id)
-    return reply.send(dossier)
+    return reply.send({ ...dossier, parcoursEtapes: stagesForSite(dossier.site) })
+  })
+
+  // GET /api/dossiers/:id/next-step — prochaine étape, responsable pressenti, droits de l'utilisateur
+  fastify.get('/:id/next-step', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const actor = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+
+    const suivante   = nextStage(dossier.status, dossier.site)
+    const completion = await stageCompletion(id, dossier.status, dossier.site)
+    const involved   = await isInvolved(actor, dossier, dossier.status)
+    const preuves    = await prisma.document.count({ where: { dossierId: id, etape: dossier.status } })
+
+    let suggere: { id: string; nom: string; role: string } | null = null
+    if (suivante) {
+      const uid = await stageOwner(dossier, suivante)
+      if (uid) suggere = await prisma.user.findUnique({ where: { id: uid }, select: { id: true, nom: true, role: true } })
+    }
+
+    const raisons: string[] = []
+    if (!suivante) raisons.push('Dossier à la dernière étape')
+    if (!actor.superviseur) {
+      if (!involved) raisons.push('Vous n\'êtes pas responsable de cette étape')
+      if (!completion.allDone) raisons.push(`Tâches non validées : ${completion.manquantes.join(', ')}`)
+      if (preuves === 0) raisons.push('Aucun document de preuve pour l\'étape en cours')
+    }
+
+    return reply.send({
+      etapeCourante: dossier.status,
+      etapeSuivante: suivante,
+      parcours: stagesForSite(dossier.site),
+      completion,
+      preuves,
+      responsableSuggere: suggere,
+      peutAvancer: !!suivante && (actor.superviseur || raisons.length === 0),
+      raisons,
+    })
   })
 
   // PATCH /api/dossiers/:id
   fastify.patch('/:id', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
     const body    = updateDossierSchema.parse(request.body)
-    const user    = request.user as any
+    const user    = request.user
 
     const existing = await prisma.dossier.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Dossier', id)
+
+    if (!user.superviseur) {
+      const canEdit = user.profil === 'administration' || await isInvolved(user, existing)
+      if (!canEdit) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Vous n\'intervenez pas sur ce dossier.' })
+      if (body.responsableId && body.responsableId !== existing.responsableId) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seuls le DG et l\'Exploitation peuvent changer le responsable.' })
+      }
+    }
 
     const updated = await prisma.dossier.update({
       where: { id },
@@ -178,24 +269,69 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const existing = await prisma.dossier.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Dossier', id)
 
-    await prisma.dossier.delete({ where: { id } })
+    await prisma.$transaction([
+      prisma.conversation.updateMany({ where: { dossierId: id }, data: { dossierId: null } }),
+      prisma.mouvementDI.updateMany({ where: { dossierId: id }, data: { dossierId: null } }),
+      prisma.dossier.delete({ where: { id } }),
+    ])
     return reply.code(204).send()
   })
 
-  // PATCH /api/dossiers/:id/status — Avancer l'étape (+ passation responsable optionnelle)
-  fastify.patch('/:id/status', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  // PATCH /api/dossiers/:id/status — Terminer l'étape et passer à la suivante (+ passation)
+  fastify.patch('/:id/status', { preHandler }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body   = z.object({
       status:        z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]),
       responsableId: z.string().uuid().optional(),
       note:          z.string().optional(),
     }).parse(request.body)
-    const user = request.user as any
+    const user = request.user
 
     const dossier = await prisma.dossier.findUnique({ where: { id } })
     if (!dossier) throw new NotFoundError('Dossier', id)
+    if (body.status === dossier.status) {
+      return reply.code(422).send({ error: 'MEME_ETAPE', message: 'Le dossier est déjà à cette étape.' })
+    }
 
-    // Clôturer le timing actuel en enregistrant le responsable qui a terminé l'étape
+    // Les comptes non superviseurs terminent eux-mêmes leur étape, dans l'ordre du parcours
+    if (!user.superviseur) {
+      if (!(await isInvolved(user, dossier, dossier.status))) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seul le responsable de l\'étape en cours (ou la Direction) peut la terminer.' })
+      }
+      const suivante = nextStage(dossier.status, dossier.site)
+      if (body.status !== suivante) {
+        return reply.code(422).send({
+          error: 'ETAPE_INVALIDE',
+          message: `L'étape suivante du parcours est « ${suivante ? STATUS_LABELS[suivante] : '—'} ».`,
+        })
+      }
+      const completion = await stageCompletion(id, dossier.status, dossier.site)
+      if (!completion.allDone) {
+        return reply.code(422).send({
+          error: 'SOUS_ETAPES_INCOMPLETES',
+          message: `Tâches à valider avant de continuer : ${completion.manquantes.join(', ')}`,
+        })
+      }
+      const preuves = await prisma.document.count({ where: { dossierId: id, etape: dossier.status } })
+      if (preuves === 0) {
+        return reply.code(422).send({
+          error: 'PREUVE_REQUISE',
+          message: `Joignez au moins un document de preuve pour l'étape « ${STATUS_LABELS[dossier.status]} ».`,
+        })
+      }
+    }
+
+    if (body.responsableId) {
+      const resp = await prisma.user.findUnique({ where: { id: body.responsableId }, select: { actif: true } })
+      if (!resp?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
+    }
+
+    // Créer les sous-étapes manquantes et attribuer celles de la nouvelle étape
+    await initSousEtapes(id)
+    const ownerAuto = await assignStage(dossier, body.status)
+    const nouveauResponsable = body.responsableId ?? ownerAuto ?? dossier.responsableId
+
+    // Clôturer le timing actuel en enregistrant le responsable qui a traité l'étape
     await prisma.dossierTiming.updateMany({
       where: { dossierId: id, etape: dossier.status, dateFin: null },
       data: { dateFin: new Date(), responsableId: dossier.responsableId },
@@ -210,15 +346,13 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         etape: body.status,
         dateDebut: new Date(),
         dureePrevueJours: sla[body.status] ?? 2,
+        responsableId: nouveauResponsable,
       },
     })
 
-    const updateData: any = { status: body.status }
-    if (body.responsableId) updateData.responsableId = body.responsableId
-
     const updated = await prisma.dossier.update({
       where: { id },
-      data: updateData,
+      data: { status: body.status, responsableId: nouveauResponsable },
       include: { responsable: { select: { id: true, nom: true, role: true } } },
     })
 
@@ -228,43 +362,57 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         data: {
           dossierId: id,
           auteurId:  user.id,
-          message:   `📋 Passation (${dossier.status} → ${body.status}) : ${body.note.trim()}`,
+          message:   `📋 Passation (${STATUS_LABELS[dossier.status]} → ${STATUS_LABELS[body.status]}) : ${body.note.trim()}`,
         },
       })
     }
 
     await logAudit(id, user.id, 'CHANGEMENT_STATUT',
-      body.responsableId
+      nouveauResponsable !== dossier.responsableId
         ? `${dossier.status} → ${body.status} (nouveau responsable assigné)`
         : `${dossier.status} → ${body.status}`)
+
+    // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
+    const taches = await prisma.sousEtapeDossier.findMany({
+      where: { dossierId: id, etape: body.status }, select: { responsableId: true },
+    })
+    await notify([nouveauResponsable, ...taches.map(t => t.responsableId)].filter(u => u !== user.id), {
+      type: 'action_requise',
+      titre: `Dossier ${updated.numero} : ${STATUS_LABELS[body.status]}`,
+      message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Des tâches vous attendent.`,
+      dossierId: id,
+      actionUrl: `/dossiers/${id}`,
+    })
+
     return reply.send(updated)
   })
 
   // ─── Upload document (multipart) — stocké en base de données ─
 
-  fastify.post('/:id/upload', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/upload', { preHandler }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
-    const user = request.user as any
+    const user = request.user
 
     const existing = await prisma.dossier.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Dossier', id)
 
+    // Écriture : permission dossier partielle, ou compte intervenant sur le dossier
+    const canWrite = ['partiel', 'complet'].includes(user.permDossier) || await isInvolved(user, existing)
+    if (!canWrite) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Permissions insuffisantes' })
+
     const data = await request.file()
     if (!data) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
 
-    const { filename, mimetype, file: fileStream } = data
+    const { filename, mimetype } = data
     const etapeRaw = (data.fields as any)?.etape?.value
     const etape: DossierStatus = STATUS_ORDER.includes(etapeRaw as DossierStatus)
       ? (etapeRaw as DossierStatus)
       : existing.status
 
-    // Lire le fichier en mémoire pour le stocker en base
-    const chunks: Buffer[] = []
-    for await (const chunk of fileStream) chunks.push(chunk as Buffer)
-    const contenu = Buffer.concat(chunks)
+    const contenu = await data.toBuffer()
     const sizeBytes = contenu.length
     const taille = sizeBytes < 1_048_576
-      ? `${Math.round(sizeBytes / 1024)} Ko`
+      ? `${Math.max(1, Math.round(sizeBytes / 1024))} Ko`
       : `${(sizeBytes / 1_048_576).toFixed(1)} Mo`
 
     // Calcul empreinte SHA-256 — détection doublon sur le dossier
@@ -282,20 +430,11 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     const doc = await prisma.document.create({
       data: {
-        dossierId: id,
-        uploadePar: user.id,
-        nom: filename,
-        type: mimetype,
-        taille,
-        contenu,
-        hashContenu,
-        url: `/api/dossiers/${id}/documents/__ID__/content`,
-        etape,
+        dossierId: id, uploadePar: user.id, nom: filename, type: mimetype,
+        taille, contenu, hashContenu, url: '', etape,
       },
-      include: { uploader: { select: { nom: true } } },
     })
 
-    // Mettre à jour l'URL avec l'ID réel du document
     const updated = await prisma.document.update({
       where: { id: doc.id },
       data: { url: `/api/dossiers/${id}/documents/${doc.id}/content` },
@@ -331,34 +470,24 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const docs = await prisma.document.findMany({
       where: { dossierId: id },
-      include: { uploader: { select: { nom: true } } },
+      select: {
+        id: true, dossierId: true, nom: true, type: true, taille: true, url: true,
+        etape: true, uploadePar: true, createdAt: true, uploader: { select: { nom: true } },
+      },
       orderBy: { createdAt: 'desc' },
     })
     return reply.send(docs)
-  })
-
-  fastify.post('/:id/documents', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
-    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
-    const body = z.object({
-      nom: z.string(), type: z.string(), taille: z.string(), url: z.string(), etape: z.string(),
-    }).parse(request.body)
-    const user = request.user as any
-
-    const existing = await prisma.dossier.findUnique({ where: { id } })
-    if (!existing) throw new NotFoundError('Dossier', id)
-
-    const doc = await prisma.document.create({
-      data: { dossierId: id, uploadePar: user.id, ...body, etape: body.etape as DossierStatus },
-    })
-    await logAudit(id, user.id, 'UPLOAD_DOCUMENT', `Document ${body.nom} ajouté`)
-    return reply.code(201).send(doc)
   })
 
   fastify.delete('/:id/documents/:docId', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id, docId } = z.object({ id: z.string().uuid(), docId: z.string().uuid() }).parse(request.params)
     const doc = await prisma.document.findFirst({ where: { id: docId, dossierId: id } })
     if (!doc) throw new NotFoundError('Document', docId)
+    if (!request.user.superviseur && doc.uploadePar !== request.user.id) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seul l\'auteur du document (ou la Direction) peut le supprimer.' })
+    }
     await prisma.document.delete({ where: { id: docId } })
+    await logAudit(id, request.user.id, 'SUPPRESSION_DOCUMENT', `"${doc.nom}" supprimé`)
     return reply.code(204).send()
   })
 
@@ -374,10 +503,10 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(comments)
   })
 
-  fastify.post('/:id/commentaires', { preHandler: [authenticate, authorize('permDossier', 'lecture')] }, async (request, reply) => {
+  fastify.post('/:id/commentaires', { preHandler }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
     const body    = commentSchema.parse(request.body)
-    const user    = request.user as any
+    const user    = request.user
 
     const existing = await prisma.dossier.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Dossier', id)
@@ -411,15 +540,26 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.post('/:id/factures', { preHandler: [authenticate, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
-      numero: z.string(), type: z.enum(['proforma', 'validee', 'reglee']),
+      numero: z.string().min(1), type: z.enum(['proforma', 'validee', 'reglee']),
       montant: z.number().positive(), compagnie: z.string(),
       dateFacture: z.string().datetime(), description: z.string(),
+      montantTVA: z.number().nonnegative().optional(),
+      montantDebours: z.number().nonnegative().optional(),
     }).parse(request.body)
 
+    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    if ((body.montantTVA ?? 0) + (body.montantDebours ?? 0) > body.montant) {
+      return reply.code(422).send({ error: 'VENTILATION_INVALIDE', message: 'TVA + débours ne peuvent dépasser le montant total' })
+    }
+
     const facture = await prisma.facture.create({
-      data: { dossierId: id, ...body, dateFacture: new Date(body.dateFacture) },
+      data: {
+        dossierId: id, ...body, dateFacture: new Date(body.dateFacture),
+        datePaiement: body.type === 'reglee' ? new Date() : undefined,
+      },
     })
-    await logAudit(id, (request.user as any).id, 'CREATION_FACTURE', `Facture ${body.numero}`)
+    await logAudit(id, request.user.id, 'CREATION_FACTURE', `Facture ${body.numero}`)
     return reply.code(201).send(facture)
   })
 
@@ -444,9 +584,9 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }).parse(request.body)
 
     const virement = await prisma.virement.create({
-      data: { dossierId: id, effectuePar: (request.user as any).id, ...body, dateVirement: new Date(body.dateVirement) },
+      data: { dossierId: id, effectuePar: request.user.id, ...body, dateVirement: new Date(body.dateVirement) },
     })
-    await logAudit(id, (request.user as any).id, 'VIREMENT', `Virement ${body.reference} — ${body.montant} FCFA`)
+    await logAudit(id, request.user.id, 'VIREMENT', `Virement ${body.reference} — ${body.montant} FCFA`)
     return reply.code(201).send(virement)
   })
 
@@ -464,9 +604,9 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }).parse(request.body)
 
     const bl = await prisma.bonLivraison.create({
-      data: { dossierId: id, effectuePar: (request.user as any).id, ...body, dateEmission: new Date(body.dateEmission) },
+      data: { dossierId: id, effectuePar: request.user.id, ...body, dateEmission: new Date(body.dateEmission) },
     })
-    await logAudit(id, (request.user as any).id, 'BON_LIVRAISON', `BL ${body.numero} créé`)
+    await logAudit(id, request.user.id, 'BON_LIVRAISON', `BL ${body.numero} créé`)
     return reply.code(201).send(bl)
   })
 
@@ -491,10 +631,48 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }).parse(request.body)
 
     const gp = await prisma.gatePass.create({
-      data: { dossierId: id, emetteurId: (request.user as any).id, ...body, dateEmission: new Date(body.dateEmission) },
+      data: { dossierId: id, emetteurId: request.user.id, ...body, dateEmission: new Date(body.dateEmission) },
     })
-    await logAudit(id, (request.user as any).id, 'GATE_PASS', `Gate Pass ${body.numero} émis`)
+    await logAudit(id, request.user.id, 'GATE_PASS', `Gate Pass ${body.numero} émis`)
     return reply.code(201).send(gp)
+  })
+
+  // ─── Pénalités (surestaries / pénalités de retard) ───────
+
+  fastify.post('/:id/penalites', { preHandler: [authenticate, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const parsed = z.object({
+      montant:      z.number().positive(),
+      motif:        z.string().min(2).optional(),
+      raison:       z.string().min(2).optional(),
+      type:         z.enum(['douane', 'compagnie']).default('compagnie'),
+      reference:    z.string().optional(),
+      date:         z.string().datetime().optional(),
+      dateEcheance: z.string().datetime().optional(),
+    }).refine(b => b.motif || b.raison, { message: 'Motif requis', path: ['raison'] }).parse(request.body)
+    const body = { ...parsed, motif: (parsed.motif ?? parsed.raison)! }
+
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+
+    const date = body.date ? new Date(body.date) : body.dateEcheance ? new Date(body.dateEcheance) : new Date()
+    const reference = body.reference?.trim() || `PEN-${dossier.numero}-${Date.now().toString(36).toUpperCase()}`
+    const paiement = body.type === 'douane'
+      ? await prisma.paiementDouane.create({
+          data: { dossierId: id, type: 'penalite', montant: body.montant, datePaiement: date, reference, statut: 'en_attente' },
+        })
+      : await prisma.paiementCompagnie.create({
+          data: { dossierId: id, compagnie: dossier.compagnie, type: 'surestaries', montant: body.montant, datePaiement: date, reference, statut: 'en_attente' },
+        })
+
+    await logAudit(id, request.user.id, 'PENALITE', `${body.motif} — ${body.montant.toLocaleString('fr-FR')} FCFA`)
+    await prisma.alerte.create({
+      data: {
+        type: 'charge', severity: 'warning', dossierId: id,
+        message: `Pénalité ${dossier.numero} : ${body.motif} — ${body.montant.toLocaleString('fr-FR')} FCFA`,
+      },
+    })
+    return reply.code(201).send(paiement)
   })
 
   // ─── Timings ──────────────────────────────────────────────
@@ -708,16 +886,18 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       arr.filter(p => p.statut === 'paye' || p.statut === 'effectue')
          .reduce((s, p) => s + Number(p.montant), 0)
 
+    const totalPaiementsDouane    = sumPaye(dossier.paiementsDouane as any)
+    const totalPaiementsCompagnie = sumPaye(dossier.paiementsCompagnie as any)
     const finance = {
-      totalPaiementsDouane:    sumPaye(dossier.paiementsDouane as any),
-      totalPaiementsCompagnie: sumPaye(dossier.paiementsCompagnie as any),
+      totalPaiementsDouane,
+      totalPaiementsCompagnie,
       totalVirements:          sumPaye(dossier.virements as any),
       totalBL: dossier.bonsLivraison.filter(b => b.statut === 'valide').reduce((s, b) => s + Number(b.montant), 0),
       montantTaxes:      dossier.montantTaxes ? Number(dossier.montantTaxes) : 0,
       montantHonoraires: dossier.montantHonoraires ? Number(dossier.montantHonoraires) : 0,
       montantRedevances: dossier.montantRedevances ? Number(dossier.montantRedevances) : 0,
+      totalCharges:      totalPaiementsDouane + totalPaiementsCompagnie,
     }
-    finance.totalCharges = finance.totalPaiementsDouane + finance.totalPaiementsCompagnie as any
 
     // ── Résumé SLA ────────────────────────────────────────
     const sla = dossier.timings.map(t => {

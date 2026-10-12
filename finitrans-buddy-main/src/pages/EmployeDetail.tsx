@@ -8,7 +8,7 @@ import { motion } from "framer-motion";
 import { Progress } from "@/components/ui/progress";
 
 const STATUS_LABELS: Record<string, string> = {
-  reception: "Réception", codage: "Codage", validation: "Validation",
+  reception: "Réception", soumission_sgs: "SGS", codage: "Codage", validation: "Validation",
   paiement: "Paiement", bon_compagnie: "Bon Cie", operations_kribi: "Kribi", cloture: "Clôturé",
 };
 const STATUS_COLORS: Record<string, string> = {
@@ -29,24 +29,28 @@ const EmployeDetail = () => {
   const decodedName = decodeURIComponent(name || "");
 
   const { data: empData, isLoading } = useQuery({
-    queryKey: ["employes-list-detail", decodedName],
-    queryFn:  () => api.get<any>(`/api/employes?limit=50`),
+    queryKey: ["employes-tous"],
+    queryFn:  () => api.get<any>(`/api/employes?limit=100`),
   });
+  const employee = (empData?.data ?? []).find((e: any) => e.nom === decodedName);
 
-  const { data: chartsData } = useQuery({
-    queryKey: ["dashboard-charts"],
-    queryFn:  () => api.get<any>("/api/dashboard/charts"),
+  const { data: perfData } = useQuery({
+    queryKey: ["employe-perf", employee?.id],
+    queryFn:  () => api.get<any>(`/api/employes/${employee.id}/performance`),
+    enabled:  !!employee?.id,
   });
-
   const { data: dossiersData } = useQuery({
-    queryKey: ["dossiers-employe", decodedName],
-    queryFn:  () => api.get<any>(`/api/dossiers?limit=20`),
+    queryKey: ["employe-dossiers", employee?.id],
+    queryFn:  () => api.get<any>(`/api/employes/${employee.id}/dossiers?limit=50`),
+    enabled:  !!employee?.id,
   });
 
-  const employes = empData?.data ?? [];
-  const employee = employes.find((e: any) => e.nom === decodedName);
-  const dossiers = (dossiersData?.data ?? []).filter((d: any) => d.responsable?.nom === decodedName);
-  const perf = (chartsData?.tauxRetardParEmploye ?? []).find((e: any) => e.nom === decodedName) ?? { actifs: 0, enRetard: 0, tauxRetard: 0 };
+  const dossiers = dossiersData?.data ?? [];
+  const perf = {
+    actifs: perfData?.dossiersActifs ?? 0,
+    enRetard: perfData?.enRetard ?? 0,
+    tauxRetard: perfData?.tauxRetard ?? 0,
+  };
 
   if (isLoading) {
     return (
@@ -117,7 +121,12 @@ const EmployeDetail = () => {
 
           {/* Dossiers */}
           <div className="stat-card">
-            <h3 className="font-display font-semibold text-foreground mb-4">Dossiers assignés ({dossiers.length})</h3>
+            {perfData && (
+              <p className="text-xs text-muted-foreground mb-3">
+                Tâches : {perfData.tachesValidees} terminées · {perfData.tachesOuvertes} ouvertes · {perfData.tachesEnRetard} en retard
+              </p>
+            )}
+            <h3 className="font-display font-semibold text-foreground mb-4">Dossiers sous sa responsabilité ({dossiers.length})</h3>
             <div className="space-y-2">
               {dossiers.map((d: any) => (
                 <div key={d.id} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 cursor-pointer hover:bg-muted" onClick={() => navigate(`/dossiers/${d.id}`)}>

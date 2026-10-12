@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Lock, User, Eye, EyeOff, AlertCircle, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { motion } from "framer-motion";
-import { login } from "@/lib/api";
+import { getStoredUser, isAuthenticated, login } from "@/lib/api";
+import { homeFor } from "@/components/RequireModule";
 import FinitransLogo from "@/components/FinitransLogo";
 import LoginBackground3D from "@/components/LoginBackground3D";
 
@@ -22,25 +23,18 @@ const Login = () => {
   const [isLoading, setIsLoading]     = useState(false);
   const [error, setError]             = useState("");
 
-  const PROFILE_REDIRECT: Record<string, string> = {
-    dg:              "/dashboard",
-    exploitation:    "/exploitation",
-    logistique:      "/logistique",
-    validation:      "/codage",
-    gestion_sorties: "/sorties",
-    administratif:   "/administratif",
-    comptabilite:    "/comptabilite",
-    terrain_kribi:   "/kribi",
-  };
+  // Déjà connecté : aller directement à l'accueil du profil
+  useEffect(() => {
+    if (isAuthenticated()) navigate(homeFor(getStoredUser()), { replace: true });
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsLoading(true);
     try {
-      const user = await login(email, password);
-      const redirect = PROFILE_REDIRECT[user.profil] ?? "/dashboard";
-      navigate(redirect);
+      const user = await login(email.trim(), password);
+      navigate(homeFor(user));
     } catch (err: any) {
       setError(err.message ?? "Identifiants incorrects");
     } finally {

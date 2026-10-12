@@ -14,7 +14,12 @@
     "db:studio": "prisma studio",
     "db:seed": "tsx src/seed.ts",
     "db:seed:test": "tsx src/seed-test.ts",
-    "db:reset": "prisma migrate reset --force"
+    "db:reset": "prisma migrate reset --force",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:migrate-roles": "tsx src/scripts/migrate-roles.ts",
+    "test": "npm run test:reset && npm run test:run",
+    "test:reset": "node --env-file=.env.test ./node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss && node --env-file=.env.test --import tsx src/seed.ts",
+    "test:run": "node --env-file=.env.test --import tsx --test --test-concurrency=1 --test-reporter=spec tests/*.test.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

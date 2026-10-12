@@ -18,9 +18,9 @@ export function clearTokens() {
   localStorage.removeItem('ft_user')
 }
 
-// null  = refresh réussi
-// true  = refresh échoué car token invalide/révoqué → déconnecter
-// false = refresh échoué pour raison serveur (5xx/réseau) → garder la session
+// 'ok'           = refresh réussi
+// 'invalid'      = token invalide/révoqué → déconnecter
+// 'server_error' = problème serveur transitoire (5xx/réseau) → garder la session
 async function tryRefresh(): Promise<'ok' | 'invalid' | 'server_error'> {
   const rt = localStorage.getItem('ft_refresh_token')
   if (!rt) return 'invalid'
@@ -33,6 +33,7 @@ async function tryRefresh(): Promise<'ok' | 'invalid' | 'server_error'> {
     if (res.ok) {
       const data = await res.json()
       setTokens(data.accessToken, data.refreshToken)
+      if (data.user) storeUser(data.user)
       return 'ok'
     }
     // 401 = token révoqué ou expiré → vraie déconnexion
@@ -45,54 +46,82 @@ async function tryRefresh(): Promise<'ok' | 'invalid' | 'server_error'> {
   }
 }
 
-// ── Core fetch ───────────────────────────────────────────────
+// Un seul refresh à la fois, même si plusieurs requêtes reçoivent 401 simultanément
+let refreshing: Promise<'ok' | 'invalid' | 'server_error'> | null = null
+function refreshOnce() {
+  if (!refreshing) refreshing = tryRefresh().finally(() => { refreshing = null })
+  return refreshing
+}
 
-async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+function sessionExpired(): never {
+  clearTokens()
+  window.location.href = '/'
+  throw new Error('SESSION_EXPIRED')
+}
+
+/** Requête authentifiée brute (gère le renouvellement du jeton). */
+async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getAccessToken()
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
+  const headers = new Headers(init.headers)
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers })
+  if (res.status !== 401) return res
+
+  const result = await refreshOnce()
+  if (result === 'ok') {
+    const retryHeaders = new Headers(init.headers)
+    retryHeaders.set('Authorization', `Bearer ${getAccessToken()}`)
+    return fetch(`${BASE_URL}${path}`, { ...init, headers: retryHeaders })
   }
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  if (result === 'invalid') sessionExpired()
+  throw new Error('Erreur serveur temporaire — réessayez')
+}
 
-  const res = await fetch(`${BASE_URL}${path}`, { ...options, headers })
-
-  if (res.status === 401) {
-    const result = await tryRefresh()
-    if (result === 'ok') return apiFetch(path, options)
-    if (result === 'invalid') {
-      clearTokens()
-      window.location.href = '/'
-      throw new Error('SESSION_EXPIRED')
-    }
-    // server_error → on laisse l'erreur remonter sans déconnecter
-    throw new Error('Erreur serveur temporaire — réessayez')
-  }
-
+async function parseResponse<T>(res: Response): Promise<T> {
+  if (res.status === 401) sessionExpired()
   if (res.status === 204) return undefined as T
 
   const text = await res.text()
-  if (!text) return undefined as T
+  if (!text) {
+    if (!res.ok) throw new ApiError(`Erreur ${res.status}`, res.status)
+    return undefined as T
+  }
 
   let data: any
   try {
     data = JSON.parse(text)
   } catch {
-    if (!res.ok) throw new Error(`Erreur ${res.status}`)
-    return undefined as T
+    if (!res.ok) throw new ApiError(`Erreur ${res.status}`, res.status)
+    return text as unknown as T
   }
 
-  if (!res.ok) throw new Error(data?.message ?? `Erreur ${res.status}`)
+  if (!res.ok) throw new ApiError(data?.message ?? `Erreur ${res.status}`, res.status, data?.error)
   return data
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number, public code?: string) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
+// ── Core fetch ───────────────────────────────────────────────
+
+async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = { ...(options.headers as Record<string, string>) }
+  if (options.body !== undefined) headers['Content-Type'] = 'application/json'
+  const res = await authFetch(path, { ...options, headers })
+  return parseResponse<T>(res)
 }
 
 // ── HTTP verbs ───────────────────────────────────────────────
 
 export const api = {
   get:    <T>(path: string)                   => apiFetch<T>(path),
-  post:   <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'POST',   body: JSON.stringify(body) }),
-  patch:  <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'PATCH',  body: JSON.stringify(body) }),
-  put:    <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'PUT',    body: JSON.stringify(body) }),
+  post:   <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'POST',   body: JSON.stringify(body ?? {}) }),
+  patch:  <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'PATCH',  body: JSON.stringify(body ?? {}) }),
+  put:    <T>(path: string, body?: unknown)   => apiFetch<T>(path, { method: 'PUT',    body: JSON.stringify(body ?? {}) }),
   delete: <T>(path: string)                   => apiFetch<T>(path, { method: 'DELETE' }),
 }
 
@@ -110,6 +139,7 @@ export interface AuthUser {
   nom:                 string
   role:                string
   profil:              string
+  profilLabel?:        string
   site:                string
   telephone?:          string
   avatarUrl?:          string
@@ -119,17 +149,44 @@ export interface AuthUser {
   permRapports:        string
   permAdministration:  string
   compagniesAssignees: string[]
+  superviseur?:        boolean
+  modules?:            string[]
+}
+
+const USER_EVENT = 'ft-user-updated'
+
+function storeUser(user: AuthUser) {
+  localStorage.setItem('ft_user', JSON.stringify(user))
+  window.dispatchEvent(new Event(USER_EVENT))
+}
+
+export function onUserChange(cb: () => void) {
+  window.addEventListener(USER_EVENT, cb)
+  return () => window.removeEventListener(USER_EVENT, cb)
 }
 
 export async function login(email: string, password: string): Promise<AuthUser> {
   const data = await api.post<LoginResponse>('/api/auth/login', { email, password })
   setTokens(data.accessToken, data.refreshToken)
-  localStorage.setItem('ft_user', JSON.stringify(data.user))
+  storeUser(data.user)
   return data.user
 }
 
+/** Recharge le profil (rôle, modules) depuis le serveur — après une attribution de rôle. */
+export async function refreshSessionUser(): Promise<AuthUser | null> {
+  if (!getAccessToken()) return null
+  try {
+    const user = await api.get<AuthUser>('/api/auth/me')
+    if (user) storeUser(user)
+    return user
+  } catch {
+    return getStoredUser()
+  }
+}
+
 export async function logout() {
-  try { await api.post('/api/auth/logout') } catch { /* ignore */ }
+  const refreshToken = localStorage.getItem('ft_refresh_token') ?? undefined
+  try { await api.post('/api/auth/logout', { refreshToken }) } catch { /* ignore */ }
   clearTokens()
   window.location.href = '/'
 }
@@ -145,36 +202,48 @@ export function isAuthenticated(): boolean {
 }
 
 export async function uploadFile<T = unknown>(path: string, formData: FormData): Promise<T> {
-  const token = getAccessToken()
-  const headers: Record<string, string> = {}
-  if (token) headers['Authorization'] = `Bearer ${token}`
+  const res = await authFetch(path, { method: 'POST', body: formData })
+  return parseResponse<T>(res)
+}
 
-  const res = await fetch(`${BASE_URL}${path}`, { method: 'POST', headers, body: formData })
+// ── Documents protégés (nécessitent le jeton) ────────────────
 
-  if (res.status === 401) {
-    const result = await tryRefresh()
-    if (result === 'ok') return uploadFile(path, formData)
-    if (result === 'invalid') {
-      clearTokens()
-      window.location.href = '/'
-      throw new Error('SESSION_EXPIRED')
-    }
-    throw new Error('Erreur serveur temporaire — réessayez')
+async function fetchBlob(path: string): Promise<Blob> {
+  const res = await authFetch(path)
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    let message = `Erreur ${res.status}`
+    try { message = JSON.parse(text).message ?? message } catch { /* texte brut */ }
+    throw new ApiError(message, res.status)
   }
+  return res.blob()
+}
 
-  if (res.status === 204) return undefined as T
-
-  const text = await res.text()
-  if (!text) return undefined as T
-
-  let data: any
+/** Ouvre un document protégé dans un nouvel onglet. */
+export async function openDocument(path: string) {
+  // Ouvrir l'onglet tout de suite (sinon bloqué par le navigateur après un await)
+  const win = window.open('', '_blank')
   try {
-    data = JSON.parse(text)
-  } catch {
-    if (!res.ok) throw new Error(`Erreur ${res.status}`)
-    return undefined as T
+    const blob = await fetchBlob(path)
+    const url = URL.createObjectURL(blob)
+    if (win) win.location.href = url
+    else window.location.href = url
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (err) {
+    win?.close()
+    throw err
   }
+}
 
-  if (!res.ok) throw new Error(data?.message ?? `Erreur ${res.status}`)
-  return data
+/** Télécharge un fichier protégé (CSV, export…) avec un nom donné. */
+export async function downloadFile(path: string, filename: string) {
+  const blob = await fetchBlob(path)
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }

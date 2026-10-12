@@ -1,11 +1,12 @@
 import { PermissionNiveau, Profil, Site } from '@prisma/client'
+import type { ModuleKey } from '../config/roles'
 
-// Payload JWT
+// Payload JWT (access token)
 export interface JwtPayload {
   sub: string           // user id
-  email: string
-  profil: Profil
-  nom: string
+  email?: string
+  profil?: Profil
+  nom?: string
 }
 
 // Objet user attaché à chaque requête authentifiée
@@ -15,11 +16,15 @@ export interface AuthUser {
   nom: string
   profil: Profil
   site: Site
+  compagniesAssignees: string[]
   permDossier: PermissionNiveau
   permValidation: PermissionNiveau
   permFinancier: PermissionNiveau
   permRapports: PermissionNiveau
   permAdministration: PermissionNiveau
+  /** DG / Exploitation : contrôle total, supervision */
+  superviseur: boolean
+  modules: ModuleKey[]
 }
 
 // Hiérarchie des niveaux de permission
@@ -56,9 +61,6 @@ export type WsEvent =
 declare module 'fastify' {
   interface FastifyInstance {
     authenticate: (request: FastifyRequest, reply: FastifyReply) => Promise<void>
-  }
-  interface FastifyRequest {
-    user: AuthUser
   }
 }
 

@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { compagniesIn } from '../utils/filters'
 import { differenceInDays } from 'date-fns'
 
 const detentionsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
@@ -23,7 +24,7 @@ const detentionsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
     const where: Record<string, unknown> = {}
     if (q.statut)    where.statut    = q.statut
-    if (q.compagnie) where.compagnie = q.compagnie
+    if (q.compagnie) where.compagnie = compagniesIn(q.compagnie)
     if (q.dossierId) where.dossierId = q.dossierId
 
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)

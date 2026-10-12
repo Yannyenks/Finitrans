@@ -5,6 +5,13 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { differenceInHours, differenceInDays } from 'date-fns'
 
+/** Convertit une période d'affichage (semaine / mois / trimestre / année) en nombre de jours. */
+function periodeEnJours(periode?: string): number | null {
+  if (!periode) return null
+  const map: Record<string, number> = { semaine: 7, week: 7, '7': 7, mois: 30, month: 30, '30': 30, trimestre: 90, quarter: 90, '90': 90, annee: 365, year: 365, '365': 365 }
+  return map[periode] ?? 30
+}
+
 const reportingRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess = [authenticate, authorize('permRapports', 'non')]  // tous les connectés
 
@@ -53,13 +60,49 @@ const reportingRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
     return reply.send({ analyse, detail: timings })
   })
 
+  // GET /api/reporting/sla — temps moyen réel par étape (heures) vs SLA, sur une période
+  fastify.get('/sla', { preHandler: [authenticate] }, async (request, reply) => {
+    const q = z.object({ periode: z.string().optional() }).parse(request.query)
+    const jours = periodeEnJours(q.periode) ?? 30
+    const depuis = new Date(Date.now() - jours * 86_400_000)
+
+    const timings = await prisma.dossierTiming.findMany({
+      where: { dateDebut: { gte: depuis } },
+      select: { etape: true, dateDebut: true, dateFin: true, dureePrevueJours: true },
+    })
+    const now = new Date()
+    const parEtape: Record<string, { heures: number; count: number; depasses: number; enCours: number }> = {}
+    for (const t of timings) {
+      const s = (parEtape[t.etape] ??= { heures: 0, count: 0, depasses: 0, enCours: 0 })
+      const h = differenceInHours(t.dateFin ?? now, t.dateDebut)
+      s.heures += h
+      s.count++
+      if (!t.dateFin) s.enCours++
+      if (h > t.dureePrevueJours * 24) s.depasses++
+    }
+    return reply.send({
+      periodeJours: jours,
+      etapes: Object.entries(parEtape).map(([etape, s]) => ({
+        etape,
+        tempsMoyen:      s.count ? Math.round(s.heures / s.count) : 0,
+        count:           s.count,
+        enCours:         s.enCours,
+        tauxDepassement: s.count ? Math.round((s.depasses / s.count) * 100) : 0,
+      })),
+    })
+  })
+
   // GET /api/reporting/performance — performance par employé
   fastify.get('/performance', { preHandler: [authenticate] }, async (request, reply) => {
     const q = z.object({
-      site: z.string().optional(),
-      from: z.string().datetime().optional(),
-      to:   z.string().datetime().optional(),
+      site:    z.string().optional(),
+      from:    z.string().datetime().optional(),
+      to:      z.string().datetime().optional(),
+      periode: z.string().optional(),
     }).parse(request.query)
+
+    const periodeJours = periodeEnJours(q.periode)
+    const depuisTaches = periodeJours ? new Date(Date.now() - periodeJours * 86_400_000) : undefined
 
     const dossierWhere: Record<string, unknown> = {}
     if (q.from || q.to) {
@@ -77,6 +120,7 @@ const reportingRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
         },
         // Sous-étapes assignées à cet employé
         sousEtapesResponsable: {
+          where: depuisTaches ? { OR: [{ createdAt: { gte: depuisTaches } }, { completedAt: { gte: depuisTaches } }] } : undefined,
           select: {
             id: true, etape: true, cle: true, statut: true,
             deadline: true, completedAt: true, createdAt: true,
@@ -143,7 +187,19 @@ const reportingRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       }
     })
 
-    return reply.send(rapport)
+    const sum = (k: 'tachesTotal' | 'tachesValidees' | 'tachesEnCours' | 'tachesEnRetard' | 'tachesEnTemps') =>
+      rapport.reduce((acc, r) => acc + r[k], 0)
+    return reply.send({
+      employes: rapport,
+      global: {
+        tachesTotal:    sum('tachesTotal'),
+        tachesValidees: sum('tachesValidees'),
+        tachesEnCours:  sum('tachesEnCours'),
+        tachesEnRetard: sum('tachesEnRetard'),
+        tachesEnTemps:  sum('tachesEnTemps'),
+        employesActifs: rapport.length,
+      },
+    })
   })
 
   // GET /api/reporting/dossiers — rapport complet des dossiers

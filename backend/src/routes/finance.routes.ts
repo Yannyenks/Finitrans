@@ -5,6 +5,9 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { compagniesIn } from '../utils/filters'
+import { logAudit } from '../utils/audit'
+import { nextSequence, withUniqueRetry } from '../utils/sequence'
 
 const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess  = [authenticate, authorize('permFinancier', 'lecture')]
@@ -84,7 +87,7 @@ const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const where: Record<string, unknown> = {}
     if (q.statut)    where.statut    = q.statut
     if (q.type)      where.type      = q.type
-    if (q.compagnie) where.compagnie = q.compagnie
+    if (q.compagnie) where.compagnie = compagniesIn(q.compagnie)
     if (q.dossierId) where.dossierId = q.dossierId
 
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
@@ -160,6 +163,59 @@ const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(paginate(data, total, page, limit))
   })
 
+  // POST /api/finance/virements — transfert de fonds (Service administratif)
+  fastify.post('/virements', { preHandler: writeAccess }, async (request, reply) => {
+    const body = z.object({
+      beneficiaire: z.string().min(2),
+      banque:       z.string().optional(),
+      compte:       z.string().optional(),
+      source:       z.string().optional(),
+      montant:      z.number().positive(),
+      type:         z.string().max(50).optional(),
+      dossierId:    z.string().uuid().optional(),
+      motif:        z.string().min(2),
+      dateVirement: z.string().datetime(),
+      statut:       z.enum(['effectue', 'en_attente', 'annule']).default('en_attente'),
+      reference:    z.string().optional(),
+    }).parse(request.body)
+
+    if (body.dossierId) {
+      const dossier = await prisma.dossier.findUnique({ where: { id: body.dossierId }, select: { id: true } })
+      if (!dossier) throw new NotFoundError('Dossier', body.dossierId)
+    }
+
+    const year = new Date(body.dateVirement).getFullYear()
+    const destination = [body.beneficiaire, body.banque, body.compte].filter(Boolean).join(' — ')
+    const virement = await withUniqueRetry(async () => {
+      const reference = body.reference?.trim() || await nextSequence(`VIR-${year}-`, async prefix =>
+        (await prisma.virement.findFirst({ where: { reference: { startsWith: prefix } }, orderBy: { reference: 'desc' }, select: { reference: true } }))?.reference)
+      return prisma.virement.create({
+        data: {
+          dossierId: body.dossierId, montant: body.montant, motif: body.motif, type: body.type,
+          source: body.source ?? 'Compte FINITRANS', destination, reference,
+          dateVirement: new Date(body.dateVirement), statut: body.statut, effectuePar: request.user.id,
+        },
+        include: { dossier: { select: { numero: true, client: true } }, responsable: { select: { nom: true } } },
+      })
+    })
+    if (body.dossierId) {
+      await logAudit(body.dossierId, request.user.id, 'VIREMENT', `Virement ${virement.reference} — ${body.montant.toLocaleString('fr-FR')} FCFA → ${destination}`)
+    }
+    return reply.code(201).send(virement)
+  })
+
+  // PATCH /api/finance/virements/:id — confirmer / annuler un virement
+  fastify.patch('/virements/:id', { preHandler: writeAccess }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = z.object({
+      statut: z.enum(['effectue', 'en_attente', 'annule']).optional(),
+      motif:  z.string().optional(),
+    }).parse(request.body)
+    const existing = await prisma.virement.findUnique({ where: { id } })
+    if (!existing) throw new NotFoundError('Virement', id)
+    return reply.send(await prisma.virement.update({ where: { id }, data: body }))
+  })
+
   // ─── Statistiques financières ─────────────────────────────
 
   fastify.get('/stats', { preHandler: readAccess }, async (request, reply) => {
@@ -196,13 +252,17 @@ const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   fastify.get('/factures', { preHandler: readAccess }, async (request, reply) => {
     const q = z.object({
-      page:   z.coerce.number().default(1),
-      limit:  z.coerce.number().default(20),
-      type:   z.string().optional(),
+      page:      z.coerce.number().default(1),
+      limit:     z.coerce.number().default(20),
+      type:      z.string().optional(),
+      dossierId: z.string().uuid().optional(),
+      compagnie: z.string().optional(),
     }).parse(request.query)
 
     const where: Record<string, unknown> = {}
-    if (q.type) where.type = q.type
+    if (q.type)      where.type = q.type
+    if (q.dossierId) where.dossierId = q.dossierId
+    if (q.compagnie && compagniesIn(q.compagnie)) where.dossier = { compagnie: compagniesIn(q.compagnie) }
 
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
     const [data, total] = await Promise.all([

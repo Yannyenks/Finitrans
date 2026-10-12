@@ -1,53 +1,17 @@
 import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
+import { createHash } from 'crypto'
+import { Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
-import fs from 'fs'
-import path from 'path'
-import { pipeline } from 'stream/promises'
-import { env } from '../config/env'
+import { logAudit } from '../utils/audit'
+import { NotFoundError } from '../utils/errors'
+import {
+  SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
+  isStatus, loadAttribution, notify, stageCompletion,
+} from '../services/workflow'
 
-// ── Configuration des sous-étapes par étape principale ─────────────────────
-export const SOUS_ETAPES_CONFIG: Record<string, { cle: string; label: string }[]> = {
-  reception: [
-    { cle: 'bl',               label: 'BL' },
-    { cle: 'facture_proforma', label: 'Facture proforma' },
-    { cle: 'saisie_pr',        label: 'Saisie du PR' },
-    { cle: 'paiement_client',  label: 'Paiement par le client' },
-    { cle: 'traitement_sgs',   label: 'Traitement SGS' },
-    { cle: 'di',               label: 'DI' },
-  ],
-  soumission_sgs: [
-    { cle: 'ff_soumission', label: 'FF et soumission des documents fournisseurs' },
-    { cle: 'pvc',           label: 'Obtention du PVC' },
-  ],
-  codage: [
-    { cle: 'etat_codage',  label: 'État de codage et validation' },
-    { cle: 'declaration',  label: 'Déclaration' },
-    { cle: 'regulation',   label: 'Régulation' },
-  ],
-  validation: [
-    { cle: 'validation_docs', label: 'Validation administrative des documents' },
-  ],
-  paiement: [
-    { cle: 'paiement_droits', label: 'Paiement des droits et taxes' },
-  ],
-  bon_compagnie: [
-    { cle: 'facturation_compagnie', label: 'Facturation & paiement (compagnie maritime)' },
-    { cle: 'bon_a_delivrer',        label: 'Soumission & obtention du Bon à Délivrer' },
-    { cle: 'facturation_terminal',  label: 'Facturation & paiement (redevance portuaire)' },
-    { cle: 'bon_livraison',         label: 'Bon de livraison' },
-    { cle: 'gate_pass',             label: 'Gate Pass — Ticket de sortie' },
-  ],
-  operations_kribi: [
-    { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)' },
-    { cle: 'bon_livraison',        label: 'Bon de livraison' },
-    { cle: 'gate_pass',            label: 'Gate Pass — Ticket de sortie' },
-  ],
-  cloture: [
-    { cle: 'rapport_final', label: 'Rapport de clôture du dossier' },
-  ],
-}
+export { SOUS_ETAPES_CONFIG }
 
 const updateSchema = z.object({
   statut:        z.enum(['todo', 'en_cours', 'valide', 'rejete']).optional(),
@@ -57,61 +21,72 @@ const updateSchema = z.object({
   metadata:      z.record(z.unknown()).optional(),
 })
 
+const paramsSchema = z.object({ id: z.string().uuid(), etape: z.string(), cle: z.string() })
+
+const includeUsers = {
+  responsable: { select: { id: true, nom: true, profil: true, role: true, avatarUrl: true } },
+  completedBy: { select: { id: true, nom: true } },
+} as const
+
+function labelOf(etape: string, cle: string) {
+  return (SOUS_ETAPES_CONFIG as Record<string, { cle: string; label: string }[]>)[etape]?.find(s => s.cle === cle)?.label ?? cle
+}
+
 const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
+
+  async function loadContext(params: unknown) {
+    const { id, etape, cle } = paramsSchema.parse(params)
+    if (!isStatus(etape) || !(SOUS_ETAPES_CONFIG[etape] ?? []).some(s => s.cle === cle)) {
+      throw new NotFoundError('Sous-étape', `${etape}/${cle}`)
+    }
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    const existing = await prisma.sousEtapeDossier.findUnique({
+      where: { dossierId_etape_cle: { dossierId: id, etape, cle } },
+    })
+    return { id, etape, cle, dossier, existing }
+  }
 
   // GET /api/dossiers/:id/sous-etapes
   fastify.get('/:id/sous-etapes', { preHandler: [authenticate] }, async (request, reply) => {
-    const { id } = request.params as { id: string }
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
 
-    // Auto-init si aucune sous-étape n'existe
-    const count = await prisma.sousEtapeDossier.count({ where: { dossierId: id } })
-    if (count === 0) {
-      const creates = Object.entries(SOUS_ETAPES_CONFIG).flatMap(([etape, steps]) =>
-        steps.map(({ cle }) => ({ dossierId: id, etape, cle }))
-      )
-      await prisma.sousEtapeDossier.createMany({ data: creates, skipDuplicates: true })
-    }
+    // Crée et attribue automatiquement les sous-étapes manquantes
+    await initSousEtapes(id)
 
     const rows = await prisma.sousEtapeDossier.findMany({
       where: { dossierId: id },
-      include: {
-        responsable: { select: { id: true, nom: true, profil: true, role: true, avatarUrl: true } },
-        completedBy: { select: { id: true, nom: true } },
-      },
+      include: includeUsers,
       orderBy: [{ etape: 'asc' }, { createdAt: 'asc' }],
     })
-
     return reply.send(rows)
   })
 
   // PUT /api/dossiers/:id/sous-etapes/:etape/:cle
   fastify.put('/:id/sous-etapes/:etape/:cle', { preHandler: [authenticate] }, async (request, reply) => {
-    const { id, etape, cle } = request.params as { id: string; etape: string; cle: string }
-    const actor = request.user as any
-    const canManage = actor.profil === 'dg' || actor.profil === 'exploitation'
+    const { id, etape, cle, dossier, existing } = await loadContext(request.params)
+    const actor = request.user
+    const body  = updateSchema.parse(request.body)
+    const isOwnStep = !!existing?.responsableId && existing.responsableId === actor.id
 
-    const body = updateSchema.parse(request.body)
-
-    // Load existing to check if actor is the assigned responsable
-    const existing = await prisma.sousEtapeDossier.findFirst({
-      where: { dossierId: id, etape, cle },
-    })
-    const isOwnStep = existing?.responsableId === actor.id
-
-    // Must be DG/Exploitation OR the assigned responsable of this step
-    if (!canManage && !isOwnStep) {
+    // Superviseurs (DG / Exploitation) : contrôle total. Sinon : uniquement ses propres sous-étapes.
+    if (!actor.superviseur && !isOwnStep) {
       return reply.code(403).send({
         error: 'FORBIDDEN',
-        message: 'Vous ne pouvez modifier que les sous-étapes qui vous sont assignées.',
+        message: 'Vous ne pouvez modifier que les sous-étapes qui vous sont attribuées.',
       })
     }
-
-    // Responsable assignment and final validation restricted to DG/Exploitation
-    if ((body.statut === 'valide' || body.responsableId !== undefined) && !canManage) {
+    if (body.responsableId !== undefined && !actor.superviseur) {
       return reply.code(403).send({
         error: 'FORBIDDEN',
-        message: 'Seuls le DG et le Chef d\'Exploitation peuvent assigner ou valider les sous-étapes.',
+        message: 'Seuls le DG et le Responsable Exploitation peuvent réattribuer une sous-étape.',
       })
+    }
+    if (body.responsableId) {
+      const target = await prisma.user.findUnique({ where: { id: body.responsableId }, select: { actif: true } })
+      if (!target?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
     }
 
     const data: Record<string, unknown> = {}
@@ -120,11 +95,10 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     if (body.deadline      !== undefined) data.deadline      = body.deadline ? new Date(body.deadline) : null
     if (body.notes         !== undefined) data.notes         = body.notes
     if (body.metadata      !== undefined) {
-      // Merge metadata so preuve_url and other fields are not lost
+      // Fusion : préserve preuve_url et les autres champs déjà saisis
       const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
-      data.metadata = { ...existingMeta, ...body.metadata }
+      data.metadata = { ...existingMeta, ...body.metadata } as Prisma.InputJsonValue
     }
-
     if (body.statut === 'valide') {
       data.completedAt   = new Date()
       data.completedById = actor.id
@@ -138,78 +112,126 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
       create: { dossierId: id, etape, cle, ...data },
       update: data,
-      include: {
-        responsable: { select: { id: true, nom: true, profil: true, role: true, avatarUrl: true } },
-        completedBy: { select: { id: true, nom: true } },
-      },
+      include: includeUsers,
     })
+
+    const label = labelOf(etape, cle)
+    if (body.statut && body.statut !== existing?.statut) {
+      const actions: Record<string, string> = {
+        valide: 'SOUS_ETAPE_VALIDEE', rejete: 'SOUS_ETAPE_REJETEE', en_cours: 'SOUS_ETAPE_DEMARREE', todo: 'SOUS_ETAPE_REINITIALISEE',
+      }
+      await logAudit(id, actor.id, actions[body.statut], `${STATUS_LABELS[etape]} — ${label}`)
+    }
+
+    if (body.responsableId && body.responsableId !== existing?.responsableId) {
+      await notify([body.responsableId], {
+        type: 'action_requise',
+        titre: 'Nouvelle tâche attribuée',
+        message: `${dossier.numero} — ${STATUS_LABELS[etape]} : ${label}`,
+        dossierId: id,
+        actionUrl: `/dossiers/${id}`,
+      })
+    }
+
+    // Étape courante entièrement validée → prévenir le responsable du dossier
+    if (body.statut === 'valide' && dossier.status === etape) {
+      const completion = await stageCompletion(id, etape, dossier.site)
+      if (completion.allDone && dossier.responsableId !== actor.id) {
+        await notify([dossier.responsableId], {
+          type: 'action_requise',
+          titre: 'Étape prête à être clôturée',
+          message: `${dossier.numero} — toutes les tâches « ${STATUS_LABELS[etape]} » sont validées. Vous pouvez passer à l'étape suivante.`,
+          dossierId: id,
+          actionUrl: `/dossiers/${id}`,
+        })
+      }
+    }
 
     return reply.send(row)
   })
 
-  // POST /api/dossiers/:id/sous-etapes/:etape/:cle/preuve — proof file upload
-  fastify.post('/:id/sous-etapes/:etape/:cle/preuve', { preHandler: [authenticate] }, async (request, reply) => {
-    const { id, etape, cle } = request.params as { id: string; etape: string; cle: string }
-    const actor = request.user as any
-    const canManage = actor.profil === 'dg' || actor.profil === 'exploitation'
+  // POST /api/dossiers/:id/sous-etapes/:etape/:cle/prendre — se positionner sur une tâche non attribuée
+  fastify.post('/:id/sous-etapes/:etape/:cle/prendre', { preHandler: [authenticate] }, async (request, reply) => {
+    const { id, etape, cle, dossier, existing } = await loadContext(request.params)
+    const actor = request.user
 
-    const existing = await prisma.sousEtapeDossier.findFirst({
-      where: { dossierId: id, etape, cle },
+    if (existing?.responsableId && existing.responsableId !== actor.id && !actor.superviseur) {
+      return reply.code(409).send({ error: 'DEJA_ATTRIBUEE', message: 'Cette tâche est déjà attribuée à un autre compte.' })
+    }
+    if (!actor.superviseur) {
+      const attribution = await loadAttribution()
+      const profil = attribution[etape].sousEtapes[cle] ?? attribution[etape].owner
+      if (profil !== actor.profil) {
+        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Cette tâche relève d\'un autre profil.' })
+      }
+    }
+    if (!applicableSousEtapes(etape, dossier.site).some(s => s.cle === cle)) {
+      return reply.code(422).send({ error: 'NON_APPLICABLE', message: 'Sous-étape non applicable à ce site.' })
+    }
+
+    const row = await prisma.sousEtapeDossier.upsert({
+      where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
+      create: { dossierId: id, etape, cle, responsableId: actor.id, statut: 'en_cours' },
+      update: { responsableId: actor.id, statut: existing?.statut === 'todo' ? 'en_cours' : undefined },
+      include: includeUsers,
     })
-    const isOwnStep = existing?.responsableId === actor.id
+    await logAudit(id, actor.id, 'SOUS_ETAPE_PRISE_EN_CHARGE', `${STATUS_LABELS[etape]} — ${labelOf(etape, cle)}`)
+    return reply.send(row)
+  })
 
-    if (!canManage && !isOwnStep) {
+  // POST /api/dossiers/:id/sous-etapes/:etape/:cle/preuve — justificatif stocké en base
+  fastify.post('/:id/sous-etapes/:etape/:cle/preuve', { preHandler: [authenticate] }, async (request, reply) => {
+    const { id, etape, cle, existing } = await loadContext(request.params)
+    const actor = request.user
+    const isOwnStep = !!existing?.responsableId && existing.responsableId === actor.id
+
+    if (!actor.superviseur && !isOwnStep) {
       return reply.code(403).send({
         error: 'FORBIDDEN',
-        message: 'Vous ne pouvez uploader une preuve que pour vos propres sous-étapes.',
+        message: 'Vous ne pouvez joindre une preuve que pour vos propres sous-étapes.',
       })
     }
 
     const fileData = await request.file()
     if (!fileData) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
 
-    const { filename, file: fileStream } = fileData
-    const safeFilename = `${Date.now()}_${filename.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const uploadDir = path.resolve(process.cwd(), env.UPLOADS_DIR, id, 'preuves')
-    await fs.promises.mkdir(uploadDir, { recursive: true })
-    const filepath = path.join(uploadDir, safeFilename)
+    const contenu = await fileData.toBuffer()
+    const hashContenu = createHash('sha256').update(contenu).digest('hex')
+    const taille = contenu.length < 1_048_576
+      ? `${Math.max(1, Math.round(contenu.length / 1024))} Ko`
+      : `${(contenu.length / 1_048_576).toFixed(1)} Mo`
 
-    await pipeline(fileStream, fs.createWriteStream(filepath))
-
-    const preuveUrl = `/uploads/${id}/preuves/${safeFilename}`
-    const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
-
-    const updated = await prisma.sousEtapeDossier.upsert({
-      where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
-      create: { dossierId: id, etape, cle, metadata: { ...existingMeta, preuve_url: preuveUrl, preuve_nom: filename } },
-      update: { metadata: { ...existingMeta, preuve_url: preuveUrl, preuve_nom: filename } },
-      include: {
-        responsable: { select: { id: true, nom: true, profil: true, role: true, avatarUrl: true } },
-        completedBy: { select: { id: true, nom: true } },
+    const doc = await prisma.document.create({
+      data: {
+        dossierId: id, uploadePar: actor.id, nom: fileData.filename, type: fileData.mimetype,
+        taille, contenu, hashContenu, etape, url: '',
       },
     })
+    const url = `/api/dossiers/${id}/documents/${doc.id}/content`
+    await prisma.document.update({ where: { id: doc.id }, data: { url } })
 
+    const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
+    const metadata = { ...existingMeta, preuve_url: url, preuve_nom: fileData.filename, preuve_doc_id: doc.id }
+    const updated = await prisma.sousEtapeDossier.upsert({
+      where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
+      create: { dossierId: id, etape, cle, metadata },
+      update: { metadata },
+      include: includeUsers,
+    })
+
+    await logAudit(id, actor.id, 'UPLOAD_PREUVE', `Preuve « ${fileData.filename} » — ${labelOf(etape, cle)}`)
     return reply.code(201).send(updated)
   })
 
-  // GET /api/dossiers/:id/sous-etapes/check — vérifie si toutes les sous-étapes d'une étape sont validées
+  // GET /api/dossiers/:id/sous-etapes/check?etape=… — toutes les sous-étapes d'une étape sont-elles validées ?
   fastify.get('/:id/sous-etapes/check', { preHandler: [authenticate] }, async (request, reply) => {
-    const { id }    = request.params as { id: string }
-    const { etape } = (request.query as any)
+    const { id }    = z.object({ id: z.string().uuid() }).parse(request.params)
+    const { etape } = z.object({ etape: z.string() }).parse(request.query)
+    if (!isStatus(etape)) return reply.code(400).send({ error: 'BAD_REQUEST', message: 'Étape inconnue' })
 
-    if (!etape) return reply.code(400).send({ error: 'Paramètre etape requis' })
-
-    const config = SOUS_ETAPES_CONFIG[etape] ?? []
-    if (config.length === 0) return reply.send({ allDone: true, count: 0, done: 0 })
-
-    const rows = await prisma.sousEtapeDossier.findMany({
-      where: { dossierId: id, etape },
-    })
-
-    const done  = rows.filter(r => r.statut === 'valide').length
-    const total = config.length
-
-    return reply.send({ allDone: done >= total, done, total })
+    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { site: true } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    return reply.send(await stageCompletion(id, etape, dossier.site))
   })
 }
 

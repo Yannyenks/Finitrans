@@ -15,7 +15,8 @@ interface Props {
   open:        boolean;
   onClose:     () => void;
   diId:        string;
-  dossierId:   string;
+  /** Dossier concerné ; absent depuis l'écran Gestion DI (justificatif rattaché à la DI) */
+  dossierId?:  string;
   diNumero:    string;
   soldeActuel: number;
   devise?:     string;
@@ -101,8 +102,14 @@ export default function FactureDialog({ open, onClose, diId, dossierId, diNumero
       try {
         const fd = new FormData();
         fd.append("file", file);
-        fd.append("etape", "facture_di");
-        await uploadFile(`/api/dossiers/${dossierId}/upload`, fd);
+        if (dossierId) {
+          fd.append("etape", "facture_di");
+          await uploadFile(`/api/dossiers/${dossierId}/upload`, fd);
+        } else {
+          fd.append("categorie", categorie);
+          fd.append("motif", `Facture ${numFacture.trim()}`);
+          await uploadFile(`/api/di/${diId}/factures`, fd);
+        }
       } catch {
         notif.erreur("Déduction enregistrée mais le document n'a pas pu être joint.");
       }

@@ -1,7 +1,8 @@
 import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, getStoredUser } from "@/lib/api";
+import { api, getStoredUser, uploadFile } from "@/lib/api";
+import { printDocument } from "@/lib/print";
 import { motion } from "framer-motion";
 import {
   FolderOpen, DollarSign, FileText, Banknote,
@@ -157,20 +158,41 @@ const VirementDialog = ({ open, onClose }: { open: boolean; onClose: () => void 
 };
 
 // ── Dialog facture proforma ───────────────────────────────────────────────────
-const ProformaDialog = ({ open, onClose }: { open: boolean; onClose: () => void }) => {
-  const [form, setForm] = useState({
-    numero: `PRO-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}`,
-    client: "", description: "", montant: "", devise: "XAF",
-    validiteJours: "30", notes: "",
-  });
+const TAUX: Record<string, number> = { XAF: 1, EUR: 655.957, USD: 605 };
 
-  const handleGenerate = () => {
-    toast({
-      title:       "Facture proforma générée",
-      description: `${form.numero} — ${form.client} — ${Number(form.montant).toLocaleString("fr-FR")} ${form.devise}`,
-    });
-    onClose();
+const ProformaDialog = ({ open, onClose, dossiers, entreprise }: { open: boolean; onClose: () => void; dossiers: any[]; entreprise?: any }) => {
+  const qc = useQueryClient();
+  const vide = {
+    numero: `PRO-${new Date().getFullYear()}-${String(Date.now()).slice(-5)}`,
+    dossierId: "", description: "", montant: "", devise: "XAF", validiteJours: "30",
   };
+  const [form, setForm] = useState(vide);
+  const dossier = dossiers.find(d => d.id === form.dossierId);
+  const montantXAF = Math.round((parseFloat(form.montant) || 0) * (TAUX[form.devise] ?? 1));
+
+  const texte = () => [
+    `N° : ${form.numero}`, `Date : ${new Date().toLocaleDateString("fr-FR")}`,
+    `Client : ${dossier?.client ?? ""}`, `Dossier : ${dossier?.numero ?? ""} — conteneur ${dossier?.conteneur ?? ""}`, "",
+    `Prestations : ${form.description || "Prestations de transit et dédouanement"}`, "",
+    `Montant : ${Number(form.montant || 0).toLocaleString("fr-FR")} ${form.devise}${form.devise !== "XAF" ? ` (≈ ${montantXAF.toLocaleString("fr-FR")} FCFA)` : ""}`,
+    `Validité : ${form.validiteJours} jours`,
+  ].join("\n");
+
+  const generer = useMutation({
+    mutationFn: () => api.post(`/api/dossiers/${form.dossierId}/factures`, {
+      numero: form.numero.trim(), type: "proforma", montant: montantXAF, compagnie: dossier?.compagnie ?? "",
+      dateFacture: new Date().toISOString(),
+      description: form.description.trim() || `Proforma — prestations de transit (validité ${form.validiteJours} j)`,
+    }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["factures-compta"] });
+      toast({ title: "Facture proforma enregistrée", description: `${form.numero} — ${montantXAF.toLocaleString("fr-FR")} FCFA` });
+      try { printDocument("Facture proforma", texte(), entreprise); } catch { /* pop-up bloquée */ }
+      setForm(vide);
+      onClose();
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
@@ -183,50 +205,45 @@ const ProformaDialog = ({ open, onClose }: { open: boolean; onClose: () => void 
         <div className="space-y-4 mt-2">
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">N° Proforma</Label>
-              <Input value={form.numero} onChange={e => setForm({ ...form, numero: e.target.value })}
-                className="bg-muted/50 font-mono text-sm" />
+              <Label className="text-xs font-medium">N° Proforma *</Label>
+              <Input value={form.numero} onChange={e => setForm({ ...form, numero: e.target.value })} className="bg-muted/50 font-mono text-sm" />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-medium">Client *</Label>
-              <Input value={form.client} onChange={e => setForm({ ...form, client: e.target.value })}
-                placeholder="Nom du client" className="bg-muted/50" />
+              <Label className="text-xs font-medium">Dossier *</Label>
+              <Select value={form.dossierId} onValueChange={v => setForm({ ...form, dossierId: v })}>
+                <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Choisir..." /></SelectTrigger>
+                <SelectContent>{dossiers.map(d => <SelectItem key={d.id} value={d.id}>{d.numero} — {d.client}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Description des services</Label>
             <Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })}
-              placeholder="Prestation de dédouanement, transit maritime, frais portuaires..."
-              className="bg-muted/50 h-20" />
+              placeholder="Prestation de dédouanement, transit maritime, frais portuaires..." className="bg-muted/50 h-20" />
           </div>
           <div className="grid grid-cols-3 gap-4">
             <div className="col-span-2 space-y-1.5">
               <Label className="text-xs font-medium">Montant *</Label>
-              <Input type="number" value={form.montant} onChange={e => setForm({ ...form, montant: e.target.value })}
-                placeholder="Ex: 850 000" className="bg-muted/50 font-mono" />
+              <Input type="number" value={form.montant} onChange={e => setForm({ ...form, montant: e.target.value })} className="bg-muted/50 font-mono" />
+              {form.devise !== "XAF" && montantXAF > 0 && <p className="text-[11px] text-secondary">≈ {montantXAF.toLocaleString("fr-FR")} FCFA</p>}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-medium">Devise</Label>
               <Select value={form.devise} onValueChange={v => setForm({ ...form, devise: v })}>
                 <SelectTrigger className="bg-muted/50"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="XAF">XAF</SelectItem>
-                  <SelectItem value="EUR">EUR</SelectItem>
-                  <SelectItem value="USD">USD</SelectItem>
-                </SelectContent>
+                <SelectContent>{Object.keys(TAUX).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-medium">Validité (jours)</Label>
-            <Input type="number" value={form.validiteJours} onChange={e => setForm({ ...form, validiteJours: e.target.value })}
-              className="bg-muted/50 font-mono max-w-[120px]" />
+            <Input type="number" value={form.validiteJours} onChange={e => setForm({ ...form, validiteJours: e.target.value })} className="bg-muted/50 font-mono max-w-[120px]" />
           </div>
           <div className="flex justify-end gap-2 pt-1 border-t border-border">
             <Button variant="outline" onClick={onClose}>Annuler</Button>
-            <Button onClick={handleGenerate} disabled={!form.client || !form.montant}
+            <Button onClick={() => generer.mutate()} disabled={!form.dossierId || !form.numero.trim() || montantXAF <= 0 || generer.isPending}
               className="gap-2 bg-primary text-primary-foreground">
-              <Receipt className="w-3.5 h-3.5" /> Générer la proforma
+              {generer.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Receipt className="w-3.5 h-3.5" />} Enregistrer et imprimer
             </Button>
           </div>
         </div>
@@ -244,6 +261,27 @@ const Administratif = () => {
   const [proOpen, setProOpen]     = useState(false);
   const [docTemplate, setDocTemplate] = useState<string | null>(null);
   const [docContent, setDocContent]   = useState("");
+  const [docDossier, setDocDossier]   = useState("");
+  const qc = useQueryClient();
+
+  const { data: entreprise } = useQuery({ queryKey: ["entreprise"], queryFn: () => api.get<any>("/api/admin/entreprise"), staleTime: 10 * 60_000 });
+
+  const docLabel = DOC_TEMPLATES.find(t => t.id === docTemplate)?.label ?? "Document";
+  const sauverDoc = useMutation({
+    mutationFn: () => {
+      const fd = new FormData();
+      const nom = `${docTemplate}-${new Date().toISOString().slice(0, 10)}-${Date.now().toString(36)}.txt`;
+      fd.append("file", new File([`${docLabel}\n\n${docContent}`], nom, { type: "text/plain" }));
+      return uploadFile(`/api/dossiers/${docDossier}/upload`, fd);
+    },
+    onSuccess: () => toast({ title: "Document classé dans le dossier", description: docLabel }),
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+  const confirmerVirement = useMutation({
+    mutationFn: (id: string) => api.patch(`/api/finance/virements/${id}`, { statut: "effectue" }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["virements-admin"] }); toast({ title: "Virement confirmé" }); },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
 
   const { data: dossiersData, isLoading } = useQuery({
     queryKey: ["dossiers-admin", search],
@@ -386,7 +424,7 @@ const Administratif = () => {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
-                  {["Référence","Bénéficiaire","Type","Montant","Statut","Date","Dossier"].map(h => (
+                  {["Référence","Bénéficiaire","Type","Montant","Statut","Date","Dossier",""].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground uppercase">{h}</th>
                   ))}
                 </tr>
@@ -396,7 +434,7 @@ const Administratif = () => {
                   <motion.tr key={v.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
                     className="border-b border-border/50 hover:bg-muted/30">
                     <td className="px-4 py-3 text-sm font-mono text-foreground">{v.reference}</td>
-                    <td className="px-4 py-3 text-sm text-foreground">{v.beneficiaire ?? v.dossier?.client ?? "—"}</td>
+                    <td className="px-4 py-3 text-sm text-foreground">{v.destination ?? "—"}{v.motif && <div className="text-[11px] text-muted-foreground">{v.motif}</div>}</td>
                     <td className="px-4 py-3 text-sm text-muted-foreground capitalize">{v.type ?? "—"}</td>
                     <td className="px-4 py-3 text-sm font-display font-bold text-foreground">
                       {Number(v.montant).toLocaleString("fr-FR")}
@@ -416,10 +454,17 @@ const Administratif = () => {
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {v.dossier?.numero ?? "—"}
                     </td>
+                    <td className="px-4 py-3">
+                      {v.statut === "en_attente" && (
+                        <Button size="sm" variant="outline" className="h-7 text-xs" disabled={confirmerVirement.isPending} onClick={() => confirmerVirement.mutate(v.id)}>
+                          Confirmer
+                        </Button>
+                      )}
+                    </td>
                   </motion.tr>
                 ))}
                 {virts.length === 0 && (
-                  <tr><td colSpan={7} className="text-center py-10 text-muted-foreground">Aucun virement enregistré</td></tr>
+                  <tr><td colSpan={8} className="text-center py-10 text-muted-foreground">Aucun virement enregistré</td></tr>
                 )}
               </tbody>
             </table>
@@ -460,13 +505,19 @@ const Administratif = () => {
                 className="bg-muted/50 h-[300px] font-mono text-sm resize-none"
               />
               {docTemplate && (
+                <Select value={docDossier} onValueChange={setDocDossier}>
+                  <SelectTrigger className="bg-card"><SelectValue placeholder="Dossier où classer le document..." /></SelectTrigger>
+                  <SelectContent>{dossiers.map((d: any) => <SelectItem key={d.id} value={d.id}>{d.numero} — {d.client}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+              {docTemplate && (
                 <div className="flex gap-2">
-                  <Button className="gap-1.5 bg-primary text-primary-foreground"
-                    onClick={() => toast({ title: "Document sauvegardé", description: DOC_TEMPLATES.find(t => t.id === docTemplate)?.label })}>
-                    <FileText className="w-3.5 h-3.5" /> Sauvegarder
+                  <Button className="gap-1.5 bg-primary text-primary-foreground" disabled={!docDossier || !docContent.trim() || sauverDoc.isPending}
+                    onClick={() => sauverDoc.mutate()}>
+                    {sauverDoc.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />} Classer dans le dossier
                   </Button>
-                  <Button variant="outline" className="gap-1.5"
-                    onClick={() => toast({ title: "Impression lancée" })}>
+                  <Button variant="outline" className="gap-1.5" disabled={!docContent.trim()}
+                    onClick={() => { try { printDocument(docLabel, docContent, entreprise); } catch (e: any) { toast({ title: "Impression impossible", description: e.message, variant: "destructive" }); } }}>
                     <Download className="w-3.5 h-3.5" /> Imprimer
                   </Button>
                   <Button variant="outline" className="gap-1.5 ml-auto"
@@ -481,7 +532,7 @@ const Administratif = () => {
       </Tabs>
 
       <VirementDialog open={virOpen} onClose={() => setVirOpen(false)} />
-      <ProformaDialog open={proOpen} onClose={() => setProOpen(false)} />
+      <ProformaDialog open={proOpen} onClose={() => setProOpen(false)} dossiers={dossiers} entreprise={entreprise} />
     </AppLayout>
   );
 };

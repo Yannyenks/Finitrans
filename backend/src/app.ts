@@ -31,6 +31,11 @@ import employeRoutes       from './routes/employe.routes'
 import exportsRoutes       from './routes/exports.routes'
 import sgsRoutes           from './routes/sgs.routes'
 import sousEtapesRoutes    from './routes/sous-etapes.routes'
+import rolesRoutes         from './routes/roles.routes'
+import supervisionRoutes   from './routes/supervision.routes'
+import adminRoutes         from './routes/admin.routes'
+import rhRoutes            from './routes/rh.routes'
+import comptaRoutes        from './routes/compta.routes'
 
 export async function buildApp(opts: { serverless?: boolean } = {}): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -68,12 +73,24 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
     })
   }
 
+  // Quota par utilisateur (et non par IP) : tout le bureau partage souvent la même IP publique
   await fastify.register(rateLimit, {
-    max: 200,
+    max: env.NODE_ENV === 'test' ? 100_000 : 600,
     timeWindow: '1 minute',
-    errorResponseBuilder: () => ({
+    keyGenerator: (request) => {
+      const auth = request.headers.authorization
+      if (auth?.startsWith('Bearer ')) {
+        try {
+          const payload = JSON.parse(Buffer.from(auth.split('.')[1] ?? '', 'base64url').toString('utf8'))
+          if (typeof payload.sub === 'string') return `${request.ip}:${payload.sub}`
+        } catch { /* jeton illisible : quota par IP */ }
+      }
+      return request.ip
+    },
+    errorResponseBuilder: (_request, context) => ({
+      statusCode: 429,
       error: 'RATE_LIMIT',
-      message: 'Trop de requêtes, veuillez patienter',
+      message: `Trop de requêtes, réessayez dans ${Math.ceil(context.ttl / 1000)} s`,
     }),
   })
 
@@ -130,47 +147,59 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
   fastify.register(exportsRoutes,       { prefix: '/api/exports' })
   fastify.register(sgsRoutes,           { prefix: '/api/sgs' })
   fastify.register(sousEtapesRoutes,    { prefix: '/api/dossiers' })
+  fastify.register(rolesRoutes,         { prefix: '/api/roles' })
+  fastify.register(supervisionRoutes,   { prefix: '/api/supervision' })
+  fastify.register(adminRoutes,         { prefix: '/api/admin' })
+  fastify.register(rhRoutes,            { prefix: '/api/rh' })
+  fastify.register(comptaRoutes,        { prefix: '/api/compta' })
 
   // ─── Gestion d'erreurs globale ────────────────────────────
 
-  fastify.setErrorHandler((error, _request, reply) => {
-    fastify.log.error(error)
+  fastify.setErrorHandler((err, _request, reply) => {
+    const error = err as Error & { code?: string; statusCode?: number; errors?: unknown; issues?: { path: (string | number)[]; message: string }[] }
 
     if (error instanceof AppError) {
-      return reply.code(error.statusCode).send({
-        error:   error.code,
-        message: error.message,
+      return reply.code(error.statusCode).send({ error: error.code, message: error.message })
+    }
+
+    // Erreurs Zod (validation) — message lisible : premier champ en erreur
+    if (error.name === 'ZodError') {
+      const issue = error.issues?.[0]
+      const champ = issue?.path?.join('.')
+      return reply.code(400).send({
+        error:   'VALIDATION_ERROR',
+        message: issue ? `Données invalides${champ ? ` (${champ})` : ''} : ${issue.message}` : 'Données invalides',
+        details: error.issues,
       })
     }
 
-    // Erreurs Zod (validation)
-    if (error.name === 'ZodError') {
-      return reply.code(400).send({
-        error:   'VALIDATION_ERROR',
-        message: 'Données invalides',
-        details: (error as any).errors,
-      })
+    // Paramètre de filtre invalide transmis à Prisma (ex. statut inconnu) → erreur client, pas serveur
+    if (error.name === 'PrismaClientValidationError') {
+      return reply.code(400).send({ error: 'BAD_REQUEST', message: 'Paramètres de requête invalides' })
     }
 
     // Erreurs Prisma
     if (error.code === 'P2002') {
-      return reply.code(409).send({
-        error:   'CONFLICT',
-        message: 'Cette valeur existe déjà (contrainte d\'unicité)',
-      })
+      return reply.code(409).send({ error: 'CONFLICT', message: 'Cette valeur existe déjà (contrainte d\'unicité)' })
     }
     if (error.code === 'P2025') {
-      return reply.code(404).send({
-        error:   'NOT_FOUND',
-        message: 'Enregistrement introuvable',
-      })
+      return reply.code(404).send({ error: 'NOT_FOUND', message: 'Enregistrement introuvable' })
+    }
+    if (error.code === 'P2003') {
+      return reply.code(409).send({ error: 'REFERENCE', message: 'Opération impossible : l\'élément est référencé ailleurs' })
     }
 
-    // Erreur JWT
-    if (error.statusCode === 401) {
-      return reply.code(401).send({ error: 'UNAUTHORIZED', message: error.message })
+    // Fichier trop volumineux (multipart)
+    if (error.code === 'FST_REQ_FILE_TOO_LARGE' || error.code === 'FST_FILES_LIMIT') {
+      return reply.code(413).send({ error: 'FILE_TOO_LARGE', message: `Fichier trop volumineux (max ${env.MAX_FILE_SIZE_MB} Mo)` })
     }
 
+    // Erreurs client Fastify (JSON invalide, rate-limit, 401 JWT…)
+    if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
+      return reply.code(error.statusCode).send({ error: error.code ?? 'BAD_REQUEST', message: error.message })
+    }
+
+    fastify.log.error(error)
     return reply.code(500).send({
       error:   'INTERNAL_ERROR',
       message: env.NODE_ENV === 'production' ? 'Erreur interne du serveur' : error.message,

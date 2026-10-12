@@ -32,3 +32,12 @@ Thumbs.db
 
 # ── Prisma generated client (regenerated from schema) ────────────────────────
 backend/src/generated/
+
+# ── Secrets locaux / scripts de déploiement contenant des jetons ─────────────
+deploy-vercel.mjs
+
+# ── Artefacts de tests ───────────────────────────────────────────────────────
+test-results/
+playwright-report/
+finitrans-buddy-main/test-results/
+finitrans-buddy-main/playwright-report/

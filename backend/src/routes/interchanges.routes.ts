@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { compagniesIn } from '../utils/filters'
 import { differenceInDays, isPast } from 'date-fns'
 
 const interchangesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
@@ -24,7 +25,7 @@ const interchangesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) 
 
     const where: Record<string, unknown> = {}
     if (q.statut)    where.statut    = q.statut
-    if (q.compagnie) where.compagnie = q.compagnie
+    if (q.compagnie) where.compagnie = compagniesIn(q.compagnie)
     if (q.dossierId) where.dossierId = q.dossierId
     if (q.enRetard)  where.statut    = 'emis', where.dateLimite = { lt: new Date() }
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
@@ -34,7 +34,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 const Dossiers = () => {
   const navigate = useNavigate();
-  const [search, setSearch]               = useState("");
+  const [searchParams] = useSearchParams();
+  const [search, setSearch]               = useState(() => searchParams.get("search") ?? "");
   const [filterStatus, setFilterStatus]   = useState("all");
   const [filterCompagnie, setFilterCompagnie] = useState("all");
   const [filterSite, setFilterSite]       = useState("all");
@@ -56,8 +57,8 @@ const Dossiers = () => {
   });
 
   const dossiers    = data?.data ?? [];
-  const total       = data?.total ?? 0;
-  const totalPages  = data?.totalPages ?? 1;
+  const total       = data?.meta?.total ?? 0;
+  const totalPages  = data?.meta?.totalPages ?? 1;
 
   const resetFilters = () => {
     setFilterStatus("all");
