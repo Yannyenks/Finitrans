@@ -39,6 +39,7 @@ export type SoundType =
   | 'warning'   // sous-étape rouverte / révisée
   | 'retard'    // délai dépassé — urgent
   | 'error'     // erreur / rejet
+  | 'alarme'    // alarme répétée (solde DI sous le seuil)
 
 const SOUNDS: Record<SoundType, (ac: AudioContext) => void> = {
   // Accord ascendant C5-E5-G5 — validation réussie
@@ -84,6 +85,14 @@ const SOUNDS: Record<SoundType, (ac: AudioContext) => void> = {
     note(ac, 330, 0.32, 0.22, 'square', 0.18)
   },
 
+  // Sonnerie d'alarme : deux séries de bips alternés, bien audible
+  alarme: ac => {
+    for (let i = 0; i < 6; i++) {
+      note(ac, i % 2 ? 660 : 880, i * 0.22, 0.18, 'square', 0.22)
+      note(ac, i % 2 ? 660 : 880, 1.6 + i * 0.22, 0.18, 'square', 0.22)
+    }
+  },
+
   // Descente sawtooth — rejet / erreur
   error: ac => {
     note(ac, 330, 0,    0.14, 'sawtooth', 0.18)
@@ -102,5 +111,30 @@ export function playSound(type: SoundType): void {
     }
   } catch {
     // Web Audio non disponible — ignore silencieusement
+  }
+}
+
+/**
+ * Joue un son ; si le navigateur bloque l'audio (pas encore d'interaction sur la page),
+ * le son est joué au premier clic ou à la première touche.
+ */
+export function playSoundWhenAllowed(type: SoundType): void {
+  try {
+    const ac = ctx()
+    if (ac.state !== 'suspended') { SOUNDS[type](ac); return }
+    ac.resume().then(() => {
+      if (ac.state === 'running') SOUNDS[type](ac)
+      else throw new Error('suspended')
+    }).catch(() => {
+      const jouer = () => {
+        document.removeEventListener('pointerdown', jouer)
+        document.removeEventListener('keydown', jouer)
+        playSound(type)
+      }
+      document.addEventListener('pointerdown', jouer, { once: true })
+      document.addEventListener('keydown', jouer, { once: true })
+    })
+  } catch {
+    // Web Audio non disponible
   }
 }

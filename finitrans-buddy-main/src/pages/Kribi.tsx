@@ -69,6 +69,11 @@ const Kribi = () => {
     queryKey: ["comptes-rendus-kribi"],
     queryFn:  () => api.get<any>("/api/kribi/comptes-rendus?limit=10&site=Kribi"),
   });
+  const { data: chauffeursRegistre = [] } = useQuery({
+    queryKey: ["logistique-chauffeurs-actifs"],
+    queryFn:  () => api.get<any[]>("/api/logistique/chauffeurs?actifs=true"),
+    staleTime: 5 * 60_000,
+  });
   const { data: empData } = useQuery({
     queryKey: ["employes-kribi"],
     queryFn:  () => api.get<any>("/api/employes?site=Kribi&actif=true"),
@@ -399,7 +404,12 @@ const Kribi = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Nom du chauffeur *</Label>
-                <Input placeholder="Ex : Emmanuel NDJOCK" value={gpForm.chauffeur} onChange={e => setGpForm({ ...gpForm, chauffeur: e.target.value })} className="bg-muted/50" />
+                <Input list="chauffeurs-registre" placeholder="Ex : Emmanuel NDJOCK" value={gpForm.chauffeur} className="bg-muted/50"
+                  onChange={e => {
+                    const ch = chauffeursRegistre.find((c: any) => c.nom === e.target.value);
+                    setGpForm({ ...gpForm, chauffeur: e.target.value, telephone: ch?.telephone ?? gpForm.telephone });
+                  }} />
+                <datalist id="chauffeurs-registre">{chauffeursRegistre.map((c: any) => <option key={c.id} value={c.nom}>{c.telephone}</option>)}</datalist>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Téléphone *</Label>

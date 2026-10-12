@@ -129,17 +129,44 @@ const messagerieRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.post('/conversations/:id/messages', { preHandler: [authenticate] }, async (request, reply) => {
     const { id }   = z.object({ id: z.string().uuid() }).parse(request.params)
     const userId   = (request.user as any).id
-    const { contenu } = z.object({ contenu: z.string().min(1) }).parse(request.body)
+    const { contenu, mentions } = z.object({
+      contenu:  z.string().min(1).max(5000),
+      mentions: z.array(z.string().uuid()).max(20).optional(),
+    }).parse(request.body)
 
     const participant = await prisma.conversationParticipant.findUnique({
       where: { conversationId_userId: { conversationId: id, userId } },
     })
     if (!participant) throw new ForbiddenError('Vous n\'êtes pas membre de cette conversation')
 
+    // Personnes mentionnées (@Nom) : comptes actifs uniquement, hors auteur
+    const mentionnes = mentions?.length
+      ? await prisma.user.findMany({ where: { id: { in: [...new Set(mentions)].filter(m => m !== userId) }, actif: true }, select: { id: true } })
+      : []
+
     const message = await prisma.message.create({
-      data: { conversationId: id, auteurId: userId, contenu },
+      data: { conversationId: id, auteurId: userId, contenu, mentions: mentionnes.map(m => m.id) },
       include: { auteur: { select: { id: true, nom: true, avatarUrl: true } } },
     })
+
+    if (mentionnes.length > 0) {
+      // Une personne mentionnée rejoint la conversation pour pouvoir répondre
+      await prisma.conversationParticipant.createMany({
+        data: mentionnes.map(m => ({ conversationId: id, userId: m.id })),
+        skipDuplicates: true,
+      })
+      const conv = await prisma.conversation.findUnique({ where: { id }, select: { titre: true, dossierId: true } })
+      await prisma.notification.createMany({
+        data: mentionnes.map(m => ({
+          userId: m.id,
+          type: 'message' as const,
+          titre: `${request.user.nom} vous a mentionné`,
+          message: `« ${contenu.slice(0, 140)} » — ${conv?.titre ?? 'conversation'}`,
+          dossierId: conv?.dossierId ?? undefined,
+          actionUrl: `/messagerie?conversation=${id}`,
+        })),
+      })
+    }
 
     // Mettre à jour le dernier message de la conversation
     await prisma.conversation.update({

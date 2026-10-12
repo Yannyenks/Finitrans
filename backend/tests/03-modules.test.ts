@@ -218,6 +218,8 @@ const LECTURES = [
   '/api/rh/fiches', '/api/rh/conges', '/api/rh/mes-conges', '/api/rh/masse-salariale', '/api/compta/dashboard',
   '/api/compta/comptes', '/api/compta/journaux', '/api/compta/exercices', '/api/compta/ecritures', '/api/compta/balance',
   '/api/compta/resultat', '/api/compta/bilan', '/api/compta/tresorerie', '/api/compta/creances', '/api/compta/comptabilisation/apercu',
+  '/api/di/mouvements', '/api/di/alertes-seuil', '/api/logistique/chauffeurs', '/api/logistique/camions',
+  '/api/logistique/transports', '/api/logistique/resume',
 ]
 
 describe('Matrice des droits — aucun compte ne provoque d\'erreur serveur', () => {

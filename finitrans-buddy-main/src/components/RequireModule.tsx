@@ -6,12 +6,12 @@ import { Module, hasModule, isSupervisor, useAuth } from "@/lib/permissions";
 import AppLayout from "./AppLayout";
 import { Button } from "./ui/button";
 
-/** Page d'accueil selon le rôle : la Direction pilote, les autres comptes traitent leurs tâches. */
+/** Page d'accueil selon le rôle : la Direction pilote, les autres employés arrivent sur leurs Alertes. */
 export function homeFor(user: AuthUser | null): string {
   if (!user) return "/";
   if (user.profil === "dg") return "/dashboard";
   if (isSupervisor(user)) return "/supervision";
-  return hasModule(user, "mon_espace") ? "/mon-espace" : "/dashboard";
+  return hasModule(user, "alertes") ? "/alertes" : "/dashboard";
 }
 
 const AccesRefuse = ({ module }: { module: Module }) => {

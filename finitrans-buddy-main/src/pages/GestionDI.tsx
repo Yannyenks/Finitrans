@@ -14,6 +14,9 @@ import { useDIList, useDIStats, useDIDelete, DIEnriched } from "@/hooks/useDI";
 import { getStoredUser } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import DIBlock from "@/components/di/DIBlock";
+import DIHistoriqueGlobal from "@/components/di/DIHistoriqueGlobal";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { History } from "lucide-react";
 import DICreateEditDialog from "@/components/di/DICreateEditDialog";
 import FactureDialog from "@/components/di/FactureDialog";
 
@@ -78,7 +81,7 @@ const GestionDI = () => {
         {[
           {
             label: "DI actives",
-            value: diStats?.totalActifs ?? 0,
+            value: diStats?.totalDI ?? 0,
             icon:  Banknote,
             color: "text-secondary",
             bg:    "bg-secondary/10",
@@ -135,6 +138,13 @@ const GestionDI = () => {
         ))}
       </div>
 
+      <Tabs defaultValue="enveloppes">
+        <TabsList className="mb-4">
+          <TabsTrigger value="enveloppes" className="gap-1.5"><Banknote className="w-3.5 h-3.5" /> Enveloppes DI</TabsTrigger>
+          <TabsTrigger value="historique" className="gap-1.5"><History className="w-3.5 h-3.5" /> Historique des DI</TabsTrigger>
+        </TabsList>
+        <TabsContent value="historique"><DIHistoriqueGlobal /></TabsContent>
+        <TabsContent value="enveloppes">
       {/* ── Toolbar ───────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
         <div className="relative flex-1">
@@ -393,6 +403,9 @@ const GestionDI = () => {
           </div>
         )}
       </div>
+
+        </TabsContent>
+      </Tabs>
 
       {/* ── Dialogs ───────────────────────────────────────────────── */}
       <DICreateEditDialog

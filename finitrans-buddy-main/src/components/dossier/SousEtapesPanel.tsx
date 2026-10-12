@@ -17,6 +17,7 @@ import { notif } from "@/hooks/useNotification";
 import { useSousEtapes, SousEtape, SousEtapeStatut } from "@/hooks/useSousEtapes";
 import { api, getStoredUser, openDocument } from "@/lib/api";
 import { isSupervisor } from "@/lib/permissions";
+import { useLiensExternes, urlValide } from "@/lib/liens";
 import { useQuery } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -773,6 +774,7 @@ const SousEtapeCard = ({
 }) => {
   const currentUser  = getStoredUser();
   const { update, prendre } = useSousEtapes(dossierId);
+  const lien = useLiensExternes()[`${etape}.${config.cle}`];
   const isResponsable = data?.responsableId === currentUser?.id;
   const canEdit      = canManage || isResponsable;
 
@@ -944,6 +946,14 @@ const SousEtapeCard = ({
 
                 {/* Description */}
                 <p className="text-[11px] text-muted-foreground leading-relaxed">{config.description}</p>
+
+                {/* Redirection vers le site externe de l'étape (ex. portail de soumission) */}
+                {lien && urlValide(lien.url) && (
+                  <a href={lien.url} target="_blank" rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-secondary text-secondary-foreground hover:opacity-90">
+                    <ExternalLink className="w-3.5 h-3.5" /> {lien.label}
+                  </a>
+                )}
 
                 {/* Output attendu */}
                 {config.outputLabel && (

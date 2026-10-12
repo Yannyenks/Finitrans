@@ -107,6 +107,85 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
   })
 
+  // ── GET /api/di/mouvements — historique de tous les mouvements DI ─
+
+  const historiqueQuery = z.object({
+    page:      z.coerce.number().default(1),
+    limit:     z.coerce.number().default(50),
+    diId:      z.string().uuid().optional(),
+    type:      z.enum(['credit', 'debit']).optional(),
+    categorie: z.string().optional(),
+    from:      z.string().datetime().optional(),
+    to:        z.string().datetime().optional(),
+    q:         z.string().optional(),
+  })
+  const historiqueWhere = (q: z.infer<typeof historiqueQuery>) => ({
+    ...(q.diId ? { diId: q.diId } : {}),
+    ...(q.type ? { type: q.type } : {}),
+    ...(q.categorie ? { categorie: q.categorie as 'frais_divers' } : {}),
+    ...(q.from || q.to ? { createdAt: { ...(q.from ? { gte: new Date(q.from) } : {}), ...(q.to ? { lte: new Date(q.to) } : {}) } } : {}),
+    ...(q.q ? { OR: [
+      { motif: { contains: q.q, mode: 'insensitive' as const } },
+      { referenceFacture: { contains: q.q, mode: 'insensitive' as const } },
+      { di: { numero: { contains: q.q, mode: 'insensitive' as const } } },
+      { di: { client: { contains: q.q, mode: 'insensitive' as const } } },
+      { dossier: { numero: { contains: q.q, mode: 'insensitive' as const } } },
+    ] } : {}),
+  })
+  const historiqueInclude = {
+    di:      { select: { id: true, numero: true, client: true, devise: true } },
+    dossier: { select: { id: true, numero: true } },
+    auteur:  { select: { nom: true } },
+  } as const
+
+  fastify.get('/mouvements', { preHandler: readAccess }, async (request, reply) => {
+    const q = historiqueQuery.parse(request.query)
+    const where = historiqueWhere(q)
+    const { skip, take, page, limit } = buildPagination(q.page, q.limit)
+    const [data, total, sommes] = await Promise.all([
+      prisma.mouvementDI.findMany({ where, skip, take, orderBy: { createdAt: 'desc' }, include: historiqueInclude }),
+      prisma.mouvementDI.count({ where }),
+      prisma.mouvementDI.groupBy({ by: ['type'], where, _sum: { montant: true } }),
+    ])
+    const somme = (t: string) => Number(sommes.find(s => s.type === t)?._sum.montant ?? 0)
+    return reply.send({ ...paginate(data, total, page, limit), totaux: { credits: somme('credit'), debits: somme('debit') } })
+  })
+
+  fastify.get('/mouvements/export', { preHandler: readAccess }, async (request, reply) => {
+    const q = historiqueQuery.parse(request.query)
+    const rows = await prisma.mouvementDI.findMany({ where: historiqueWhere(q), orderBy: { createdAt: 'asc' }, include: historiqueInclude, take: 10_000 })
+    const esc = (v: unknown) => {
+      const s = String(v ?? '')
+      return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
+    }
+    const lignes = [
+      ['Date', 'DI', 'Client', 'Dossier', 'Type', 'Catégorie', 'Montant', 'Référence facture', 'Motif', 'Saisi par'].join(';'),
+      ...rows.map(m => [
+        format(m.createdAt, 'dd/MM/yyyy HH:mm'), m.di.numero, m.di.client, m.dossier?.numero ?? '', m.type,
+        m.categorie ?? '', Number(m.montant).toFixed(2).replace('.', ','), m.referenceFacture ?? '', m.motif, m.auteur.nom,
+      ].map(esc).join(';')),
+    ]
+    reply
+      .header('Content-Type', 'text/csv; charset=utf-8')
+      .header('Content-Disposition', `attachment; filename="historique-di-${format(new Date(), 'yyyyMMdd')}.csv"`)
+    return reply.send('﻿' + lignes.join('\r\n'))
+  })
+
+  // ── GET /api/di/alertes-seuil — DI actives sous le seuil d'alerte (≤ 20 % par défaut) ─
+
+  fastify.get('/alertes-seuil', { preHandler: readAccess }, async (_request, reply) => {
+    const dis = await prisma.declarationImportation.findMany({
+      where: { statut: 'actif' },
+      select: { id: true, numero: true, client: true, montant: true, soldeActuel: true, seuilAlerte1: true, seuilAlerte2: true, devise: true },
+    })
+    const enAlerte = dis
+      .map(d => ({ id: d.id, numero: d.numero, client: d.client, devise: d.devise, ...enrichDI(d) }))
+      .filter(d => d.alerteNiveau !== 'ok')
+      .sort((a, b) => a.tauxRestant - b.tauxRestant)
+      .map(d => ({ id: d.id, numero: d.numero, client: d.client, devise: d.devise, tauxRestant: d.tauxRestant, soldeNum: d.soldeNum, alerteNiveau: d.alerteNiveau }))
+    return reply.send(enAlerte)
+  })
+
   // ── GET /api/di/client/:client — vue consolidée par client ─
 
   fastify.get('/client/:client', { preHandler: readAccess }, async (request, reply) => {

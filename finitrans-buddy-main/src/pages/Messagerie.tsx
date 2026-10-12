@@ -2,7 +2,10 @@ import { useState, useEffect, useRef } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
+import { useSearchParams } from "react-router-dom";
+import { toast } from "@/hooks/use-toast";
 import {
+  AtSign,
   MessageSquare, Send, Users, FolderOpen, AlertTriangle,
   Search, Plus, Loader2, Check, X,
 } from "lucide-react";
@@ -36,8 +39,13 @@ const Messagerie = () => {
   const qc   = useQueryClient();
   const user = getStoredUser();
 
-  const [selectedConv, setSelectedConv] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const [selectedConv, setSelectedConv] = useState<string | null>(() => searchParams.get("conversation"));
   const [newMessage,   setNewMessage]   = useState("");
+  // Mentions : nom affiché → id ; recherche en cours après « @ »
+  const [mentions,     setMentions]     = useState<Record<string, string>>({});
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [searchConv,   setSearchConv]   = useState("");
   const [showNewConv,  setShowNewConv]  = useState(false);
   const [newConvForm,  setNewConvForm]  = useState({
@@ -73,28 +81,68 @@ const Messagerie = () => {
 
   // ── Send message ───────────────────────────────────────────────
   const sendMsg = useMutation({
-    mutationFn: (contenu: string) =>
-      api.post(`/api/messagerie/conversations/${selectedConv}/messages`, { contenu }),
-    onSuccess: () => {
+    mutationFn: ({ contenu, mentions: ids }: { contenu: string; mentions: string[] }) =>
+      api.post(`/api/messagerie/conversations/${selectedConv}/messages`, { contenu, mentions: ids }),
+    onSuccess: (_d, v) => {
       qc.invalidateQueries({ queryKey: ["messages", selectedConv] });
       qc.invalidateQueries({ queryKey: ["conversations"] });
       setNewMessage("");
+      setMentions({});
+      if (v.mentions.length) toast({ title: `${v.mentions.length} personne(s) mentionnée(s) et notifiée(s)` });
     },
+    onError: (err: any) => toast({ title: "Message non envoyé", description: err.message, variant: "destructive" }),
   });
 
   const handleSend = () => {
     const text = newMessage.trim();
-    if (text && !sendMsg.isPending) sendMsg.mutate(text);
+    if (!text || sendMsg.isPending) return;
+    // Seules les mentions encore présentes dans le texte sont envoyées
+    const ids = [...new Set(Object.entries(mentions).filter(([nom]) => text.includes(`@${nom}`)).map(([, id]) => id))];
+    sendMsg.mutate({ contenu: text, mentions: ids });
   };
 
-  // ── Employees for new conv ─────────────────────────────────────
+  // ── Employés (nouvelle conversation et mentions) ────────────────
   const { data: empData } = useQuery({
-    queryKey:  ["employes-list"],
-    queryFn:   () => api.get<any>("/api/employes?limit=50&actif=true"),
+    queryKey:  ["employes-actifs"],
+    queryFn:   () => api.get<any>("/api/employes?limit=100&actif=true"),
     staleTime: 5 * 60_000,
-    enabled:   showNewConv,
   });
   const employes: any[] = empData?.data ?? [];
+  const nomsConnus = employes.map(e => e.nom).sort((a, b) => b.length - a.length);
+  const suggestions = mentionQuery === null ? [] : employes
+    .filter(e => e.id !== user?.id && e.nom.toLowerCase().includes(mentionQuery.toLowerCase()))
+    .slice(0, 6);
+
+  const majTexte = (valeur: string) => {
+    setNewMessage(valeur);
+    const pos = textareaRef.current?.selectionStart ?? valeur.length;
+    const m = valeur.slice(0, pos).match(/(?:^|\s)@([^\s@]*)$/);
+    setMentionQuery(m ? m[1] : null);
+  };
+
+  const choisirMention = (emp: any) => {
+    const el = textareaRef.current;
+    const pos = el?.selectionStart ?? newMessage.length;
+    const avant = newMessage.slice(0, pos).replace(/@([^\s@]*)$/, `@${emp.nom} `);
+    setNewMessage(avant + newMessage.slice(pos));
+    setMentions(m => ({ ...m, [emp.nom]: emp.id }));
+    setMentionQuery(null);
+    requestAnimationFrame(() => { el?.focus(); el?.setSelectionRange(avant.length, avant.length); });
+  };
+
+  /** Met en évidence les « @Nom » dans un message. */
+  const rendreContenu = (texte: string, ids: string[] = []) => {
+    if (!nomsConnus.length || !texte.includes("@")) return texte;
+    const echap = nomsConnus.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    const parts = texte.split(new RegExp(`(@(?:${echap.join("|")}))`, "g"));
+    return parts.map((part, i) => {
+      if (!part.startsWith("@")) return part;
+      const emp = employes.find(e => `@${e.nom}` === part);
+      // Mention qui me concerne : surlignée
+      const moi = emp?.id === user?.id && (ids.length === 0 || ids.includes(user?.id ?? ""));
+      return <span key={i} className={cn("font-semibold rounded px-0.5", moi ? "bg-amber-200 text-amber-900" : "underline decoration-dotted")}>{part}</span>;
+    });
+  };
 
   // ── Create conversation ────────────────────────────────────────
   const createConv = useMutation({
@@ -298,7 +346,7 @@ const Messagerie = () => {
                           ? "bg-primary text-primary-foreground rounded-br-sm"
                           : "bg-muted/80 text-foreground rounded-bl-sm"
                         )}>
-                          <p className="text-sm leading-relaxed whitespace-pre-wrap">{m.contenu}</p>
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap">{rendreContenu(m.contenu, m.mentions)}</p>
                         </div>
                         <span className={cn("text-[9px] px-1", isMine ? "text-right text-muted-foreground" : "text-muted-foreground")}>
                           {new Date(m.createdAt).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}
@@ -316,16 +364,40 @@ const Messagerie = () => {
               </div>
 
               {/* Input */}
-              <div className="p-3 border-t border-border flex-shrink-0">
+              <div className="p-3 border-t border-border flex-shrink-0 relative">
+                {suggestions.length > 0 && (
+                  <div className="absolute bottom-full left-3 mb-1 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden z-10" role="listbox" aria-label="Mentionner une personne">
+                    <p className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-muted-foreground border-b border-border">Mentionner</p>
+                    {suggestions.map(emp => (
+                      <button key={emp.id} type="button" role="option"
+                        onMouseDown={e => { e.preventDefault(); choisirMention(emp); }}
+                        className="w-full text-left px-3 py-2 text-sm hover:bg-muted flex items-center gap-2">
+                        <AtSign className="w-3.5 h-3.5 text-secondary" />
+                        <span className="font-medium">{emp.nom}</span>
+                        <span className="text-[11px] text-muted-foreground truncate">{emp.role}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <div className="flex gap-2 items-end">
+                  <Button type="button" variant="outline" className="h-11 w-11 p-0 flex-shrink-0" title="Mentionner une personne"
+                    onClick={() => { majTexte(`${newMessage}${newMessage && !newMessage.endsWith(" ") ? " " : ""}@`); textareaRef.current?.focus(); }}>
+                    <AtSign className="w-4 h-4" />
+                  </Button>
                   <Textarea
-                    placeholder="Écrire un message… (Entrée pour envoyer, Maj+Entrée pour saut de ligne)"
+                    ref={textareaRef}
+                    placeholder="Écrire un message… tapez @ pour mentionner quelqu'un (Entrée pour envoyer)"
                     value={newMessage}
-                    onChange={e => setNewMessage(e.target.value)}
+                    onChange={e => majTexte(e.target.value)}
                     className="bg-muted/50 min-h-[44px] max-h-32 resize-none"
                     rows={1}
                     onKeyDown={e => {
-                      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
+                      if (e.key === "Escape") setMentionQuery(null);
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        if (suggestions.length > 0) choisirMention(suggestions[0]);
+                        else handleSend();
+                      }
                     }}
                   />
                   <Button

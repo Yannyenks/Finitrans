@@ -4,6 +4,7 @@ import AppSidebar from "./AppSidebar";
 import { Search, LogOut } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import NotificationPanel from "./NotificationPanel";
+import DIAlarme from "./DIAlarme";
 import { logout } from "@/lib/api";
 import { PROFIL_LABELS, useAuth } from "@/lib/permissions";
 
@@ -51,6 +52,7 @@ const AppLayout = ({ children, title, subtitle }: AppLayoutProps) => {
                   />
                 </form>
               )}
+              <DIAlarme />
               <NotificationPanel />
               <div className="flex items-center gap-2">
                 <button

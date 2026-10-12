@@ -75,7 +75,15 @@ const NAV: NavGroup[] = [
 const AppSidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
-  const { user, hasModule } = useAuth();
+  const { user, hasModule, superviseur } = useAuth();
+
+  // Employés : les Alertes sont le menu par défaut, en tête de la navigation
+  const groupes: NavGroup[] = superviseur ? NAV : NAV.map((g, i) => ({
+    ...g,
+    items: i === 0
+      ? [{ label: "Alertes", icon: Bell, path: "/alertes", module: "alertes", badge: "alertes" } as NavItem, ...g.items]
+      : g.items.filter(it => it.path !== "/alertes"),
+  }));
 
   const { data: alertes } = useQuery({
     queryKey:        ["alertes-count"],
@@ -127,7 +135,7 @@ const AppSidebar = () => {
 
       {/* Navigation */}
       <nav className="flex-1 p-3 overflow-y-auto" aria-label="Navigation principale">
-        {NAV.map(group => {
+        {groupes.map(group => {
           const items = group.items.filter(i => hasModule(i.module));
           if (items.length === 0) return null;
           return (

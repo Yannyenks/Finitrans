@@ -14,6 +14,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { api, refreshSessionUser } from "@/lib/api";
 import { STATUS_LABELS, useAuth } from "@/lib/permissions";
+import { useLiensExternes, urlValide } from "@/lib/liens";
 import { toast } from "@/hooks/use-toast";
 
 /** Tâches qui demandent une saisie spécifique (résultat PVC, quittance, gate pass) : à terminer depuis le dossier. */
@@ -36,6 +37,7 @@ type Tache = {
 
 const TacheRow = ({ t, action }: { t: Tache; action?: React.ReactNode }) => {
   const navigate = useNavigate();
+  const lien = useLiensExternes()[`${t.etape}.${t.cle}`];
   return (
     <div className={`flex items-center gap-3 p-3 rounded-xl border ${t.enRetard ? "border-amber-300 bg-amber-50/50" : "border-border/60 bg-card"}`}>
       <div className={`w-2 h-2 rounded-full flex-shrink-0 ${t.statut === "en_cours" ? "bg-blue-500" : t.statut === "rejete" ? "bg-destructive" : "bg-muted-foreground/40"}`} />
@@ -50,6 +52,11 @@ const TacheRow = ({ t, action }: { t: Tache; action?: React.ReactNode }) => {
         <span className={`text-[11px] flex items-center gap-1 ${t.enRetard ? "text-amber-700 font-semibold" : "text-muted-foreground"}`}>
           <Clock className="w-3 h-3" /> {new Date(t.deadline).toLocaleDateString("fr-FR")}
         </span>
+      )}
+      {lien && urlValide(lien.url) && (
+        <a href={lien.url} target="_blank" rel="noopener noreferrer" className="h-8 px-3 rounded-md text-xs font-semibold bg-secondary/10 text-secondary inline-flex items-center gap-1 hover:bg-secondary/20">
+          {lien.label} ↗
+        </a>
       )}
       {action}
       <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => navigate(`/dossiers/${t.dossier.id}`)}>

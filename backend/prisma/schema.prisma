@@ -60,6 +60,7 @@ model User {
   ecrituresCreees          EcritureComptable[]       @relation("EcritureCreateur")
   ecrituresValidees        EcritureComptable[]       @relation("EcritureValideur")
   diDocuments              DIDocument[]
+  transportsCrees          Transport[]               @relation("TransportCreateur")
 
   @@map("users")
 }
@@ -115,6 +116,7 @@ model Dossier {
   virements          Virement[]
   sousEtapes         SousEtapeDossier[]
   ecritures          EcritureComptable[]
+  transports         Transport[]
 
   @@map("dossiers")
 }
@@ -316,6 +318,7 @@ model Message {
   conversationId String       @map("conversation_id") @db.Uuid
   auteurId       String       @map("auteur_id") @db.Uuid
   contenu        String
+  mentions       String[]     @default([])
   lu             Boolean      @default(false)
   createdAt      DateTime     @default(now()) @map("created_at")
   updatedAt      DateTime     @updatedAt @map("updated_at")
@@ -1112,4 +1115,75 @@ model LigneEcriture {
 
   @@index([compteId])
   @@map("lignes_ecriture")
+}
+
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Logistique transport : chauffeurs, véhicules (camions), transports de TC
+// ════════════════════════════════════════════════════════════════════════════
+
+model Chauffeur {
+  id           String      @id @default(uuid()) @db.Uuid
+  nom          String      @db.VarChar(255)
+  telephone    String      @db.VarChar(50)
+  numeroPermis String?     @map("numero_permis") @db.VarChar(50)
+  cni          String?     @db.VarChar(50)
+  transporteur String?     @db.VarChar(255)
+  actif        Boolean     @default(true)
+  notes        String?
+  createdAt    DateTime    @default(now()) @map("created_at")
+  updatedAt    DateTime    @updatedAt @map("updated_at")
+  transports   Transport[]
+
+  @@map("chauffeurs")
+}
+
+model Camion {
+  id              String      @id @default(uuid()) @db.Uuid
+  immatriculation String      @unique @db.VarChar(50)
+  marque          String?     @db.VarChar(100)
+  typeVehicule    String      @default("porte_conteneur") @map("type_vehicule") @db.VarChar(50)
+  capacite        String?     @db.VarChar(20)
+  transporteur    String?     @db.VarChar(255)
+  actif           Boolean     @default(true)
+  notes           String?
+  createdAt       DateTime    @default(now()) @map("created_at")
+  updatedAt       DateTime    @updatedAt @map("updated_at")
+  transports      Transport[]
+
+  @@map("camions")
+}
+
+enum StatutTransport {
+  planifie
+  en_route
+  livre
+  retour_vide
+  annule
+
+  @@map("statut_transport")
+}
+
+model Transport {
+  id             String          @id @default(uuid()) @db.Uuid
+  dossierId      String?         @map("dossier_id") @db.Uuid
+  conteneur      String          @db.VarChar(100)
+  camionId       String?         @map("camion_id") @db.Uuid
+  chauffeurId    String?         @map("chauffeur_id") @db.Uuid
+  dateEnlevement DateTime        @map("date_enlevement")
+  dateLivraison  DateTime?       @map("date_livraison")
+  origine        String?         @db.VarChar(255)
+  destination    String          @db.VarChar(255)
+  statut         StatutTransport @default(planifie)
+  notes          String?
+  createdById    String          @map("created_by_id") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at")
+  updatedAt      DateTime        @updatedAt @map("updated_at")
+  dossier        Dossier?        @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+  camion         Camion?         @relation(fields: [camionId], references: [id])
+  chauffeur      Chauffeur?      @relation(fields: [chauffeurId], references: [id])
+  createdBy      User            @relation("TransportCreateur", fields: [createdById], references: [id])
+
+  @@index([dateEnlevement])
+  @@map("transports")
 }

@@ -92,7 +92,16 @@ const getSLAStatus = (
   stepKey: string,
   timeline: any[],
   dossierCreatedAt: string,
+  timings: any[] = [],
 ): { elapsedH: number; slaH: number; pct: number; status: "ok" | "warning" | "critical" } | null => {
+  // Priorité au chronomètre réel de l'étape (début + durée cible paramétrée)
+  const timing = [...timings].reverse().find((t: any) => t.etape === stepKey && !t.dateFin);
+  if (timing) {
+    const slaH = Math.max(1, Number(timing.dureePrevueJours ?? 1) * 24);
+    const elapsedH = (Date.now() - new Date(timing.dateDebut).getTime()) / 3_600_000;
+    const pct = Math.min(100, Math.round((elapsedH / slaH) * 100));
+    return { elapsedH: Math.round(elapsedH), slaH, pct, status: pct >= 100 ? "critical" : pct >= 80 ? "warning" : "ok" };
+  }
   if (!(stepKey in SLA_HOURS)) return null;
   const slaH = SLA_HOURS[stepKey];
   const ev = timeline.find((e: any) => {
@@ -310,6 +319,7 @@ const DossierDetail = () => {
   const [handoffStatus, setHandoffStatus]         = useState<string | null>(null);
   const [handoffResponsableId, setHandoffResponsableId] = useState("");
   const [handoffNote, setHandoffNote]             = useState("");
+  const [handoffRecherche, setHandoffRecherche]   = useState("");
 
   const toggleStep = (stepKey: string) =>
     setExpandedSteps(prev => { const s = new Set(prev); s.has(stepKey) ? s.delete(stepKey) : s.add(stepKey); return s; });
@@ -474,6 +484,7 @@ const DossierDetail = () => {
   const openHandoffDialog = (targetStatus: string) => {
     setHandoffStatus(targetStatus);
     setHandoffResponsableId(targetStatus === nextStatus && nextStep?.responsableSuggere?.id ? nextStep.responsableSuggere.id : "");
+    setHandoffRecherche("");
     setHandoffNote("");
     setHandoffDialog(true);
   };
@@ -509,7 +520,7 @@ const DossierDetail = () => {
       return;
     }
 
-    const sla = getSLAStatus(dossier.status, timeline, dossier.dateCreation);
+    const sla = getSLAStatus(dossier.status, timeline, dossier.dateCreation, dossier.timings);
     if (sla && sla.status === "critical") {
       setPendingAdvance(nextStatus);
       setRetardDialog(true);
@@ -566,7 +577,7 @@ const DossierDetail = () => {
             <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-4">
               <p className="text-sm text-red-700">
                 L'étape <strong>"{STATUS_LABELS[dossier.status]}"</strong> a dépassé son délai cible de{" "}
-                <strong>{SLA_HOURS[dossier.status]}h</strong>. Veuillez indiquer le motif du retard avant de continuer.
+                <strong>{getSLAStatus(dossier.status, timeline, dossier.dateCreation, dossier.timings)?.slaH ?? SLA_HOURS[dossier.status]}h</strong>. Veuillez indiquer le motif du retard avant de continuer.
               </p>
             </div>
 
@@ -644,23 +655,28 @@ const DossierDetail = () => {
 
             <div className="space-y-4 mb-5">
               <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Responsable de l'étape « {STATUS_LABELS[handoffStatus]} »</Label>
-                <Select value={handoffResponsableId || "__auto__"} onValueChange={setHandoffResponsableId}>
-                  <SelectTrigger className="bg-muted/40 h-9 text-sm">
-                    <SelectValue placeholder="Attribution automatique" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__auto__">
-                      Attribution automatique{nextStep?.responsableSuggere && handoffStatus === nextStatus ? ` (${nextStep.responsableSuggere.nom})` : ""}
-                    </SelectItem>
-                    {usersList.map((u: any) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        <span className="font-medium">{u.nom}</span>
-                        {u.profil && <span className="text-muted-foreground ml-1">— {u.profil}</span>}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs font-semibold">Qui continue l'étape « {STATUS_LABELS[handoffStatus]} » ?</Label>
+                <p className="text-[11px] text-muted-foreground">La personne choisie devient responsable du dossier et reçoit les tâches de cette étape.</p>
+                <Input placeholder="Rechercher un employé…" value={handoffRecherche} onChange={e => setHandoffRecherche(e.target.value)} className="h-8 text-xs bg-muted/40" />
+                <div className="max-h-56 overflow-y-auto rounded-lg border border-border divide-y divide-border/50" role="radiogroup" aria-label="Employé qui continue">
+                  {usersList
+                    .filter((u: any) => !handoffRecherche || `${u.nom} ${u.role ?? ""}`.toLowerCase().includes(handoffRecherche.toLowerCase()))
+                    .sort((a: any, b: any) => Number(b.id === nextStep?.responsableSuggere?.id) - Number(a.id === nextStep?.responsableSuggere?.id))
+                    .map((u: any) => {
+                      const choisi = handoffResponsableId === u.id;
+                      const suggere = u.id === nextStep?.responsableSuggere?.id && handoffStatus === nextStatus;
+                      return (
+                        <button key={u.id} type="button" role="radio" aria-checked={choisi}
+                          onClick={() => setHandoffResponsableId(u.id)}
+                          className={`w-full text-left px-3 py-2 flex items-center gap-2 text-sm transition-colors ${choisi ? "bg-secondary/10" : "hover:bg-muted/50"}`}>
+                          <span className={`w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 ${choisi ? "border-secondary bg-secondary" : "border-muted-foreground/40"}`} />
+                          <span className="font-medium">{u.nom}</span>
+                          <span className="text-[11px] text-muted-foreground truncate">{u.role ?? u.profil}</span>
+                          {suggere && <span className="ml-auto text-[10px] font-semibold text-secondary bg-secondary/10 px-1.5 py-0.5 rounded-full">recommandé</span>}
+                        </button>
+                      );
+                    })}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Note de passation (optionnelle)</Label>
@@ -676,7 +692,7 @@ const DossierDetail = () => {
             <div className="flex gap-2">
               <Button
                 onClick={confirmHandoff}
-                disabled={advanceStatus.isPending}
+                disabled={advanceStatus.isPending || !handoffResponsableId}
                 className="flex-1 bg-secondary text-secondary-foreground gap-1.5"
               >
                 {advanceStatus.isPending
@@ -854,7 +870,7 @@ const DossierDetail = () => {
 
                         {/* SLA indicateur */}
                         {isCurrent && (() => {
-                          const sla = getSLAStatus(stepKey, timeline, dossier.dateCreation);
+                          const sla = getSLAStatus(stepKey, timeline, dossier.dateCreation, dossier.timings);
                           if (!sla) return null;
                           return (
                             <div className="flex items-center gap-1.5 flex-shrink-0 mx-2">

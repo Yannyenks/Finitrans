@@ -331,6 +331,15 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const ownerAuto = await assignStage(dossier, body.status)
     const nouveauResponsable = body.responsableId ?? ownerAuto ?? dossier.responsableId
 
+    // Passation choisie par la personne qui termine l'étape : la personne désignée
+    // reçoit aussi les tâches non terminées de l'étape suivante
+    if (body.responsableId) {
+      await prisma.sousEtapeDossier.updateMany({
+        where: { dossierId: id, etape: body.status, statut: { not: 'valide' } },
+        data: { responsableId: body.responsableId },
+      })
+    }
+
     // Clôturer le timing actuel en enregistrant le responsable qui a traité l'étape
     await prisma.dossierTiming.updateMany({
       where: { dossierId: id, etape: dossier.status, dateFin: null },

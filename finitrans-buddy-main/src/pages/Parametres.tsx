@@ -2,7 +2,12 @@ import { useState, useEffect } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Settings, Bell, Shield, Database, Globe, Save, Timer, Users, ChevronRight } from "lucide-react";
+import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2 } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { LIENS_DEFAUT, LienExterne, urlValide } from "@/lib/liens";
+import { useAuth } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
@@ -21,15 +26,16 @@ const STEP_LABELS: Record<string, string> = {
   cloture:          "Clôture",
 };
 
+/** Délais cibles par étape, en jours (paramètre serveur « sla_jours » utilisé par le workflow). */
 const DEFAULT_SLA: Record<string, number> = {
-  reception:        24,
-  soumission_sgs:   48,
-  codage:           24,
-  validation:       48,
-  paiement:         72,
-  bon_compagnie:    48,
-  operations_kribi: 72,
-  cloture:          24,
+  reception:        1,
+  soumission_sgs:   2,
+  codage:           1,
+  validation:       2,
+  paiement:         3,
+  bon_compagnie:    2,
+  operations_kribi: 3,
+  cloture:          1,
 };
 
 const Parametres = () => {
@@ -41,18 +47,37 @@ const Parametres = () => {
   const [alerts, setAlerts] = useState<any[]>([]);
   useEffect(() => { if (configData) setAlerts(configData); }, [configData]);
 
-  // SLA local state (stored in localStorage for persistence)
-  const [slaConfig, setSlaConfig] = useState<Record<string, number>>(() => {
-    try {
-      const saved = localStorage.getItem("finitrans_sla_config");
-      return saved ? { ...DEFAULT_SLA, ...JSON.parse(saved) } : DEFAULT_SLA;
-    } catch { return DEFAULT_SLA; }
-  });
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const { data: params } = useQuery({ queryKey: ["parametres"], queryFn: () => api.get<Record<string, any>>("/api/parametres") });
 
-  const saveSlaConfig = () => {
-    localStorage.setItem("finitrans_sla_config", JSON.stringify(slaConfig));
-    toast({ title: "SLA sauvegardés", description: "Les délais cibles ont été mis à jour." });
-  };
+  // SLA : paramètre serveur « sla_jours » (durée prévue de chaque étape)
+  const [slaConfig, setSlaConfig] = useState<Record<string, number>>(DEFAULT_SLA);
+  useEffect(() => { if (params?.sla_jours) setSlaConfig({ ...DEFAULT_SLA, ...params.sla_jours }); }, [params]);
+  const saveSla = useMutation({
+    mutationFn: () => api.patch("/api/parametres/sla_jours", { valeur: slaConfig }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["parametres"] }); toast({ title: "Délais enregistrés", description: "Appliqués aux prochaines étapes démarrées." }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+  const saveSlaConfig = () => saveSla.mutate();
+
+  // Liens externes (portails ouverts depuis une sous-étape)
+  const { data: attribution } = useQuery({ queryKey: ["roles-attribution"], queryFn: () => api.get<any>("/api/roles/attribution") });
+  const sousEtapes: { cle: string; label: string }[] = (attribution?.etapes ?? []).flatMap((e: any) =>
+    e.sousEtapes.map((x: any) => ({ cle: `${e.etape}.${x.cle}`, label: `${STEP_LABELS[e.etape] ?? e.etape} — ${x.label}` })));
+  const [liens, setLiens] = useState<{ cle: string; label: string; url: string }[]>([]);
+  useEffect(() => {
+    const src: Record<string, LienExterne> = params?.liens_externes ?? LIENS_DEFAUT;
+    setLiens(Object.entries(src).map(([cle, l]) => ({ cle, ...l })));
+  }, [params]);
+  const liensValides = liens.every(l => l.cle && l.label.trim() && urlValide(l.url));
+  const saveLiens = useMutation({
+    mutationFn: () => api.patch("/api/parametres/liens_externes", {
+      valeur: Object.fromEntries(liens.map(l => [l.cle, { label: l.label.trim(), url: l.url.trim() }])),
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["parametres"] }); toast({ title: "Liens enregistrés" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
 
   const saveConfig = useMutation({
     mutationFn: (cfg: any) => api.patch(`/api/alertes/config/${cfg.id}`, { seuil: cfg.seuil, actif: cfg.actif }),
@@ -70,6 +95,7 @@ const Parametres = () => {
         <TabsList className="mb-6 flex-wrap gap-1">
           <TabsTrigger value="alertes"  className="gap-1.5"><Bell   className="w-3.5 h-3.5" /> Alertes</TabsTrigger>
           <TabsTrigger value="sla"      className="gap-1.5"><Timer  className="w-3.5 h-3.5" /> SLA &amp; Délais</TabsTrigger>
+          <TabsTrigger value="liens"    className="gap-1.5"><Link2  className="w-3.5 h-3.5" /> Liens &amp; portails</TabsTrigger>
           <TabsTrigger value="securite" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Sécurité</TabsTrigger>
           <TabsTrigger value="general"  className="gap-1.5"><Globe  className="w-3.5 h-3.5" /> Général</TabsTrigger>
         </TabsList>
@@ -119,8 +145,8 @@ const Parametres = () => {
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card">
             <h3 className="font-display font-semibold text-foreground mb-1">Délais SLA par étape</h3>
             <p className="text-sm text-muted-foreground mb-6">
-              Définissez le temps cible (en heures) pour chaque étape du workflow dossier.
-              Le système signale automatiquement les dépassements.
+              Définissez la durée cible (en jours) de chaque étape du workflow dossier.
+              Elle s'applique aux étapes démarrées après l'enregistrement et alimente la Supervision.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
@@ -128,18 +154,18 @@ const Parametres = () => {
                 <div key={step} className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
                   <div className="flex-1">
                     <p className="text-sm font-medium text-foreground">{STEP_LABELS[step] ?? step}</p>
-                    <p className="text-xs text-muted-foreground">Délai cible actuel : <span className="font-mono font-semibold">{h}h</span></p>
+                    <p className="text-xs text-muted-foreground">Délai cible : <span className="font-mono font-semibold">{h} j</span></p>
                   </div>
                   <div className="flex items-center gap-2">
                     <Input
                       type="number"
                       min={1}
-                      max={720}
+                      max={60}
                       value={h}
-                      onChange={e => setSlaConfig(prev => ({ ...prev, [step]: Number(e.target.value) || 1 }))}
+                      onChange={e => setSlaConfig(prev => ({ ...prev, [step]: Math.max(1, Math.round(Number(e.target.value) || 1)) }))}
                       className="w-16 text-center bg-card font-mono text-sm h-9"
                     />
-                    <span className="text-xs text-muted-foreground w-3">h</span>
+                    <span className="text-xs text-muted-foreground w-3">j</span>
                   </div>
                 </div>
               ))}
@@ -152,7 +178,7 @@ const Parametres = () => {
               >
                 Réinitialiser les valeurs par défaut
               </button>
-              <Button onClick={saveSlaConfig} className="gap-2 bg-primary text-primary-foreground">
+              <Button onClick={saveSlaConfig} disabled={saveSla.isPending} className="gap-2 bg-primary text-primary-foreground">
                 <Save className="w-4 h-4" /> Enregistrer les SLA
               </Button>
             </div>
@@ -171,68 +197,67 @@ const Parametres = () => {
           </motion.div>
         </TabsContent>
 
-        <TabsContent value="securite">
+        <TabsContent value="liens">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card space-y-4">
-            <h3 className="font-display font-semibold text-foreground mb-1">Politique de sécurité</h3>
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Double authentification (2FA)</p>
-                  <p className="text-xs text-muted-foreground">Ajouter une couche de sécurité supplémentaire</p>
+            <div>
+              <h3 className="font-display font-semibold text-foreground mb-1">Liens & portails externes</h3>
+              <p className="text-sm text-muted-foreground">Un bouton de redirection vers le site apparaît sur la sous-étape choisie (ex. soumission SGS, déclaration en douane).</p>
+            </div>
+            {liens.map((l, i) => (
+              <div key={i} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-end p-3 rounded-xl bg-muted/40">
+                <div className="md:col-span-4 space-y-1">
+                  <Label className="text-[10px]">Sous-étape</Label>
+                  <Select value={l.cle} onValueChange={v => setLiens(ls => ls.map((x, j) => j === i ? { ...x, cle: v } : x))}>
+                    <SelectTrigger className="bg-card h-9 text-xs"><SelectValue placeholder="Choisir…" /></SelectTrigger>
+                    <SelectContent>{sousEtapes.map(se => <SelectItem key={se.cle} value={se.cle}>{se.label}</SelectItem>)}</SelectContent>
+                  </Select>
                 </div>
-                <Switch />
-              </div>
-              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Expiration mot de passe</p>
-                  <p className="text-xs text-muted-foreground">Forcer le changement tous les 90 jours</p>
+                <div className="md:col-span-3 space-y-1">
+                  <Label className="text-[10px]">Libellé du bouton</Label>
+                  <Input value={l.label} onChange={e => setLiens(ls => ls.map((x, j) => j === i ? { ...x, label: e.target.value } : x))} className="bg-card h-9 text-xs" />
                 </div>
-                <Switch defaultChecked />
-              </div>
-              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Journal d'audit</p>
-                  <p className="text-xs text-muted-foreground">Enregistrer toutes les actions utilisateurs</p>
+                <div className="md:col-span-4 space-y-1">
+                  <Label className="text-[10px]">Adresse du site (https://…)</Label>
+                  <Input value={l.url} onChange={e => setLiens(ls => ls.map((x, j) => j === i ? { ...x, url: e.target.value } : x))} className={`bg-card h-9 text-xs font-mono ${l.url && !urlValide(l.url) ? "border-destructive" : ""}`} />
                 </div>
-                <Switch defaultChecked />
+                <Button variant="ghost" size="sm" className="md:col-span-1 h-9 text-destructive" onClick={() => setLiens(ls => ls.filter((_, j) => j !== i))}><Trash2 className="w-4 h-4" /></Button>
               </div>
-              <div className="flex items-center justify-between p-4 rounded-lg bg-muted/50">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Sauvegarde automatique</p>
-                  <p className="text-xs text-muted-foreground">Sauvegarde quotidienne des données</p>
-                </div>
-                <Switch defaultChecked />
-              </div>
+            ))}
+            <div className="flex justify-between">
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setLiens(ls => [...ls, { cle: "", label: "Ouvrir le portail", url: "https://" }])}><Plus className="w-3.5 h-3.5" /> Ajouter un lien</Button>
+              <Button onClick={() => saveLiens.mutate()} disabled={!liensValides || saveLiens.isPending} className="gap-2 bg-primary text-primary-foreground"><Save className="w-4 h-4" /> Enregistrer les liens</Button>
             </div>
           </motion.div>
         </TabsContent>
 
+        <TabsContent value="securite">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card space-y-3">
+            <h3 className="font-display font-semibold text-foreground mb-1">Sécurité en place</h3>
+            {[
+              "Mots de passe chiffrés (bcrypt), 8 caractères minimum",
+              "Sessions de 8 h renouvelées automatiquement ; changement de mot de passe = déconnexion des autres sessions",
+              "Limitation des tentatives de connexion (anti-bruteforce)",
+              "Accès par rôle : chaque page et chaque action sont vérifiées par le serveur",
+              "Journal d'activité et historique complet de chaque dossier (Administration → Journal)",
+              "Comptes désactivables sans perte d'historique",
+            ].map(t => (
+              <div key={t} className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 text-sm">
+                <CheckCircle2 className="w-4 h-4 text-success mt-0.5 flex-shrink-0" /> {t}
+              </div>
+            ))}
+          </motion.div>
+        </TabsContent>
+
         <TabsContent value="general">
-          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card space-y-4">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card space-y-3">
             <h3 className="font-display font-semibold text-foreground mb-1">Paramètres généraux</h3>
-            <div className="space-y-4">
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium text-foreground mb-2">Nom de l'entreprise</p>
-                <Input defaultValue="FINITRANS — Transit & Dédouanement" className="bg-card" />
-              </div>
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium text-foreground mb-2">Devise par défaut</p>
-                <Input defaultValue="FCFA" className="bg-card w-32" />
-              </div>
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium text-foreground mb-2">Fuseau horaire</p>
-                <Input defaultValue="Africa/Douala (UTC+1)" className="bg-card" disabled />
-              </div>
-              <div className="p-4 rounded-lg bg-muted/50">
-                <p className="text-sm font-medium text-foreground mb-2">Format numéro dossier</p>
-                <Input defaultValue="DOS-{ANNEE}-{SEQUENCE}" className="bg-card font-mono text-sm" />
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <Button onClick={handleSave} className="gap-2 bg-primary text-primary-foreground">
-                <Save className="w-4 h-4" /> Enregistrer
-              </Button>
-            </div>
+            <p className="text-sm text-muted-foreground">
+              La fiche de l'entreprise (raison sociale, NIU, RCCM, devise, TVA…) se gère dans Administration → Entreprise.
+              Les rôles et l'attribution des étapes se gèrent dans Administration → Rôles et Attribution des étapes.
+            </p>
+            {user?.profil === "dg" && (
+              <Button variant="outline" onClick={() => navigate("/administration?onglet=entreprise")}>Ouvrir la fiche entreprise</Button>
+            )}
           </motion.div>
         </TabsContent>
       </Tabs>
