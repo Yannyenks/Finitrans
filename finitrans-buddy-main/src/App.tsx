@@ -18,6 +18,8 @@ const Kribi = lazy(() => import("./pages/Kribi"));
 const Exploitation = lazy(() => import("./pages/Exploitation"));
 const Parametres = lazy(() => import("./pages/Parametres"));
 const Messagerie = lazy(() => import("./pages/Messagerie"));
+const Repertoire = lazy(() => import("./pages/Repertoire"));
+const Bibliotheque = lazy(() => import("./pages/Bibliotheque"));
 const Reporting = lazy(() => import("./pages/Reporting"));
 const GestionDI = lazy(() => import("./pages/GestionDI"));
 const Codage = lazy(() => import("./pages/Codage"));
@@ -130,6 +132,8 @@ const App = () => (
           <Route path="/di"                   element={R("di", <GestionDI />)} />
           <Route path="/kribi"                element={R("kribi", <Kribi />)} />
           <Route path="/messagerie"           element={R("messagerie", <Messagerie />)} />
+          <Route path="/repertoire"           element={R("repertoire", <Repertoire />)} />
+          <Route path="/bibliotheque"         element={R("bibliotheque", <Bibliotheque />)} />
           <Route path="/reporting"            element={R("reporting", <Reporting />)} />
           <Route path="/performance"          element={R("performance", <Performance />)} />
           <Route path="/parametres"           element={R("parametres", <Parametres />)} />

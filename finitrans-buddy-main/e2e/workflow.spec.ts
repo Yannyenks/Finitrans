@@ -1,10 +1,16 @@
-import { test, expect, Page, Browser } from "@playwright/test";
+import { test, expect, Page, Browser, BrowserContext } from "@playwright/test";
+// Les sessions ouvertes par un test sont fermées à la fin de celui-ci (sinon elles continuent
+// d'interroger l'API en arrière-plan et ralentissent les tests suivants)
+const contextes: BrowserContext[] = [];
+test.afterEach(async () => { await Promise.all(contextes.splice(0).map(c => c.close().catch(() => {}))); });
+
 
 const PASSWORD = "finitrans2025";
 const CLIENT = `CLIENT E2E ${Date.now() % 100000}`;
 
 async function session(browser: Browser, compte: string): Promise<Page> {
   const ctx = await browser.newContext();
+  contextes.push(ctx);
   const page = await ctx.newPage();
   page.on("pageerror", err => { throw new Error(`[JS ${compte}] ${err.message}`); });
   await page.goto("/");
@@ -35,7 +41,7 @@ async function terminerMesTaches(page: Page) {
 }
 
 test("parcours réel : création, chaque compte termine sa tâche, passage d'étape, supervision", async ({ browser }) => {
-  test.setTimeout(240_000);
+  test.setTimeout(480_000);
 
   // 1. Mme Yasmine enregistre le dossier via le formulaire
   const yasmine = await session(browser, "yasmine");

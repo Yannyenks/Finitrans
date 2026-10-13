@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { AuthUser, getStoredUser, onUserChange } from "./api";
 
 export type Module =
-  | "dashboard" | "mon_espace" | "supervision" | "exploitation" | "dossiers" | "codage"
+  | "dashboard" | "mon_espace" | "bibliotheque" | "repertoire" | "supervision" | "exploitation" | "dossiers" | "codage"
   | "sorties" | "logistique" | "messagerie" | "alertes" | "finance" | "di" | "comptabilite"
   | "comptabilite_avancee" | "administratif" | "employes" | "kribi" | "reporting"
   | "performance" | "administration" | "parametres";
@@ -14,14 +14,14 @@ export type Level = "lecture" | "partiel" | "complet";
 
 /** Modules par défaut si la session date d'avant le système de rôles (repli). */
 const FALLBACK: Record<string, Module[]> = {
-  dg: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "alertes", "finance", "di", "comptabilite", "comptabilite_avancee", "administratif", "employes", "kribi", "reporting", "performance", "administration", "parametres"],
-  exploitation: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "alertes", "finance", "di", "comptabilite", "administratif", "employes", "kribi", "reporting", "performance", "parametres"],
+  dg: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "comptabilite_avancee", "administratif", "employes", "kribi", "reporting", "performance", "administration", "parametres"],
+  exploitation: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "administratif", "employes", "kribi", "reporting", "performance", "parametres"],
 };
 
 export function userModules(user: AuthUser | null): Module[] {
   if (!user) return [];
   if (user.modules?.length) return user.modules as Module[];
-  return FALLBACK[user.profil] ?? ["dashboard", "mon_espace", "messagerie", "alertes", "dossiers"];
+  return FALLBACK[user.profil] ?? ["dashboard", "mon_espace", "messagerie", "bibliotheque", "repertoire", "alertes", "dossiers"];
 }
 
 export function hasModule(user: AuthUser | null, module: Module): boolean {

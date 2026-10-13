@@ -10,6 +10,7 @@ import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { AuthUser } from '../types'
+import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import {
   STATUS_ORDER, STATUS_LABELS, assignStage, initSousEtapes, loadAttribution, nextStage,
   notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
@@ -232,6 +233,130 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
   })
 
+  // ─── Affectation des étapes du parcours ───────────────────
+  // Les responsables (Direction, responsable du dossier, intervenants) désignent à l'avance
+  // qui traitera chaque étape : la personne reçoit les tâches ouvertes de l'étape.
+
+  fastify.get('/:id/affectations', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const actor = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+
+    const parcours = stagesForSite(dossier.site)
+    const courant = parcours.indexOf(dossier.status)
+    const [affectations, taches] = await Promise.all([
+      prisma.affectationEtape.findMany({
+        where: { dossierId: id },
+        include: { responsable: { select: { id: true, nom: true, role: true } }, assignePar: { select: { nom: true } } },
+      }),
+      prisma.sousEtapeDossier.findMany({
+        where: { dossierId: id },
+        select: { etape: true, statut: true, responsableId: true, responsable: { select: { id: true, nom: true } } },
+      }),
+    ])
+    const implique = actor.superviseur || await isInvolved(actor, dossier)
+
+    return reply.send(parcours.map((etape, i) => {
+      const t = taches.filter(x => x.etape === etape)
+      const titulaires = new Map<string, { id: string; nom: string; taches: number }>()
+      t.forEach(x => {
+        if (!x.responsable) return
+        const cur = titulaires.get(x.responsable.id) ?? { ...x.responsable, taches: 0 }
+        cur.taches++
+        titulaires.set(x.responsable.id, cur)
+      })
+      const a = affectations.find(x => x.etape === etape)
+      return {
+        etape, label: STATUS_LABELS[etape], position: i,
+        terminee: dossier.status === 'cloture' || i < courant,
+        courante: i === courant,
+        affectation: a ? { responsable: a.responsable, assignePar: a.assignePar.nom, note: a.note, updatedAt: a.updatedAt } : null,
+        titulaires: [...titulaires.values()],
+        tachesOuvertes: t.filter(x => x.statut !== 'valide').length,
+        modifiable: implique && dossier.status !== 'cloture' && i >= courant,
+      }
+    }))
+  })
+
+  fastify.put('/:id/affectations/:etape', { preHandler }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid(), etape: z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]) }).parse(request.params)
+    const body = z.object({ responsableId: z.string().uuid(), note: z.string().max(1000).optional() }).parse(request.body)
+    const actor = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id: params.id } })
+    if (!dossier) throw new NotFoundError('Dossier', params.id)
+
+    const parcours = stagesForSite(dossier.site)
+    const position = parcours.indexOf(params.etape)
+    if (position < 0) return reply.code(422).send({ error: 'ETAPE_INVALIDE', message: `L'étape « ${STATUS_LABELS[params.etape]} » ne fait pas partie du parcours de ce dossier.` })
+    if (dossier.status === 'cloture' || position < parcours.indexOf(dossier.status)) {
+      return reply.code(422).send({ error: 'ETAPE_TERMINEE', message: 'Cette étape est déjà terminée.' })
+    }
+    if (!actor.superviseur && !(await isInvolved(actor, dossier))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seuls les responsables intervenant sur ce dossier (ou la Direction) peuvent assigner ses étapes.' })
+    }
+    const cible = await prisma.user.findUnique({ where: { id: body.responsableId }, select: { id: true, nom: true, actif: true } })
+    if (!cible?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
+
+    await initSousEtapes(dossier.id)
+    const affectation = await prisma.affectationEtape.upsert({
+      where: { dossierId_etape: { dossierId: dossier.id, etape: params.etape } },
+      update: { responsableId: cible.id, assigneParId: actor.id, note: body.note?.trim() || null },
+      create: { dossierId: dossier.id, etape: params.etape, responsableId: cible.id, assigneParId: actor.id, note: body.note?.trim() || null },
+      include: { responsable: { select: { id: true, nom: true, role: true } } },
+    })
+    const { count } = await prisma.sousEtapeDossier.updateMany({
+      where: { dossierId: dossier.id, etape: params.etape, statut: { not: 'valide' } },
+      data: { responsableId: cible.id },
+    })
+    // Étape en cours : la personne désignée devient aussi responsable du dossier
+    if (params.etape === dossier.status) {
+      await prisma.dossier.update({ where: { id: dossier.id }, data: { responsableId: cible.id } })
+      await prisma.dossierTiming.updateMany({ where: { dossierId: dossier.id, etape: params.etape, dateFin: null }, data: { responsableId: cible.id } })
+    }
+
+    await logAudit(dossier.id, actor.id, 'AFFECTATION_ETAPE', `Étape « ${STATUS_LABELS[params.etape]} » confiée à ${cible.nom} (${count} tâche(s))`,
+      { etape: params.etape, responsableId: cible.id })
+    if (cible.id !== actor.id) {
+      await notify([cible.id], {
+        type: 'action_requise',
+        titre: `Étape « ${STATUS_LABELS[params.etape]} » vous est confiée`,
+        message: `${actor.nom} vous confie l'étape « ${STATUS_LABELS[params.etape]} » du dossier ${dossier.numero} (${dossier.client})${body.note?.trim() ? ` : ${body.note.trim()}` : ''}.`,
+        dossierId: dossier.id,
+        actionUrl: `/dossiers/${dossier.id}`,
+      })
+    }
+    return reply.send({ ...affectation, tachesAttribuees: count })
+  })
+
+  fastify.delete('/:id/affectations/:etape', { preHandler }, async (request, reply) => {
+    const params = z.object({ id: z.string().uuid(), etape: z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]) }).parse(request.params)
+    const actor = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id: params.id } })
+    if (!dossier) throw new NotFoundError('Dossier', params.id)
+    if (!actor.superviseur && !(await isInvolved(actor, dossier))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Action réservée aux responsables du dossier.' })
+    }
+    await prisma.affectationEtape.deleteMany({ where: { dossierId: dossier.id, etape: params.etape } })
+    await logAudit(dossier.id, actor.id, 'AFFECTATION_ETAPE', `Désignation retirée pour l'étape « ${STATUS_LABELS[params.etape]} »`)
+    return reply.code(204).send()
+  })
+
+  // ─── Compte rendu d'évolution (PDF) ───────────────────────
+
+  fastify.get('/:id/compte-rendu', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const { telecharger } = z.object({ telecharger: z.coerce.boolean().optional() }).parse(request.query)
+    const cr = await genererCompteRendu(id, { nom: request.user.nom })
+    if (!cr) throw new NotFoundError('Dossier', id)
+    reply
+      .header('Content-Type', 'application/pdf')
+      .header('Content-Disposition', `${telecharger ? 'attachment' : 'inline'}; filename="${cr.nomFichier}"`)
+      .header('Content-Length', cr.buffer.length)
+      .header('Cache-Control', 'no-store')
+    return reply.send(cr.buffer)
+  })
+
   // PATCH /api/dossiers/:id
   fastify.patch('/:id', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
@@ -381,6 +506,16 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         ? `${dossier.status} → ${body.status} (nouveau responsable assigné)`
         : `${dossier.status} → ${body.status}`)
 
+    // Clôture : le compte rendu complet est généré et archivé dans la bibliothèque
+    if (body.status === 'cloture') {
+      try {
+        const cr = await archiverCompteRendu(id, user.id, { nom: user.nom })
+        if (cr) await logAudit(id, user.id, 'COMPTE_RENDU_ARCHIVE', `Compte rendu de clôture archivé (${cr.nom})`)
+      } catch (err) {
+        request.log.error({ err }, 'Compte rendu de clôture non généré')
+      }
+    }
+
     // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
     const taches = await prisma.sousEtapeDossier.findMany({
       where: { dossierId: id, etape: body.status }, select: { responsableId: true },
@@ -440,7 +575,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const doc = await prisma.document.create({
       data: {
         dossierId: id, uploadePar: user.id, nom: filename, type: mimetype,
-        taille, contenu, hashContenu, url: '', etape,
+        taille, tailleOctets: sizeBytes, contenu, hashContenu, url: '', etape, categorie: 'preuve',
       },
     })
 
@@ -704,7 +839,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         responsable:        { select: { id: true, nom: true, role: true, avatarUrl: true } },
         di:                 { select: { numero: true, montant: true, soldeActuel: true, statut: true } },
         timings:            { orderBy: { dateDebut: 'asc' }, include: { responsable: { select: { id: true, nom: true, role: true } } } },
-        documents:          { include: { uploader: { select: { nom: true } } } },
+        documents:          { select: { nom: true, type: true, taille: true, etape: true, createdAt: true, uploader: { select: { nom: true } } } },
         commentaires:       { include: { auteur: { select: { id: true, nom: true, avatarUrl: true } } } },
         auditEntries:       { include: { auteur: { select: { nom: true } } } },
         paiementsDouane:    true,

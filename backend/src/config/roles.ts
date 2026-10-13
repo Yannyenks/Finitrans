@@ -20,6 +20,8 @@ export type PermissionSet = Record<PermissionKey, PermissionNiveau>
 export const MODULES = {
   dashboard:            'Tableau de bord',
   mon_espace:           'Mon espace (tâches, congés, profil)',
+  repertoire:           'Répertoire des contacts',
+  bibliotheque:         'Bibliothèque documentaire',
   supervision:          'Supervision des process',
   exploitation:         'Exploitation',
   dossiers:             'Dossiers',
@@ -44,7 +46,7 @@ export type ModuleKey = keyof typeof MODULES
 export const ALL_MODULES = Object.keys(MODULES) as ModuleKey[]
 
 /** Modules accessibles à tout compte actif. */
-const SOCLE: ModuleKey[] = ['dashboard', 'mon_espace', 'messagerie', 'alertes']
+const SOCLE: ModuleKey[] = ['dashboard', 'mon_espace', 'bibliotheque', 'repertoire', 'messagerie', 'alertes']
 
 export interface RoleTemplate {
   profil:       Profil

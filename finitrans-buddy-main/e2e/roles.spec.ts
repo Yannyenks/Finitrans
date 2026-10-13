@@ -9,7 +9,7 @@ const PAGES: [string, string][] = [
   ["/logistique", "logistique"], ["/kribi", "kribi"], ["/administratif", "administratif"], ["/finance", "finance"],
   ["/di", "di"], ["/comptabilite", "comptabilite"], ["/comptabilite-avancee", "comptabilite_avancee"],
   ["/administration", "administration"], ["/employes", "employes"], ["/reporting", "reporting"],
-  ["/performance", "performance"], ["/messagerie", "messagerie"], ["/alertes", "alertes"], ["/parametres", "parametres"],
+  ["/performance", "performance"], ["/messagerie", "messagerie"], ["/bibliotheque", "bibliotheque"], ["/repertoire", "repertoire"], ["/alertes", "alertes"], ["/parametres", "parametres"],
 ];
 
 const COMPTES = ["delba", "soudi", "yaya", "odette", "wandala", "rasoul", "yasmine", "honore", "aliou", "raphael"];
@@ -25,6 +25,7 @@ async function connexion(page: Page, compte: string) {
 
 for (const compte of COMPTES) {
   test(`compte ${compte} : chaque page autorisée fonctionne, les autres sont refusées`, async ({ page }) => {
+    test.setTimeout(300_000); // 22 pages pour la Direction : marge quand les tests tournent en parallèle
     const erreurs: string[] = [];
     let pageAutorisee = false;
     page.on("pageerror", err => erreurs.push(`[JS] ${page.url()} : ${err.message}`));

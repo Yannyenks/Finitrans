@@ -2,6 +2,8 @@ import { useState } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
+import { can } from "@/lib/permissions";
+import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CheckSquare, Clock, ChevronRight, Search, FileText,
@@ -121,6 +123,33 @@ const CodagePanel = ({ dossier, onClose, onSuccess }: { dossier: any; onClose: (
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
 
+  // Circuit de validation des positions : brouillon → soumis → validé / rejeté
+  const user = getStoredUser();
+  const peutValider = can(user, "permValidation", "complet");
+  const navigate = useNavigate();
+  const actionPosition = useMutation({
+    mutationFn: ({ id, action, commentaire }: { id: string; action: "soumettre" | "valider" | "rejeter"; commentaire?: string }) =>
+      api.post(`/api/codage/${id}/${action}`, commentaire ? { commentaire } : {}),
+    onSuccess: (_d, v) => {
+      refetchPos();
+      qc.invalidateQueries({ queryKey: ["dossiers-codage"] });
+      qc.invalidateQueries({ queryKey: ["sous-etapes", dossier.id] });
+      toast({ title: v.action === "soumettre" ? "Position soumise à validation" : v.action === "valider" ? "Position validée" : "Position rejetée" });
+    },
+    onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
+  });
+  const toutes = async (statut: string, action: "soumettre" | "valider") => {
+    for (const p of positions.filter((x: any) => x.statut === statut)) await actionPosition.mutateAsync({ id: p.id, action });
+  };
+  const rejeter = (id: string) => {
+    const motif = window.prompt("Motif du rejet (5 caractères minimum) :");
+    if (motif && motif.trim().length >= 5) actionPosition.mutate({ id, action: "rejeter", commentaire: motif.trim() });
+  };
+  const STATUT_POS: Record<string, string> = {
+    brouillon: "bg-gray-100 text-gray-600", soumis: "bg-amber-100 text-amber-700",
+    valide: "bg-green-100 text-green-700", rejete: "bg-red-100 text-red-700",
+  };
+
   const deletePosition = useMutation({
     mutationFn: (id: string) => api.delete(`/api/codage/${id}`),
     onSuccess: () => { refetchPos(); toast({ title: "Position supprimée" }); },
@@ -223,7 +252,8 @@ const CodagePanel = ({ dossier, onClose, onSuccess }: { dossier: any; onClose: (
                   <th className="text-right px-3 py-2 font-medium">Valeur CIF</th>
                   <th className="text-right px-3 py-2 font-medium">Droits</th>
                   <th className="text-right px-3 py-2 font-medium">TVA</th>
-                  <th className="w-8 px-2 py-2"></th>
+                  <th className="text-left px-3 py-2 font-medium">Statut</th>
+                  <th className="px-2 py-2"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -234,16 +264,34 @@ const CodagePanel = ({ dossier, onClose, onSuccess }: { dossier: any; onClose: (
                     <td className="px-3 py-2 text-right font-mono">{Number(p.valeurCIF).toLocaleString("fr-FR")}</td>
                     <td className="px-3 py-2 text-right font-mono text-orange-600">{Number(p.montantDroits).toLocaleString("fr-FR")}</td>
                     <td className="px-3 py-2 text-right font-mono text-blue-600">{Number(p.montantTVA).toLocaleString("fr-FR")}</td>
+                    <td className="px-3 py-2">
+                      <span className={`status-badge text-[10px] ${STATUT_POS[p.statut] ?? ""}`} title={p.commentaireValidation ?? ""}>{p.statut}</span>
+                    </td>
                     <td className="px-2 py-2">
-                      {p.statut === "brouillon" && (
-                        <button
-                          onClick={() => deletePosition.mutate(p.id)}
-                          disabled={deletePosition.isPending}
-                          className="text-muted-foreground hover:text-destructive transition-colors"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1 justify-end">
+                        {p.statut === "brouillon" && (
+                          <button onClick={() => actionPosition.mutate({ id: p.id, action: "soumettre" })} disabled={actionPosition.isPending}
+                            className="text-[10px] font-semibold text-secondary hover:underline">Soumettre</button>
+                        )}
+                        {p.statut === "soumis" && peutValider && (
+                          <>
+                            <button onClick={() => actionPosition.mutate({ id: p.id, action: "valider" })} disabled={actionPosition.isPending}
+                              className="text-[10px] font-semibold text-success hover:underline">Valider</button>
+                            <button onClick={() => rejeter(p.id)} disabled={actionPosition.isPending}
+                              className="text-[10px] font-semibold text-destructive hover:underline">Rejeter</button>
+                          </>
+                        )}
+                        {p.statut === "brouillon" && (
+                          <button
+                            onClick={() => deletePosition.mutate(p.id)}
+                            disabled={deletePosition.isPending}
+                            className="text-muted-foreground hover:text-destructive transition-colors"
+                            title="Supprimer"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -354,21 +402,29 @@ const CodagePanel = ({ dossier, onClose, onSuccess }: { dossier: any; onClose: (
       </div>
 
       {/* ── Actions ─────────────────────────────────────── */}
-      <div className="flex gap-2 pt-1 border-t border-border">
+      <div className="flex gap-2 pt-1 border-t border-border flex-wrap">
+        {positions.some((x: any) => x.statut === "brouillon") && (
+          <Button variant="outline" className="text-sm" disabled={actionPosition.isPending} onClick={() => toutes("brouillon", "soumettre")}>
+            Soumettre les brouillons
+          </Button>
+        )}
+        {peutValider && positions.some((x: any) => x.statut === "soumis") && (
+          <Button className="text-sm bg-success text-white" disabled={actionPosition.isPending} onClick={() => toutes("soumis", "valider")}>
+            Valider toutes les positions soumises
+          </Button>
+        )}
         <Button variant="outline" onClick={() => saveMeta.mutate()} disabled={saveMeta.isPending} className="gap-1.5 text-sm">
           {saveMeta.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
           Enregistrer déclaration
         </Button>
         {nextStatus && (
           <Button
-            onClick={() => advanceStatus.mutate(nextStatus)}
-            disabled={advanceStatus.isPending}
+            onClick={() => navigate(`/dossiers/${dossier.id}`)}
             className="gap-1.5 bg-secondary text-secondary-foreground hover:opacity-90 text-sm"
+            title="Terminer les tâches, joindre la preuve et choisir qui continue"
           >
-            {advanceStatus.isPending
-              ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              : <ChevronRight className="w-3.5 h-3.5" />}
-            Passer à : {STATUS_LABELS[nextStatus]}
+            <ChevronRight className="w-3.5 h-3.5" />
+            Terminer l'étape dans le dossier
           </Button>
         )}
       </div>

@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError, ForbiddenError } from '../utils/errors'
+import { logAudit } from '../utils/audit'
 
 const codageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess     = [authenticate, authorize('permDossier', 'lecture')]
@@ -135,9 +136,9 @@ const codageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         userId:    u.id,
         type:      'action_requise' as const,
         titre:     'État de codage à valider',
-        message:   `Un état de codage pour le dossier ${existing.dossierId} est en attente de validation`,
+        message:   `Une position tarifaire (${existing.codeDouanier}) est en attente de validation`,
         dossierId: existing.dossierId,
-        actionUrl: `/codage/${id}`,
+        actionUrl: `/codage`,
       }))),
     })
 
@@ -155,8 +156,8 @@ const codageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return reply.code(422).send({ error: 'NON_SOUMIS', message: 'Seul un état soumis peut être validé' })
     }
 
-    const userId = (request.user as any).id
-    return reply.send(await prisma.etatCodage.update({
+    const userId = request.user.id
+    const ec = await prisma.etatCodage.update({
       where: { id },
       data: {
         statut:               'valide',
@@ -164,7 +165,20 @@ const codageRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         valideAt:             new Date(),
         commentaireValidation: commentaire,
       },
-    }))
+    })
+
+    // Toutes les positions du dossier validées → montant des droits et taxes + tâche « état de codage » terminée
+    const positions = await prisma.etatCodage.findMany({ where: { dossierId: ec.dossierId } })
+    if (positions.every(p => p.statut === 'valide')) {
+      const total = positions.reduce((s, p) => s + Number(p.montantDroits) + Number(p.montantTVA), 0)
+      await prisma.dossier.update({ where: { id: ec.dossierId }, data: { montantTaxes: total } })
+      await prisma.sousEtapeDossier.updateMany({
+        where: { dossierId: ec.dossierId, etape: 'codage', cle: 'etat_codage', statut: { not: 'valide' } },
+        data: { statut: 'valide', completedAt: new Date(), completedById: userId },
+      })
+      await logAudit(ec.dossierId, userId, 'CODAGE_VALIDE', `${positions.length} position(s) validée(s) — droits et taxes : ${total.toLocaleString('fr-FR')} FCFA`)
+    }
+    return reply.send(ec)
   })
 
   // POST /api/codage/:id/rejeter — rejeter un état soumis

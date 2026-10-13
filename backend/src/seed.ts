@@ -22,6 +22,9 @@ async function main() {
   console.log('🌱 Nettoyage de la base...')
 
   // Suppression dans l'ordre des dépendances FK
+  await prisma.documentFavori.deleteMany()
+  await prisma.affectationEtape.deleteMany()
+  await prisma.contact.deleteMany()
   await prisma.transport.deleteMany()
   await prisma.chauffeur.deleteMany()
   await prisma.camion.deleteMany()

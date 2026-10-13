@@ -61,6 +61,10 @@ model User {
   ecrituresValidees        EcritureComptable[]       @relation("EcritureValideur")
   diDocuments              DIDocument[]
   transportsCrees          Transport[]               @relation("TransportCreateur")
+  contactsCrees            Contact[]                 @relation("ContactCreateur")
+  documentsFavoris         DocumentFavori[]
+  affectationsRecues       AffectationEtape[]        @relation("AffectationResponsable")
+  affectationsDonnees      AffectationEtape[]        @relation("AffectationAuteur")
 
   @@map("users")
 }
@@ -117,26 +121,68 @@ model Dossier {
   sousEtapes         SousEtapeDossier[]
   ecritures          EcritureComptable[]
   transports         Transport[]
+  affectations       AffectationEtape[]
 
   @@map("dossiers")
 }
 
 model Document {
   id           String        @id @default(uuid()) @db.Uuid
-  dossierId    String        @map("dossier_id") @db.Uuid
+  /// Facultatif : les documents de l'entreprise (contrats, procédures, modèles…) ne sont liés à aucun dossier
+  dossierId    String?       @map("dossier_id") @db.Uuid
   nom          String        @db.VarChar(255)
-  type         String        @db.VarChar(50)
+  type         String        @db.VarChar(100)
   taille       String        @db.VarChar(50)
+  tailleOctets Int?          @map("taille_octets")
   url          String        @db.VarChar(500)
   contenu      Bytes?
   hashContenu  String?       @map("hash_contenu") @db.VarChar(64)
   uploadePar   String        @map("uploade_par") @db.Uuid
-  etape        DossierStatus
+  etape        DossierStatus?
+  /// preuve | compte_rendu | contrat | procedure | modele | rh | juridique | administratif | finance | autre
+  categorie    String        @default("preuve") @db.VarChar(30)
+  description  String?
+  tags         String[]      @default([])
+  /// Réservé à la Direction, au service administratif et à l'auteur
+  confidentiel Boolean       @default(false)
   createdAt    DateTime      @default(now()) @map("created_at")
-  dossier      Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at")
+  dossier      Dossier?      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   uploader     User          @relation(fields: [uploadePar], references: [id])
+  favoris      DocumentFavori[]
 
+  @@index([categorie])
+  @@index([dossierId])
   @@map("documents")
+}
+
+model DocumentFavori {
+  userId     String   @map("user_id") @db.Uuid
+  documentId String   @map("document_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@id([userId, documentId])
+  @@map("documents_favoris")
+}
+
+/// Responsable désigné à l'avance pour une étape du parcours d'un dossier
+model AffectationEtape {
+  id            String        @id @default(uuid()) @db.Uuid
+  dossierId     String        @map("dossier_id") @db.Uuid
+  etape         DossierStatus
+  responsableId String        @map("responsable_id") @db.Uuid
+  assigneParId  String        @map("assigne_par_id") @db.Uuid
+  note          String?
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  dossier       Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable   User          @relation("AffectationResponsable", fields: [responsableId], references: [id])
+  assignePar    User          @relation("AffectationAuteur", fields: [assigneParId], references: [id])
+
+  @@unique([dossierId, etape])
+  @@map("affectations_etapes")
 }
 
 model Commentaire {
@@ -1186,4 +1232,41 @@ model Transport {
 
   @@index([dateEnlevement])
   @@map("transports")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+//  Répertoire : clients, fournisseurs, compagnies, transporteurs, administrations
+// ════════════════════════════════════════════════════════════════════════════
+
+enum TypeContact {
+  client
+  fournisseur
+  compagnie
+  transporteur
+  administration
+  banque
+  autre
+
+  @@map("type_contact")
+}
+
+model Contact {
+  id          String      @id @default(uuid()) @db.Uuid
+  type        TypeContact @default(client)
+  nom         String      @db.VarChar(255)
+  societe     String?     @db.VarChar(255)
+  fonction    String?     @db.VarChar(255)
+  telephone   String?     @db.VarChar(50)
+  telephone2  String?     @db.VarChar(50)
+  email       String?     @db.VarChar(255)
+  adresse     String?
+  niu         String?     @db.VarChar(50)
+  notes       String?
+  createdById String      @map("created_by_id") @db.Uuid
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+  createdBy   User        @relation("ContactCreateur", fields: [createdById], references: [id])
+
+  @@index([type])
+  @@map("contacts")
 }

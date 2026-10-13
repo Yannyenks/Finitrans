@@ -219,7 +219,8 @@ const LECTURES = [
   '/api/compta/comptes', '/api/compta/journaux', '/api/compta/exercices', '/api/compta/ecritures', '/api/compta/balance',
   '/api/compta/resultat', '/api/compta/bilan', '/api/compta/tresorerie', '/api/compta/creances', '/api/compta/comptabilisation/apercu',
   '/api/di/mouvements', '/api/di/alertes-seuil', '/api/logistique/chauffeurs', '/api/logistique/camions',
-  '/api/logistique/transports', '/api/logistique/resume',
+  '/api/logistique/transports', '/api/logistique/resume', '/api/repertoire', '/api/repertoire?type=client&q=a',
+  '/api/bibliotheque', '/api/bibliotheque?format=pdf&tri=taille&espace=dossiers', '/api/bibliotheque?favoris=1&categorie=preuve,compte_rendu',
 ]
 
 describe('Matrice des droits — aucun compte ne provoque d\'erreur serveur', () => {

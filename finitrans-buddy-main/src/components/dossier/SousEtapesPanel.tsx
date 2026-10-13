@@ -41,6 +41,8 @@ export type SousEtapeConfig = {
   hasPvcResult?:       boolean;
   hasModePaiement?:    boolean;
   hasImmatriculation?: boolean;
+  /** Paiement à saisir en terminant la tâche (crée un paiement compagnie) */
+  facture?:            { montant: string; numero: string; date: string; titre: string };
   outputLabel?:        string;
   fields?:             FieldDef[];
   /** Sites où la sous-étape s'applique (toutes si absent) */
@@ -175,6 +177,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   bon_compagnie: [
     {
       cle: "facturation_compagnie", label: "Facturation & paiement",
+      facture: { montant: "bc_montant", numero: "bc_facture_numero", date: "bc_date_paiement", titre: "Facture de la compagnie maritime" },
       description: "Règlement des frais de surestaries, THC et frais compagnie maritime", partie: "A", partieLabel: "Bon de Compagnie Maritime",
       fields: [
         { key: "bc_facture_numero", label: "N° Facture compagnie", type: "text",   placeholder: "Ex : MSC-INV-2025-0042" },
@@ -192,6 +195,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
     },
     {
       cle: "facturation_terminal", label: "Facturation & paiement (redevance portuaire)", sites: ["Douala"],
+      facture: { montant: "term_montant", numero: "term_facture_numero", date: "term_date_paiement", titre: "Redevance portuaire (terminal)" },
       description: "Règlement des redevances portuaires auprès du terminal RTC de Douala (à Kribi : étape Opérations Kribi)", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
       fields: [
         { key: "term_facture_numero", label: "N° Facture terminal", type: "text",   placeholder: "Ex : KCT-INV-2025-0042" },
@@ -222,6 +226,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   operations_kribi: [
     {
       cle: "facturation_terminal", label: "Facturation & paiement (redevance portuaire)",
+      facture: { montant: "kct_montant", numero: "kct_facture_numero", date: "kct_date_paiement", titre: "Redevance portuaire KCT Kribi" },
       description: "Règlement des redevances portuaires auprès du terminal KCT de Kribi",
       fields: [
         { key: "kct_facture_numero", label: "N° Facture KCT",   type: "text",   placeholder: "Ex : KCT-INV-2025-0042" },
@@ -360,35 +365,43 @@ const PvcDialog = ({
   );
 };
 
-// ── Dialogue Mode de Paiement ────────────────────────────────────────────────
+// ── Dialogue Paiement des droits & taxes (crée le paiement douane) ────────────
 const PaiementDialog = ({
-  onConfirm, onCancel, loading,
+  onConfirm, onCancel, loading, meta,
 }: {
-  onConfirm: (data: { mode: string; reference: string }) => void;
+  onConfirm: (data: Record<string, string>) => void;
   onCancel:  () => void;
   loading:   boolean;
+  meta:      Record<string, string>;
 }) => {
-  const [mode,      setMode]      = useState("virement");
-  const [reference, setReference] = useState("");
+  const [mode,      setMode]      = useState(meta.mode_paiement ?? "virement");
+  const [reference, setReference] = useState(meta.paiement_quittance ?? meta.reference ?? "");
+  const [montant,   setMontant]   = useState(meta.paiement_montant ?? "");
+  const [datePaie,  setDatePaie]  = useState(meta.paiement_date ?? new Date().toISOString().slice(0, 10));
+  const montantOk = Number(String(montant).replace(/\s/g, "")) > 0;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border"
-      >
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border max-h-[92vh] overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center">
-            <Receipt className="w-5 h-5 text-orange-600" />
-          </div>
+          <div className="w-9 h-9 rounded-xl bg-orange-100 flex items-center justify-center"><Receipt className="w-5 h-5 text-orange-600" /></div>
           <div>
             <h3 className="font-display font-bold text-foreground">Paiement des droits & taxes</h3>
-            <p className="text-xs text-muted-foreground">Quittance de paiement au Trésor Public</p>
+            <p className="text-xs text-muted-foreground">Le paiement est enregistré automatiquement en Finance et en comptabilité</p>
           </div>
         </div>
-
         <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Montant payé (FCFA) *</Label>
+              <Input type="number" min={1} value={montant} onChange={e => setMontant(e.target.value)} className="bg-muted/40 font-mono" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Date</Label>
+              <Input type="date" value={datePaie} onChange={e => setDatePaie(e.target.value)} className="bg-muted/40" />
+            </div>
+          </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Mode de règlement *</Label>
             <Select value={mode} onValueChange={setMode}>
@@ -400,41 +413,21 @@ const PaiementDialog = ({
               </SelectContent>
             </Select>
           </div>
-
           {mode === "autres" && (
-            <motion.div initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}
-              className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700 flex items-start gap-2">
-              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-              Un document justificatif doit être joint en preuve de paiement.
-            </motion.div>
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700 flex items-start gap-2">
+              <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" /> Joignez le justificatif en preuve de paiement.
+            </div>
           )}
-
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
-              {mode === "virement" ? "N° de virement / référence bancaire *" :
-               mode === "cash"     ? "N° de quittance *" :
-               "Référence / description du mode de paiement *"}
-            </Label>
-            <Input
-              value={reference}
-              onChange={e => setReference(e.target.value)}
-              placeholder={
-                mode === "virement" ? "Ex : VIR-2025-004821" :
-                mode === "cash"     ? "Ex : QTT-2025-00987" :
-                "Ex : Compensation créance client N°..."
-              }
-              className="bg-muted/40"
-            />
+            <Label className="text-xs font-semibold">N° de quittance / référence *</Label>
+            <Input value={reference} onChange={e => setReference(e.target.value)} placeholder="Ex : QTT-2026-00987" className="bg-muted/40" />
           </div>
-
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={() => onConfirm({ mode, reference })}
-              disabled={!reference.trim() || loading}
-              className="flex-1 gap-1.5 bg-secondary text-secondary-foreground"
-            >
-              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Valider le paiement
+              onClick={() => onConfirm({ mode_paiement: mode, reference, paiement_quittance: reference, paiement_montant: String(montant), paiement_date: datePaie })}
+              disabled={!reference.trim() || !montantOk || loading}
+              className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Valider le paiement
             </Button>
             <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
           </div>
@@ -444,62 +437,116 @@ const PaiementDialog = ({
   );
 };
 
-// ── Dialogue Gate Pass ────────────────────────────────────────────────────────
-const GatePassDialog = ({
-  onConfirm, onCancel, loading,
+// ── Dialogue Facture compagnie / terminal (crée le paiement compagnie) ────────
+const FactureCieDialog = ({
+  champs, titre, onConfirm, onCancel, loading, meta,
 }: {
-  onConfirm: (data: { immatriculation: string; notes?: string }) => void;
+  champs:    { montant: string; numero: string; date: string };
+  titre:     string;
+  onConfirm: (data: Record<string, string>) => void;
   onCancel:  () => void;
   loading:   boolean;
+  meta:      Record<string, string>;
 }) => {
-  const [immat, setImmat] = useState("");
+  const [numero,  setNumero]  = useState(meta[champs.numero] ?? "");
+  const [montant, setMontant] = useState(meta[champs.montant] ?? "");
+  const [datePaie, setDatePaie] = useState(meta[champs.date] ?? new Date().toISOString().slice(0, 10));
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center"><Receipt className="w-5 h-5 text-green-700" /></div>
+          <div>
+            <h3 className="font-display font-bold text-foreground">{titre}</h3>
+            <p className="text-xs text-muted-foreground">Le paiement est enregistré automatiquement en Finance</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">N° de facture</Label><Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" /></div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Montant payé (FCFA) *</Label><Input type="number" min={1} value={montant} onChange={e => setMontant(e.target.value)} className="bg-muted/40 font-mono" /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Date de paiement</Label><Input type="date" value={datePaie} onChange={e => setDatePaie(e.target.value)} className="bg-muted/40" /></div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button onClick={() => onConfirm({ [champs.numero]: numero, [champs.montant]: String(montant), [champs.date]: datePaie })}
+              disabled={!(Number(montant) > 0) || loading} className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Valider le paiement
+            </Button>
+            <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+// ── Dialogue Gate Pass (crée le ticket de sortie) ─────────────────────────────
+const GatePassDialog = ({
+  onConfirm, onCancel, loading, meta,
+}: {
+  onConfirm: (data: Record<string, string>, notes?: string) => void;
+  onCancel:  () => void;
+  loading:   boolean;
+  meta:      Record<string, string>;
+}) => {
+  const { data: chauffeurs = [] } = useQuery({
+    queryKey: ["logistique-chauffeurs-actifs"],
+    queryFn:  () => api.get<any[]>("/api/logistique/chauffeurs?actifs=true"),
+    staleTime: 5 * 60_000,
+  });
+  const [immat, setImmat] = useState(meta.immatriculation ?? "");
+  const [chauffeur, setChauffeur] = useState(meta.gp_chauffeur ?? meta.kgp_chauffeur ?? "");
+  const [telephone, setTelephone] = useState(meta.gp_telephone ?? "");
+  const [destination, setDestination] = useState(meta.gp_destination ?? "");
   const [notes, setNotes] = useState("");
+  const choisirChauffeur = (v: string) => {
+    setChauffeur(v);
+    const c = chauffeurs.find((x: any) => x.nom === v);
+    if (c) setTelephone(c.telephone);
+  };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
-        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border"
-      >
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border max-h-[92vh] overflow-y-auto">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center">
-            <FileText className="w-5 h-5 text-teal-600" />
-          </div>
+          <div className="w-9 h-9 rounded-xl bg-teal-100 flex items-center justify-center"><FileText className="w-5 h-5 text-teal-600" /></div>
           <div>
             <h3 className="font-display font-bold text-foreground">Gate Pass — Ticket de sortie</h3>
-            <p className="text-xs text-muted-foreground">Enregistrement du véhicule de transport</p>
+            <p className="text-xs text-muted-foreground">Le ticket est enregistré et imprimable depuis la plateforme</p>
           </div>
         </div>
-
-        <div className="space-y-4">
+        <div className="space-y-3">
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Immatriculation du véhicule *</Label>
-            <Input
-              value={immat}
-              onChange={e => setImmat(e.target.value.toUpperCase())}
-              placeholder="Ex : LT 1234 A"
-              className="bg-muted/40 font-mono uppercase text-base tracking-widest"
-            />
+            <Input value={immat} onChange={e => setImmat(e.target.value.toUpperCase())} placeholder="Ex : LT 1234 A" className="bg-muted/40 font-mono uppercase tracking-widest" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Chauffeur *</Label>
+              <Input list="gp-chauffeurs" value={chauffeur} onChange={e => choisirChauffeur(e.target.value)} className="bg-muted/40" />
+              <datalist id="gp-chauffeurs">{chauffeurs.map((c: any) => <option key={c.id} value={c.nom}>{c.telephone}</option>)}</datalist>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Téléphone *</Label>
+              <Input value={telephone} onChange={e => setTelephone(e.target.value)} className="bg-muted/40" />
+            </div>
           </div>
           <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">Observations (optionnel)</Label>
-            <Textarea
-              value={notes}
-              onChange={e => setNotes(e.target.value)}
-              placeholder="Ex : Camion plateau — chauffeur M. DUPONT — heure de sortie 14h30"
-              className="bg-muted/40 text-sm h-16 resize-none"
-            />
+            <Label className="text-xs font-semibold">Destination *</Label>
+            <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="Ex : Yaoundé — entrepôt client" className="bg-muted/40" />
           </div>
-
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Observations</Label>
+            <Textarea value={notes} onChange={e => setNotes(e.target.value)} className="bg-muted/40 text-sm h-14 resize-none" />
+          </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={() => onConfirm({ immatriculation: immat, notes })}
-              disabled={!immat.trim() || loading}
-              className="flex-1 gap-1.5 bg-secondary text-secondary-foreground"
-            >
-              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              Enregistrer le Gate Pass
+              onClick={() => onConfirm({ immatriculation: immat, gp_chauffeur: chauffeur, gp_telephone: telephone, gp_destination: destination }, notes)}
+              disabled={!immat.trim() || chauffeur.trim().length < 2 || telephone.replace(/\D/g, "").length < 8 || destination.trim().length < 2 || loading}
+              className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer le Gate Pass
             </Button>
             <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
           </div>
@@ -785,6 +832,7 @@ const SousEtapeCard = ({
   const [showPvc,      setShowPvc]      = useState(false);
   const [showPaiement, setShowPaiement] = useState(false);
   const [showGatePass, setShowGatePass] = useState(false);
+  const [showFacture,  setShowFacture]  = useState(false);
   const [notes,        setNotes]        = useState(data?.notes ?? "");
 
   const statut    = data?.statut ?? "todo";
@@ -797,6 +845,7 @@ const SousEtapeCard = ({
     if (config.hasPvcResult)        { setShowPvc(true);      return; }
     if (config.hasModePaiement)     { setShowPaiement(true); return; }
     if (config.hasImmatriculation)  { setShowGatePass(true); return; }
+    if (config.facture)             { setShowFacture(true);  return; }
     update.mutate(
       { etape, cle: config.cle, data: { statut: "valide" } },
       { onSuccess: () => notif.sousEtapeValidee(config.label), ...onErr }
@@ -826,11 +875,12 @@ const SousEtapeCard = ({
       {showPaiement && (
         <PaiementDialog
           loading={isPending}
+          meta={meta}
           onCancel={() => setShowPaiement(false)}
-          onConfirm={({ mode, reference }) => {
+          onConfirm={metadata => {
             update.mutate(
-              { etape, cle: config.cle, data: { statut: "valide", metadata: { mode_paiement: mode, reference } } },
-              { onSuccess: () => { setShowPaiement(false); notif.sousEtapeValidee(config.label); } }
+              { etape, cle: config.cle, data: { statut: "valide", metadata } },
+              { onSuccess: () => { setShowPaiement(false); notif.sousEtapeValidee(config.label); }, ...onErr }
             );
           }}
         />
@@ -838,11 +888,27 @@ const SousEtapeCard = ({
       {showGatePass && (
         <GatePassDialog
           loading={isPending}
+          meta={meta}
           onCancel={() => setShowGatePass(false)}
-          onConfirm={({ immatriculation, notes: n }) => {
+          onConfirm={(metadata, n) => {
             update.mutate(
-              { etape, cle: config.cle, data: { statut: "valide", metadata: { immatriculation }, notes: n || undefined } },
-              { onSuccess: () => { setShowGatePass(false); notif.sousEtapeValidee(config.label); } }
+              { etape, cle: config.cle, data: { statut: "valide", metadata, notes: n || undefined } },
+              { onSuccess: () => { setShowGatePass(false); notif.sousEtapeValidee(config.label); }, ...onErr }
+            );
+          }}
+        />
+      )}
+      {showFacture && config.facture && (
+        <FactureCieDialog
+          loading={isPending}
+          meta={meta}
+          champs={config.facture}
+          titre={config.facture.titre}
+          onCancel={() => setShowFacture(false)}
+          onConfirm={metadata => {
+            update.mutate(
+              { etape, cle: config.cle, data: { statut: "valide", metadata } },
+              { onSuccess: () => { setShowFacture(false); notif.sousEtapeValidee(config.label); }, ...onErr }
             );
           }}
         />
@@ -908,6 +974,13 @@ const SousEtapeCard = ({
             {meta.mode_paiement && (
               <p className="text-[10px] mt-0.5 text-muted-foreground">
                 Mode : {meta.mode_paiement === "virement" ? "Virement" : meta.mode_paiement === "cash" ? "Cash" : "Autres"}{meta.reference ? ` · Réf : ${meta.reference}` : ""}
+              </p>
+            )}
+            {meta.enregistrement_type && (
+              <p className="text-[10px] mt-0.5 text-success font-medium">
+                ✓ {meta.enregistrement_type === "paiement_douane" ? "Paiement douane enregistré en Finance"
+                  : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
+                  : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
             )}
             {meta.immatriculation && (

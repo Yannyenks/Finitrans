@@ -6,7 +6,7 @@
     "api/index.ts": {
       "memory": 1024,
       "maxDuration": 30,
-      "includeFiles": "backend/node_modules/.prisma/**"
+      "includeFiles": "{backend/node_modules/.prisma/**,backend/node_modules/pdfkit/js/data/**}"
     }
   },
   "rewrites": [

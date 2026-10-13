@@ -6,6 +6,7 @@ import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
+import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
   isStatus, loadAttribution, notify, stageCompletion,
@@ -108,12 +109,22 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       data.completedById = null
     }
 
-    const row = await prisma.sousEtapeDossier.upsert({
+    let row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
       create: { dossierId: id, etape, cle, ...data },
       update: data,
       include: includeUsers,
     })
+
+    // Tâche terminée → création automatique de l'enregistrement métier (paiement, gate pass…)
+    if (body.statut === 'valide') {
+      const meta = (row.metadata ?? {}) as Record<string, unknown>
+      const ajout = await enregistrerDepuisSousEtape(id, etape, cle, meta, actor.id)
+      if (ajout) {
+        await memoriserEnregistrement(row.id, meta, ajout)
+        row = { ...row, metadata: { ...meta, ...ajout } as typeof row.metadata }
+      }
+    }
 
     const label = labelOf(etape, cle)
     if (body.statut && body.statut !== existing?.statut) {
@@ -204,7 +215,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const doc = await prisma.document.create({
       data: {
         dossierId: id, uploadePar: actor.id, nom: fileData.filename, type: fileData.mimetype,
-        taille, contenu, hashContenu, etape, url: '',
+        taille, tailleOctets: contenu.length, contenu, hashContenu, etape, url: '', categorie: 'preuve',
       },
     })
     const url = `/api/dossiers/${id}/documents/${doc.id}/content`

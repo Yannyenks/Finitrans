@@ -208,7 +208,7 @@ export async function uploadFile<T = unknown>(path: string, formData: FormData):
 
 // ── Documents protégés (nécessitent le jeton) ────────────────
 
-async function fetchBlob(path: string): Promise<Blob> {
+export async function fetchBlob(path: string): Promise<Blob> {
   const res = await authFetch(path)
   if (!res.ok) {
     const text = await res.text().catch(() => '')

@@ -203,6 +203,13 @@ export async function stageOwner(
   dossier: { id: string; compagnie: string; site: Site },
   etape: DossierStatus,
 ): Promise<string | null> {
+  // Responsable désigné à l'avance dans le parcours du dossier : prioritaire
+  const affectation = await prisma.affectationEtape.findUnique({
+    where: { dossierId_etape: { dossierId: dossier.id, etape } },
+    select: { responsableId: true, responsable: { select: { actif: true } } },
+  })
+  if (affectation?.responsable.actif) return affectation.responsableId
+
   const attribution = await loadAttribution()
   const owner = attribution[etape].owner
   const holders = await prisma.sousEtapeDossier.findMany({

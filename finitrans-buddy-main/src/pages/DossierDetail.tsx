@@ -2,15 +2,17 @@ import { useState, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, getStoredUser, openDocument, uploadFile } from "@/lib/api";
+import { api, downloadFile, getStoredUser, openDocument, uploadFile } from "@/lib/api";
 import { can, isSupervisor } from "@/lib/permissions";
 import {
   ArrowLeft, Ship, MapPin, Calendar, User, Package, FileText,
   MessageSquare, CheckCircle2, History, Send, ClipboardList,
   DollarSign, AlertTriangle, Loader2, ChevronRight, ChevronDown, Upload,
   Image as ImageIcon, Banknote, Plus, Code2, ShieldCheck, Landmark,
-  Clock, AlertCircle, X, Container, Receipt,
+  Clock, AlertCircle, X, Container, Receipt, Pencil, Download, FileDown, Library, Lock,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import EquipeParcours from "@/components/dossier/EquipeParcours";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -283,6 +285,64 @@ const CreateDIInline = ({
   );
 };
 
+// ── Modification des informations du dossier ────────────────────────────────
+
+const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open: boolean; onClose: () => void }) => {
+  const qc = useQueryClient();
+  const initial = () => ({
+    client: dossier.client ?? "", marchandise: dossier.marchandise ?? "", conteneur: dossier.conteneur ?? "",
+    fournisseur: dossier.fournisseur ?? "", numeroBL: dossier.numeroBL ?? "", numDeclaration: dossier.numDeclaration ?? "",
+    regimeDouanier: dossier.regimeDouanier ?? "", priorite: dossier.priorite ?? "moyenne",
+    dateLimiteSortie: dossier.dateLimiteSortie ? String(dossier.dateLimiteSortie).slice(0, 10) : "", notes: dossier.notes ?? "",
+  });
+  const [v, setV] = useState(initial);
+  const champ = (k: keyof ReturnType<typeof initial>) => ({ value: v[k], onChange: (e: any) => setV(x => ({ ...x, [k]: e.target.value })) });
+  const enregistrer = useMutation({
+    mutationFn: () => {
+      const corps: Record<string, unknown> = { client: v.client.trim(), marchandise: v.marchandise.trim(), conteneur: v.conteneur.trim(), priorite: v.priorite };
+      for (const k of ["fournisseur", "numeroBL", "numDeclaration", "regimeDouanier", "notes"] as const) if (v[k].trim() || dossier[k]) corps[k] = v[k].trim();
+      if (v.dateLimiteSortie) corps.dateLimiteSortie = new Date(`${v.dateLimiteSortie}T23:59:00`).toISOString();
+      return api.patch(`/api/dossiers/${dossier.id}`, corps);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dossier", dossier.id] });
+      qc.invalidateQueries({ queryKey: ["dossier-audit", dossier.id] });
+      toast({ title: "Dossier mis à jour" });
+      onClose();
+    },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+  return (
+    <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader><DialogTitle>Modifier le dossier {dossier.numero}</DialogTitle></DialogHeader>
+        <form className="grid grid-cols-2 gap-3" onSubmit={e => { e.preventDefault(); enregistrer.mutate(); }}>
+          <div className="col-span-2"><Label htmlFor="md-client">Client *</Label><Input id="md-client" required minLength={2} {...champ("client")} /></div>
+          <div><Label htmlFor="md-march">Marchandise *</Label><Input id="md-march" required minLength={2} {...champ("marchandise")} /></div>
+          <div><Label htmlFor="md-tc">Conteneur *</Label><Input id="md-tc" required minLength={3} {...champ("conteneur")} /></div>
+          <div><Label htmlFor="md-fourn">Fournisseur</Label><Input id="md-fourn" {...champ("fournisseur")} /></div>
+          <div><Label htmlFor="md-bl">N° BL</Label><Input id="md-bl" {...champ("numeroBL")} /></div>
+          <div><Label htmlFor="md-decl">N° déclaration</Label><Input id="md-decl" {...champ("numDeclaration")} /></div>
+          <div><Label htmlFor="md-regime">Régime douanier</Label><Input id="md-regime" {...champ("regimeDouanier")} /></div>
+          <div>
+            <Label>Priorité</Label>
+            <Select value={v.priorite} onValueChange={p => setV(x => ({ ...x, priorite: p }))}>
+              <SelectTrigger aria-label="Priorité"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="haute">Haute</SelectItem><SelectItem value="moyenne">Moyenne</SelectItem><SelectItem value="basse">Basse</SelectItem></SelectContent>
+            </Select>
+          </div>
+          <div><Label htmlFor="md-limite">Date limite de sortie</Label><Input id="md-limite" type="date" {...champ("dateLimiteSortie")} /></div>
+          <div className="col-span-2"><Label htmlFor="md-notes">Notes</Label><Textarea id="md-notes" rows={3} {...champ("notes")} /></div>
+          <div className="col-span-2 flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
+            <Button type="submit" disabled={enregistrer.isPending}>{enregistrer.isPending && <Loader2 className="w-4 h-4 animate-spin mr-1" />}Enregistrer</Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // ── Page ─────────────────────────────────────────────────────────────────────
 
 const DossierDetail = () => {
@@ -306,6 +366,8 @@ const DossierDetail = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [showFactureDialog, setShowFactureDialog] = useState(false);
+  const [showModifier, setShowModifier] = useState(false);
+  const [crEnCours, setCrEnCours] = useState(false);
   const { query: sousEtapesQuery } = useSousEtapes(id ?? "");
 
   // Retard / SLA state
@@ -418,6 +480,7 @@ const DossierDetail = () => {
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["dossier", id] });
       qc.invalidateQueries({ queryKey: ["dossier-parcours", id] });
+      qc.invalidateQueries({ queryKey: ["dossier-affectations", id] });
       qc.invalidateQueries({ queryKey: ["dossier-comments", id] });
       qc.invalidateQueries({ queryKey: ["dossiers"] });
       qc.invalidateQueries({ queryKey: ["dossier-next", id] });
@@ -462,6 +525,18 @@ const DossierDetail = () => {
   const impliqueEtapeCourante = dossier.responsableId === user?.id || mesTaches.some(t => t.etape === dossier.status);
   const canAdvance = superviseur || impliqueEtapeCourante;
   const canUpload  = superviseur || can(user, "permDossier", "partiel") || dossier.responsableId === user?.id || mesTaches.length > 0;
+  const canModifier = superviseur || (can(user, "permDossier", "partiel") && (user?.profil === "administration" || dossier.responsableId === user?.id || mesTaches.length > 0));
+  const ouvrirCompteRendu = async (telecharger = false) => {
+    setCrEnCours(true);
+    try {
+      if (telecharger) await downloadFile(`/api/dossiers/${dossier.id}/compte-rendu?telecharger=1`, `Compte-rendu-${dossier.numero}.pdf`);
+      else await openDocument(`/api/dossiers/${dossier.id}/compte-rendu`);
+    } catch (e: any) {
+      toast({ title: "Compte rendu indisponible", description: e.message, variant: "destructive" });
+    } finally {
+      setCrEnCours(false);
+    }
+  };
   const effectiveEtape  = uploadEtape || dossier.status;
   const docs: any[]     = docsData ?? [];
 
@@ -708,10 +783,24 @@ const DossierDetail = () => {
         </div>
       )}
 
-      <button onClick={() => navigate("/dossiers")}
-        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors">
-        <ArrowLeft className="w-4 h-4" /> Retour aux dossiers
-      </button>
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-6">
+        <button onClick={() => navigate("/dossiers")}
+          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Retour aux dossiers
+        </button>
+        <div className="flex gap-2">
+          <div className="flex">
+            <Button variant="outline" size="sm" className="gap-1.5 rounded-r-none" disabled={crEnCours} onClick={() => ouvrirCompteRendu()}
+              title="Compte rendu complet de l'évolution du dossier, prêt à imprimer">
+              {crEnCours ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileDown className="w-3.5 h-3.5" />} Compte rendu PDF
+            </Button>
+            <Button variant="outline" size="sm" className="rounded-l-none border-l-0 px-2" disabled={crEnCours} onClick={() => ouvrirCompteRendu(true)}
+              title="Télécharger le compte rendu" aria-label="Télécharger le compte rendu"><Download className="w-3.5 h-3.5" /></Button>
+          </div>
+          {canModifier && <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowModifier(true)}><Pencil className="w-3.5 h-3.5" /> Modifier</Button>}
+        </div>
+      </div>
+      {canModifier && showModifier && <ModifierDossierDialog dossier={dossier} open onClose={() => setShowModifier(false)} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -721,6 +810,25 @@ const DossierDetail = () => {
           animate={{ opacity: 1, y: 0 }}
           className="lg:col-span-2 space-y-6"
         >
+          {dossier.status === "cloture" && (
+            <div className="relative overflow-hidden rounded-2xl border border-success/25 bg-gradient-to-r from-success/10 via-success/5 to-transparent p-5" data-testid="bandeau-cloture">
+              <div className="flex flex-wrap items-center gap-4">
+                <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-success text-white shadow-sm"><Lock className="w-5 h-5" /></div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-display font-semibold text-foreground">Dossier clôturé</p>
+                  <p className="text-xs text-muted-foreground">Le compte rendu complet du parcours a été archivé dans la bibliothèque documentaire.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" className="gap-1.5 bg-success text-white hover:bg-success/90" disabled={crEnCours} onClick={() => ouvrirCompteRendu()}>
+                    <FileDown className="w-3.5 h-3.5" /> Ouvrir le compte rendu
+                  </Button>
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => navigate(`/bibliotheque?dossier=${dossier.id}`)}>
+                    <Library className="w-3.5 h-3.5" /> Bibliothèque
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* ══ Progression du dossier — Ultra Premium ═══════════════════ */}
           <div className="stat-card overflow-hidden">
             {/* En-tête */}
@@ -1349,6 +1457,8 @@ const DossierDetail = () => {
           transition={{ delay: 0.15 }}
           className="space-y-6"
         >
+          <EquipeParcours dossierId={dossier.id} employes={usersList} />
+
           {/* Informations */}
           <div className="stat-card space-y-4">
             <h3 className="font-display font-semibold text-foreground">Informations</h3>

@@ -5,7 +5,7 @@ import {
   MapPin, ChevronLeft, ChevronRight, LogOut, Settings,
   ClipboardList, MessageSquare, BarChart3, Banknote,
   CheckSquare, PackageOpen, Truck, BookOpen, Trophy,
-  ListTodo, Radar, Building2, Calculator, FileStack,
+  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -67,13 +67,16 @@ const NAV: NavGroup[] = [
     titre: "Communication",
     items: [
       { label: "Messagerie", icon: MessageSquare, path: "/messagerie", module: "messagerie" },
+      { label: "Bibliothèque", icon: Library,     path: "/bibliotheque", module: "bibliotheque" },
+      { label: "Répertoire", icon: BookUser,      path: "/repertoire", module: "repertoire" },
       { label: "Alertes",    icon: Bell,          path: "/alertes",    module: "alertes", badge: "alertes" },
     ],
   },
 ];
 
 const AppSidebar = () => {
-  const [collapsed, setCollapsed] = useState(false);
+  // Réduite par défaut sur téléphone et petite tablette pour laisser la place au contenu
+  const [collapsed, setCollapsed] = useState(() => typeof window !== "undefined" && !!window.matchMedia?.("(max-width: 1023px)").matches);
   const location = useLocation();
   const { user, hasModule, superviseur } = useAuth();
 
