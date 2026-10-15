@@ -5,6 +5,7 @@ import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
+import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { logActivity } from '../utils/audit'
 import { createHash } from 'crypto'
 import { differenceInDays, subDays, format, eachDayOfInterval } from 'date-fns'
@@ -755,7 +756,7 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const di = await prisma.declarationImportation.findUnique({ where: { id }, select: { id: true, numero: true } })
     if (!di) throw new NotFoundError('DI', id)
 
-    const file = await request.file()
+    const file = await recevoirFichier(request)
     if (!file) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
 
     const contenu = await file.toBuffer()
@@ -796,11 +797,10 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { id, docId } = z.object({ id: z.string().uuid(), docId: z.string().uuid() }).parse(request.params)
     const doc = await prisma.dIDocument.findFirst({ where: { id: docId, diId: id }, select: { nom: true, type: true, contenu: true } })
     if (!doc?.contenu) throw new NotFoundError('Document DI', docId)
-    reply
-      .header('Content-Type', doc.type)
-      .header('Content-Disposition', `inline; filename="${encodeURIComponent(doc.nom)}"`)
-      .header('Content-Length', doc.contenu.length)
-    return reply.send(doc.contenu)
+    return envoyerContenu(request, reply, doc.contenu, {
+      'Content-Type': doc.type,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(doc.nom)}"`,
+    })
   })
 
   // ── DELETE /api/di/:id — supprimer une DI sans consommation ─

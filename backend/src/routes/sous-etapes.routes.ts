@@ -6,6 +6,7 @@ import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
+import { recevoirFichier } from '../services/televersement'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
@@ -203,7 +204,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       })
     }
 
-    const fileData = await request.file()
+    const fileData = await recevoirFichier(request)
     if (!fileData) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
 
     const contenu = await fileData.toBuffer()

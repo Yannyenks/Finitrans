@@ -59,19 +59,38 @@ function sessionExpired(): never {
   throw new Error('SESSION_EXPIRED')
 }
 
+const MESSAGE_RESEAU = 'Connexion au serveur interrompue — vérifiez votre connexion internet puis réessayez.'
+
+/**
+ * fetch avec un message clair en cas de coupure réseau (au lieu de « Failed to fetch »).
+ * Les lectures (GET) sont relancées une fois automatiquement.
+ */
+async function fetchReseau(path: string, init: RequestInit): Promise<Response> {
+  const lecture = !init.method || init.method === 'GET'
+  for (let essai = 0; ; essai++) {
+    try {
+      return await fetch(`${BASE_URL}${path}`, init)
+    } catch (err) {
+      if ((err as Error)?.name === 'AbortError') throw err
+      if (lecture && essai === 0) { await new Promise(r => setTimeout(r, 1000)); continue }
+      throw new ApiError(MESSAGE_RESEAU, 0, 'NETWORK_ERROR')
+    }
+  }
+}
+
 /** Requête authentifiée brute (gère le renouvellement du jeton). */
 async function authFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const token = getAccessToken()
   const headers = new Headers(init.headers)
   if (token) headers.set('Authorization', `Bearer ${token}`)
-  const res = await fetch(`${BASE_URL}${path}`, { ...init, headers })
+  const res = await fetchReseau(path, { ...init, headers })
   if (res.status !== 401) return res
 
   const result = await refreshOnce()
   if (result === 'ok') {
     const retryHeaders = new Headers(init.headers)
     retryHeaders.set('Authorization', `Bearer ${getAccessToken()}`)
-    return fetch(`${BASE_URL}${path}`, { ...init, headers: retryHeaders })
+    return fetchReseau(path, { ...init, headers: retryHeaders })
   }
   if (result === 'invalid') sessionExpired()
   throw new Error('Erreur serveur temporaire — réessayez')
@@ -201,22 +220,61 @@ export function isAuthenticated(): boolean {
   return !!getAccessToken()
 }
 
+// L'hébergement (Vercel) refuse toute requête ou réponse de plus de 4,5 Mo :
+// les fichiers plus gros sont envoyés et relus par morceaux.
+const TAILLE_MORCEAU = 3 * 1024 * 1024
+
 export async function uploadFile<T = unknown>(path: string, formData: FormData): Promise<T> {
+  const fichier = [...formData.values()].find((v): v is File => v instanceof File)
+  if (fichier && fichier.size > TAILLE_MORCEAU) {
+    const televersementId = crypto.randomUUID()
+    const total = Math.ceil(fichier.size / TAILLE_MORCEAU)
+    const q = new URLSearchParams({ total: String(total), nom: fichier.name || 'fichier', type: fichier.type || 'application/octet-stream' })
+    for (let i = 0; i < total; i++) {
+      const morceau = new FormData()
+      morceau.append('file', fichier.slice(i * TAILLE_MORCEAU, (i + 1) * TAILLE_MORCEAU), fichier.name || 'fichier')
+      const res = await authFetch(`/api/televersements/${televersementId}/morceaux/${i}?${q}`, { method: 'POST', body: morceau })
+      await parseResponse(res)
+    }
+    // Même requête métier, le fichier étant remplacé par la référence de l'envoi
+    const fd = new FormData()
+    formData.forEach((v, k) => { if (!(v instanceof File)) fd.append(k, v) })
+    fd.append('televersementId', televersementId)
+    formData = fd
+  }
   const res = await authFetch(path, { method: 'POST', body: formData })
   return parseResponse<T>(res)
 }
 
 // ── Documents protégés (nécessitent le jeton) ────────────────
 
+async function erreurDe(res: Response): Promise<ApiError> {
+  const text = await res.text().catch(() => '')
+  let message = `Erreur ${res.status}`
+  try { message = JSON.parse(text).message ?? message } catch { /* texte brut */ }
+  return new ApiError(message, res.status)
+}
+
 export async function fetchBlob(path: string): Promise<Blob> {
-  const res = await authFetch(path)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    let message = `Erreur ${res.status}`
-    try { message = JSON.parse(text).message ?? message } catch { /* texte brut */ }
-    throw new ApiError(message, res.status)
+  const plage = (debut: number) => ({ headers: { Range: `bytes=${debut}-${debut + TAILLE_MORCEAU - 1}` } })
+  const res = await authFetch(path, plage(0))
+  if (!res.ok) throw await erreurDe(res)
+  if (res.status !== 206) return res.blob()
+
+  // Lecture par plages : « bytes 0-3145727/8000000 »
+  const total = Number(/\/(\d+)$/.exec(res.headers.get('Content-Range') ?? '')?.[1] ?? 0)
+  const type = res.headers.get('Content-Type') ?? 'application/octet-stream'
+  const parties: Blob[] = [await res.blob()]
+  let lu = parties[0].size
+  while (lu < total) {
+    const suite = await authFetch(path, plage(lu))
+    if (!suite.ok) throw await erreurDe(suite)
+    const b = await suite.blob()
+    if (b.size === 0) break
+    parties.push(b)
+    lu += b.size
   }
-  return res.blob()
+  return new Blob(parties, { type })
 }
 
 /** Ouvre un document protégé dans un nouvel onglet. */

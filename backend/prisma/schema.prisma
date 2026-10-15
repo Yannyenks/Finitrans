@@ -1270,3 +1270,19 @@ model Contact {
   @@index([type])
   @@map("contacts")
 }
+
+/// Morceaux d'un fichier envoyé en plusieurs requêtes (Vercel limite chaque requête à 4,5 Mo)
+model TeleversementMorceau {
+  televersementId String   @map("televersement_id") @db.Uuid
+  index           Int
+  total           Int
+  userId          String   @map("user_id") @db.Uuid
+  nom             String   @db.VarChar(255)
+  type            String   @db.VarChar(100)
+  contenu         Bytes
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@id([televersementId, index])
+  @@index([createdAt])
+  @@map("televersements_morceaux")
+}

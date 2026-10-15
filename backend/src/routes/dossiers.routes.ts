@@ -10,6 +10,7 @@ import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { AuthUser } from '../types'
+import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import {
   STATUS_ORDER, STATUS_LABELS, assignStage, initSousEtapes, loadAttribution, nextStage,
@@ -544,7 +545,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const canWrite = ['partiel', 'complet'].includes(user.permDossier) || await isInvolved(user, existing)
     if (!canWrite) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Permissions insuffisantes' })
 
-    const data = await request.file()
+    const data = await recevoirFichier(request)
     if (!data) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
 
     const { filename, mimetype } = data
@@ -601,11 +602,10 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (!doc) throw new NotFoundError('Document', docId)
     if (!doc.contenu) return reply.code(404).send({ error: 'NO_CONTENT', message: 'Contenu non disponible' })
 
-    reply
-      .header('Content-Type', doc.type)
-      .header('Content-Disposition', `inline; filename="${encodeURIComponent(doc.nom)}"`)
-      .header('Content-Length', doc.contenu.length)
-      .send(doc.contenu)
+    return envoyerContenu(request, reply, doc.contenu, {
+      'Content-Type': doc.type,
+      'Content-Disposition': `inline; filename="${encodeURIComponent(doc.nom)}"`,
+    })
   })
 
   // ─── Documents ────────────────────────────────────────────

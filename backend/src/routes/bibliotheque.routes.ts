@@ -11,6 +11,7 @@ import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { logAudit, logActivity } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
+import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { STATUS_ORDER } from '../services/workflow'
 import { AuthUser } from '../types'
 
@@ -156,18 +157,17 @@ const bibliothequeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) 
     const doc = await prisma.document.findFirst({ where: { AND: [{ id }, visibles(request.user)] }, select: { nom: true, type: true, contenu: true } })
     if (!doc) throw new NotFoundError('Document', id)
     if (!doc.contenu) return reply.code(404).send({ error: 'NO_CONTENT', message: 'Contenu non disponible' })
-    reply
-      .header('Content-Type', doc.type || 'application/octet-stream')
-      .header('Content-Disposition', `${telecharger === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(doc.nom)}`)
-      .header('Content-Length', doc.contenu.length)
-      .header('Cache-Control', 'private, max-age=300')
-    return reply.send(doc.contenu)
+    return envoyerContenu(request, reply, doc.contenu, {
+      'Content-Type': doc.type || 'application/octet-stream',
+      'Content-Disposition': `${telecharger === '1' ? 'attachment' : 'inline'}; filename*=UTF-8''${encodeURIComponent(doc.nom)}`,
+      'Cache-Control': 'private, max-age=300',
+    })
   })
 
   // POST /api/bibliotheque — dépôt (multipart : fichier + categorie, description, tags, dossierId, etape, confidentiel)
   fastify.post('/', { preHandler }, async (request, reply) => {
     const actor = request.user
-    const fichier = await request.file()
+    const fichier = await recevoirFichier(request)
     if (!fichier) return reply.code(400).send({ error: 'NO_FILE', message: 'Aucun fichier fourni' })
     const champ = (k: string) => {
       const v = (fichier.fields as Record<string, any>)[k]
