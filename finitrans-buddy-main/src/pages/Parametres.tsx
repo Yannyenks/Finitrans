@@ -38,6 +38,8 @@ const DEFAULT_SLA: Record<string, number> = {
   cloture:          1,
 };
 
+type SlaSousEtape = { cle: string; etape: string; etapeLabel: string; label: string; sites: string[] | null; heures: number; defaut: number };
+
 const Parametres = () => {
   const qc = useQueryClient();
   const { data: configData } = useQuery({
@@ -60,6 +62,20 @@ const Parametres = () => {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
   const saveSlaConfig = () => saveSla.mutate();
+
+  // SLA de chaque sous-étape (heures, précision à la minute) — paramètre « sla_sous_etapes »
+  const { superviseur } = useAuth();
+  const { data: slaSE } = useQuery({ queryKey: ["sla-sous-etapes"], queryFn: () => api.get<SlaSousEtape[]>("/api/parametres/sla-sous-etapes") });
+  const [slaTaches, setSlaTaches] = useState<Record<string, number>>({});
+  useEffect(() => { if (slaSE) setSlaTaches(Object.fromEntries(slaSE.map(l => [l.cle, l.heures]))); }, [slaSE]);
+  const saveSlaTaches = useMutation({
+    mutationFn: () => api.patch("/api/parametres/sla_sous_etapes", { valeur: slaTaches }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["sla-sous-etapes"] }); toast({ title: "SLA des tâches enregistrés", description: "Ils s'appliquent aux tâches des prochaines étapes démarrées." }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+  const groupesSla = (slaSE ?? []).reduce<Record<string, SlaSousEtape[]>>((acc, l) => { (acc[l.etape] ??= []).push(l); return acc; }, {});
+  const majSla = (cle: string, heures: number, minutes: number) =>
+    setSlaTaches(p => ({ ...p, [cle]: Math.max(0, Math.round((heures * 60 + minutes)) / 60) }));
 
   // Liens externes (portails ouverts depuis une sous-étape)
   const { data: attribution } = useQuery({ queryKey: ["roles-attribution"], queryFn: () => api.get<any>("/api/roles/attribution") });
@@ -178,9 +194,48 @@ const Parametres = () => {
               >
                 Réinitialiser les valeurs par défaut
               </button>
-              <Button onClick={saveSlaConfig} disabled={saveSla.isPending} className="gap-2 bg-primary text-primary-foreground">
+              <Button onClick={saveSlaConfig} disabled={saveSla.isPending || !superviseur} className="gap-2 bg-primary text-primary-foreground">
                 <Save className="w-4 h-4" /> Enregistrer les SLA
               </Button>
+            </div>
+
+            <div className="mt-8 pt-6 border-t border-border/60">
+              <h3 className="font-display font-semibold text-foreground mb-1">SLA de chaque tâche (sous-étape)</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                Délai cible de chaque tâche, à la minute près. Quand le dossier entre dans une étape, le chronomètre de ses tâches démarre
+                et leur échéance est calculée automatiquement. {!superviseur && <strong>Modifiable par la Direction et le Responsable Exploitation.</strong>}
+              </p>
+              <div className="space-y-4">
+                {Object.entries(groupesSla).map(([etape, lignes]) => (
+                  <div key={etape} className="rounded-xl border border-border/60 overflow-hidden">
+                    <p className="px-4 py-2 bg-muted/50 text-xs font-bold text-foreground uppercase tracking-wide">{lignes[0].etapeLabel}</p>
+                    <div className="divide-y divide-border/50">
+                      {lignes.map(l => {
+                        const total = Math.round((slaTaches[l.cle] ?? l.heures) * 60);
+                        return (
+                          <div key={l.cle} className="flex items-center gap-3 px-4 py-2.5" data-testid={`sla-${l.cle}`}>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm text-foreground truncate">{l.label}{l.sites && <span className="text-[10px] text-muted-foreground ml-1.5">({l.sites.join(", ")})</span>}</p>
+                              <p className="text-[10px] text-muted-foreground">Par défaut : {l.defaut} h</p>
+                            </div>
+                            <Input type="number" min={0} max={720} value={Math.floor(total / 60)} disabled={!superviseur} aria-label={`Heures — ${l.label}`}
+                              onChange={e => majSla(l.cle, Math.max(0, Number(e.target.value) || 0), total % 60)} className="w-16 h-8 text-center font-mono text-sm bg-card" />
+                            <span className="text-xs text-muted-foreground">h</span>
+                            <Input type="number" min={0} max={59} value={total % 60} disabled={!superviseur} aria-label={`Minutes — ${l.label}`}
+                              onChange={e => majSla(l.cle, Math.floor(total / 60), Math.min(59, Math.max(0, Number(e.target.value) || 0)))} className="w-16 h-8 text-center font-mono text-sm bg-card" />
+                            <span className="text-xs text-muted-foreground">min</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end mt-4">
+                <Button onClick={() => saveSlaTaches.mutate()} disabled={saveSlaTaches.isPending || !superviseur} className="gap-2 bg-primary text-primary-foreground">
+                  <Save className="w-4 h-4" /> Enregistrer les SLA des tâches
+                </Button>
+              </div>
             </div>
 
             <div className="mt-6 p-4 rounded-xl bg-blue-50 border border-blue-200">

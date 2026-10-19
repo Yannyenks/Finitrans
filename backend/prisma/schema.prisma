@@ -73,6 +73,10 @@ model Dossier {
   id                 String                  @id @default(uuid()) @db.Uuid
   numero             String                  @unique @db.VarChar(50)
   client             String                  @db.VarChar(255)
+  /// Fiche client du CRM (rattachée automatiquement par le nom)
+  clientId           String?                 @map("client_id") @db.Uuid
+  clientCrm          Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  reglementsClient   ReglementClient[]
   compagnie          Compagnie
   conteneur          String                  @db.VarChar(100)
   marchandise        String
@@ -127,28 +131,28 @@ model Dossier {
 }
 
 model Document {
-  id           String        @id @default(uuid()) @db.Uuid
+  id           String           @id @default(uuid()) @db.Uuid
   /// Facultatif : les documents de l'entreprise (contrats, procédures, modèles…) ne sont liés à aucun dossier
-  dossierId    String?       @map("dossier_id") @db.Uuid
-  nom          String        @db.VarChar(255)
-  type         String        @db.VarChar(100)
-  taille       String        @db.VarChar(50)
-  tailleOctets Int?          @map("taille_octets")
-  url          String        @db.VarChar(500)
+  dossierId    String?          @map("dossier_id") @db.Uuid
+  nom          String           @db.VarChar(255)
+  type         String           @db.VarChar(100)
+  taille       String           @db.VarChar(50)
+  tailleOctets Int?             @map("taille_octets")
+  url          String           @db.VarChar(500)
   contenu      Bytes?
-  hashContenu  String?       @map("hash_contenu") @db.VarChar(64)
-  uploadePar   String        @map("uploade_par") @db.Uuid
+  hashContenu  String?          @map("hash_contenu") @db.VarChar(64)
+  uploadePar   String           @map("uploade_par") @db.Uuid
   etape        DossierStatus?
   /// preuve | compte_rendu | contrat | procedure | modele | rh | juridique | administratif | finance | autre
-  categorie    String        @default("preuve") @db.VarChar(30)
+  categorie    String           @default("preuve") @db.VarChar(30)
   description  String?
-  tags         String[]      @default([])
+  tags         String[]         @default([])
   /// Réservé à la Direction, au service administratif et à l'auteur
-  confidentiel Boolean       @default(false)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @default(now()) @updatedAt @map("updated_at")
-  dossier      Dossier?      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  uploader     User          @relation(fields: [uploadePar], references: [id])
+  confidentiel Boolean          @default(false)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @default(now()) @updatedAt @map("updated_at")
+  dossier      Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  uploader     User             @relation(fields: [uploadePar], references: [id])
   favoris      DocumentFavori[]
 
   @@index([categorie])
@@ -213,21 +217,21 @@ model AuditEntry {
 }
 
 model Facture {
-  id           String        @id @default(uuid()) @db.Uuid
-  dossierId    String        @map("dossier_id") @db.Uuid
-  numero       String        @unique @db.VarChar(50)
-  type         StatutFacture @default(proforma)
-  montant      Decimal       @db.Decimal(15, 2)
-  compagnie    String        @db.VarChar(255)
-  dateFacture  DateTime      @map("date_facture")
-  datePaiement DateTime?     @map("date_paiement")
-  description  String
+  id             String        @id @default(uuid()) @db.Uuid
+  dossierId      String        @map("dossier_id") @db.Uuid
+  numero         String        @unique @db.VarChar(50)
+  type           StatutFacture @default(proforma)
+  montant        Decimal       @db.Decimal(15, 2)
+  compagnie      String        @db.VarChar(255)
+  dateFacture    DateTime      @map("date_facture")
+  datePaiement   DateTime?     @map("date_paiement")
+  description    String
   // Ventilation comptable (optionnelle) : montant = HT honoraires + TVA + débours refacturés
-  montantTVA     Decimal?    @map("montant_tva") @db.Decimal(15, 2)
-  montantDebours Decimal?    @map("montant_debours") @db.Decimal(15, 2)
-  createdAt    DateTime      @default(now()) @map("created_at")
-  updatedAt    DateTime      @updatedAt @map("updated_at")
-  dossier      Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  montantTVA     Decimal?      @map("montant_tva") @db.Decimal(15, 2)
+  montantDebours Decimal?      @map("montant_debours") @db.Decimal(15, 2)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  dossier        Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
   @@map("factures")
 }
@@ -880,17 +884,19 @@ model SousEtapeDossier {
   statut        SousEtapeStatut @default(todo)
   responsableId String?         @map("responsable_id") @db.Uuid
   deadline      DateTime?
+  /// Début effectif du traitement (prise en charge, démarrage ou entrée du dossier dans l'étape)
+  startedAt     DateTime?       @map("started_at")
   completedAt   DateTime?       @map("completed_at")
   completedById String?         @map("completed_by_id") @db.Uuid
   metadata      Json?
   notes         String?         @db.Text
 
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  dossier       Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable   User?           @relation("SousEtapeResponsable", fields: [responsableId], references: [id])
-  completedBy   User?           @relation("SousEtapeCompletedBy", fields: [completedById], references: [id])
+  dossier     Dossier @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable User?   @relation("SousEtapeResponsable", fields: [responsableId], references: [id])
+  completedBy User?   @relation("SousEtapeCompletedBy", fields: [completedById], references: [id])
 
   @@unique([dossierId, etape, cle])
   @@map("sous_etapes_dossier")
@@ -1163,7 +1169,6 @@ model LigneEcriture {
   @@map("lignes_ecriture")
 }
 
-
 // ════════════════════════════════════════════════════════════════════════════
 //  Logistique transport : chauffeurs, véhicules (camions), transports de TC
 // ════════════════════════════════════════════════════════════════════════════
@@ -1285,4 +1290,127 @@ model TeleversementMorceau {
   @@id([televersementId, index])
   @@index([createdAt])
   @@map("televersements_morceaux")
+}
+
+// ── CRM ───────────────────────────────────────────────────────────────────
+
+enum StatutClient {
+  prospect
+  actif
+  inactif
+}
+
+enum SegmentClient {
+  standard
+  premium
+  strategique
+}
+
+enum ModeReglement {
+  virement
+  cheque
+  especes
+  traite
+  mobile_money
+  autre
+}
+
+enum TypeInteraction {
+  appel
+  email
+  reunion
+  visite
+  note
+  relance
+  reclamation
+}
+
+/// Fiche client (CRM) : centralise dossiers, règlements et échanges
+model Client {
+  id                   String              @id @default(uuid()) @db.Uuid
+  nom                  String              @db.VarChar(255)
+  /// Nom normalisé (majuscules, sans accents ni ponctuation) pour rattacher les dossiers
+  cleNom               String              @unique @map("cle_nom") @db.VarChar(255)
+  statut               StatutClient        @default(actif)
+  segment              SegmentClient       @default(standard)
+  secteur              String?             @db.VarChar(120)
+  niu                  String?             @db.VarChar(50)
+  rccm                 String?             @db.VarChar(80)
+  adresse              String?
+  ville                String?             @db.VarChar(120)
+  pays                 String?             @default("Cameroun") @db.VarChar(80)
+  telephone            String?             @db.VarChar(50)
+  email                String?             @db.VarChar(255)
+  siteWeb              String?             @map("site_web") @db.VarChar(255)
+  contactNom           String?             @map("contact_nom") @db.VarChar(255)
+  contactFonction      String?             @map("contact_fonction") @db.VarChar(255)
+  contactTelephone     String?             @map("contact_telephone") @db.VarChar(50)
+  contactEmail         String?             @map("contact_email") @db.VarChar(255)
+  /// Délai de paiement accordé (jours)
+  delaiPaiementJours   Int?                @map("delai_paiement_jours")
+  plafondCredit        Decimal?            @map("plafond_credit") @db.Decimal(15, 2)
+  modeReglementPrefere ModeReglement?      @map("mode_reglement_prefere")
+  /// Compte FINITRANS chargé de la relation client
+  gestionnaireId       String?             @map("gestionnaire_id") @db.Uuid
+  tags                 String[]            @default([])
+  notes                String?
+  createdById          String              @map("created_by_id") @db.Uuid
+  createdAt            DateTime            @default(now()) @map("created_at")
+  updatedAt            DateTime            @updatedAt @map("updated_at")
+  dossiers             Dossier[]
+  reglements           ReglementClient[]
+  interactions         InteractionClient[]
+
+  @@index([statut])
+  @@map("clients")
+}
+
+/// Règlement reçu d'un client (paiement par le client à la réception, ou ultérieur)
+model ReglementClient {
+  id            String        @id @default(uuid()) @db.Uuid
+  clientId      String?       @map("client_id") @db.Uuid
+  dossierId     String?       @map("dossier_id") @db.Uuid
+  /// Nom du client tel que saisi
+  clientNom     String        @map("client_nom") @db.VarChar(255)
+  /// Personne ou société qui a effectivement payé (si différente du client)
+  payeur        String?       @db.VarChar(255)
+  mode          ModeReglement
+  montant       Decimal       @db.Decimal(15, 2)
+  dateReglement DateTime      @map("date_reglement")
+  /// N° de virement, de chèque, de traite ou de reçu
+  reference     String?       @db.VarChar(100)
+  banque        String?       @db.VarChar(120)
+  /// Échéance (traite, chèque post-daté)
+  dateEcheance  DateTime?     @map("date_echeance")
+  observations  String?
+  saisiParId    String        @map("saisi_par_id") @db.Uuid
+  createdAt     DateTime      @default(now()) @map("created_at")
+  client        Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  dossier       Dossier?      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([dossierId])
+  @@map("reglements_clients")
+}
+
+/// Échange avec un client : appel, réunion, relance, réclamation…
+model InteractionClient {
+  id                  String          @id @default(uuid()) @db.Uuid
+  clientId            String          @map("client_id") @db.Uuid
+  type                TypeInteraction
+  sujet               String          @db.VarChar(255)
+  contenu             String?
+  dateInteraction     DateTime        @default(now()) @map("date_interaction")
+  /// Prochaine action prévue (relance, rendez-vous…)
+  prochaineAction     String?         @map("prochaine_action") @db.VarChar(255)
+  dateProchaineAction DateTime?       @map("date_prochaine_action")
+  faite               Boolean         @default(false)
+  dossierId           String?         @map("dossier_id") @db.Uuid
+  auteurId            String          @map("auteur_id") @db.Uuid
+  createdAt           DateTime        @default(now()) @map("created_at")
+  client              Client          @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId])
+  @@index([dateProchaineAction])
+  @@map("interactions_clients")
 }

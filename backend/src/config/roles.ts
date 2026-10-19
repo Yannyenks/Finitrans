@@ -41,6 +41,7 @@ export const MODULES = {
   performance:          'Performance',
   administration:       'Administration de l\'entreprise',
   parametres:           'Paramètres',
+  crm:                  'CRM — relation client',
 } as const
 export type ModuleKey = keyof typeof MODULES
 export const ALL_MODULES = Object.keys(MODULES) as ModuleKey[]
@@ -94,13 +95,13 @@ export const DEFAULT_ROLES: Record<Profil, RoleTemplate> = {
   administration: {
     profil: 'administration', label: 'Service Administratif', superviseur: false,
     description: 'Enregistrement et classement des dossiers, transferts de fonds, suivi DI, factures proforma.',
-    modules: [...SOCLE, 'dossiers', 'administratif', 'di', 'finance', 'employes'],
+    modules: [...SOCLE, 'dossiers', 'administratif', 'di', 'finance', 'employes', 'crm'],
     permissions: P('partiel', 'non', 'partiel', 'non', 'partiel'),
   },
   comptabilite: {
     profil: 'comptabilite', label: 'Comptable', superviseur: false,
     description: 'Factures, journaux comptables, bilans, analyse financière, conformité OHADA.',
-    modules: [...SOCLE, 'dossiers', 'comptabilite', 'comptabilite_avancee', 'finance', 'di', 'reporting'],
+    modules: [...SOCLE, 'dossiers', 'comptabilite', 'comptabilite_avancee', 'finance', 'di', 'reporting', 'crm'],
     permissions: P('lecture', 'non', 'complet', 'complet', 'non'),
   },
   terrain_kribi: {
@@ -121,6 +122,9 @@ export const ALL_PROFILS = Object.keys(DEFAULT_ROLES) as Profil[]
 
 /** Modules qu'on ne peut jamais retirer au DG (évite de se verrouiller hors du système). */
 const DG_LOCKED: ModuleKey[] = ['administration', 'parametres', 'employes', 'supervision']
+
+/** Modules ajoutés après la mise en production des surcharges de rôles (paramètre roles_config). */
+const MODULES_RECENTS: ModuleKey[] = ['crm']
 
 // ── Surcharges éditables par le DG (paramètre roles_config) ─────────────────
 
@@ -145,6 +149,8 @@ export async function getRoleTemplates(): Promise<Record<Profil, RoleTemplate>> 
     const base = DEFAULT_ROLES[profil]
     const o = overrides[profil] ?? {}
     let modules = (o.modules ?? base.modules).filter((m): m is ModuleKey => m in MODULES)
+    // Modules créés après l'enregistrement des surcharges : ajoutés aux profils qui les ont par défaut
+    if (o.modules) for (const m of MODULES_RECENTS) if (base.modules.includes(m) && !modules.includes(m)) modules.push(m)
     for (const m of SOCLE) if (!modules.includes(m)) modules.push(m)
     if (profil === 'dg') for (const m of DG_LOCKED) if (!modules.includes(m)) modules.push(m)
     modules = ALL_MODULES.filter(m => modules.includes(m))

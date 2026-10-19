@@ -42,12 +42,12 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'facture_proforma', label: 'Facture proforma' },
     { cle: 'saisie_pr',        label: 'Saisie du PR' },
     { cle: 'paiement_client',  label: 'Paiement par le client' },
-    { cle: 'traitement_sgs',   label: 'Traitement SGS' },
+    { cle: 'traitement_sgs',   label: 'Suivi et traitement SI' },
     { cle: 'di',               label: 'DI' },
   ],
   soumission_sgs: [
     { cle: 'ff_soumission', label: 'FF et soumission des documents fournisseurs' },
-    { cle: 'pvc',           label: 'Obtention du PVC' },
+    { cle: 'pvc',           label: 'Obtention du RVC' },
   ],
   codage: [
     { cle: 'etat_codage', label: 'État de codage et validation' },
@@ -100,7 +100,8 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
       paiement_client: 'comptabilite', traitement_sgs: 'administration', di: 'administration',
     },
   },
-  soumission_sgs:   { owner: 'administration', sousEtapes: { ff_soumission: 'administration', pvc: 'administration' } },
+  // Fournisseur & soumission : M. Soudi (et Mme Samira) ; RVC : M. Delba et M. Soudi
+  soumission_sgs:   { owner: 'exploitation', sousEtapes: { ff_soumission: 'exploitation', pvc: 'exploitation' } },
   codage:           { owner: 'validation', sousEtapes: { etat_codage: 'validation', declaration: 'validation', regulation: 'validation' } },
   validation:       { owner: 'validation', sousEtapes: { validation_docs: 'validation' } },
   paiement:         { owner: 'logistique', sousEtapes: { paiement_droits: 'logistique' } },
@@ -256,4 +257,53 @@ export async function notify(
   const ids = [...new Set(userIds.filter((u): u is string => !!u))]
   if (ids.length === 0) return
   await prisma.notification.createMany({ data: ids.map(userId => ({ userId, ...data })) })
+}
+
+// ── Délais des sous-étapes (SLA en heures, paramètre « sla_sous_etapes ») ──
+
+/** SLA par défaut d'une sous-étape, en heures (clé « etape.cle »). */
+export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
+  'reception.bl': 4, 'reception.facture_proforma': 8, 'reception.saisie_pr': 8, 'reception.paiement_client': 24,
+  'reception.traitement_sgs': 24, 'reception.di': 24,
+  'soumission_sgs.ff_soumission': 24, 'soumission_sgs.pvc': 48,
+  'codage.etat_codage': 8, 'codage.declaration': 8, 'codage.regulation': 8,
+  'validation.validation_docs': 8,
+  'paiement.paiement_droits': 24,
+  'bon_compagnie.facturation_compagnie': 24, 'bon_compagnie.bon_a_delivrer': 24, 'bon_compagnie.facturation_terminal': 24,
+  'bon_compagnie.bon_livraison': 8, 'bon_compagnie.gate_pass': 8,
+  'operations_kribi.facturation_terminal': 24, 'operations_kribi.bon_livraison': 8, 'operations_kribi.gate_pass': 8,
+  'cloture.rapport_final': 8,
+}
+
+export async function loadSlaSousEtapes(): Promise<Record<string, number>> {
+  const row = await prisma.parametre.findUnique({ where: { cle: 'sla_sous_etapes' } })
+  return { ...DEFAULT_SLA_SOUS_ETAPES, ...((row?.valeur ?? {}) as Record<string, number>) }
+}
+
+/**
+ * Le dossier entre dans une étape : le chronomètre de chaque sous-étape démarre
+ * et son échéance est calculée d'après le SLA (sauf délai déjà fixé).
+ */
+export async function demarrerEtape(dossierId: string, etape: DossierStatus, debut = new Date()) {
+  const sla = await loadSlaSousEtapes()
+  const rows = await prisma.sousEtapeDossier.findMany({
+    where: { dossierId, etape, statut: { not: 'valide' } },
+    select: { id: true, cle: true, startedAt: true, deadline: true },
+  })
+  for (const r of rows) {
+    const heures = sla[`${etape}.${r.cle}`]
+    const data: Prisma.SousEtapeDossierUpdateInput = {}
+    if (!r.startedAt) data.startedAt = debut
+    if (!r.deadline && heures > 0) data.deadline = new Date(debut.getTime() + heures * 3_600_000)
+    if (Object.keys(data).length > 0) await prisma.sousEtapeDossier.update({ where: { id: r.id }, data })
+  }
+}
+
+/** Alerte Direction Générale : les événements qui demandent l'attention du DG lui sont signalés. */
+export async function notifierDirection(
+  data: { titre: string; message: string; dossierId?: string; actionUrl?: string },
+  sauf?: string,
+) {
+  const dg = await prisma.user.findMany({ where: { profil: 'dg', actif: true }, select: { id: true } })
+  await notify(dg.map(u => u.id).filter(id => id !== sauf), { type: 'alerte', ...data })
 }

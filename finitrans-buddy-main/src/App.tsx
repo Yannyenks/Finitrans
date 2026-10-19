@@ -1,5 +1,5 @@
 import { Component, ReactNode, Suspense, lazy, useEffect } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
@@ -32,6 +32,7 @@ const MonEspace = lazy(() => import("./pages/MonEspace"));
 const Supervision = lazy(() => import("./pages/Supervision"));
 const Administration = lazy(() => import("./pages/Administration"));
 const ComptabiliteAvancee = lazy(() => import("./pages/ComptabiliteAvancee"));
+const Crm = lazy(() => import("./pages/Crm"));
 import NotFound from "./pages/NotFound";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
@@ -67,7 +68,11 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   }
 }
 
-const queryClient = new QueryClient({
+const queryClient: QueryClient = new QueryClient({
+  // Après chaque action réussie, toutes les données affichées sont rechargées (statuts, assignations, avancement)
+  mutationCache: new MutationCache({
+    onSuccess: () => { queryClient.invalidateQueries(); },
+  }),
   defaultOptions: {
     queries: {
       // Pas de nouvelle tentative sur les refus d'accès / introuvables ; sinon délai progressif (réveil Neon)
@@ -77,6 +82,7 @@ const queryClient = new QueryClient({
       },
       retryDelay: (attempt) => Math.min(2_000 * (attempt + 1), 8_000),
       staleTime: 30_000,
+      refetchOnWindowFocus: true,
     },
   },
 });
@@ -137,6 +143,8 @@ const App = () => (
           <Route path="/reporting"            element={R("reporting", <Reporting />)} />
           <Route path="/performance"          element={R("performance", <Performance />)} />
           <Route path="/parametres"           element={R("parametres", <Parametres />)} />
+          <Route path="/crm"                  element={R("crm", <Crm />)} />
+          <Route path="/crm/:id"              element={R("crm", <Crm />)} />
           <Route path="*"                     element={<NotFound />} />
         </Routes>
       </BrowserRouter>

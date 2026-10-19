@@ -3,10 +3,16 @@
  * correspondant (paiement, gate pass…), pour que l'employé n'ait rien à ressaisir
  * ailleurs et que Finance / Comptabilité / Kribi soient à jour immédiatement.
  */
-import { Prisma } from '@prisma/client'
+import { ModeReglement, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
+import { clientParNom } from './crm'
+
+export const MODES_REGLEMENT = ['virement', 'cheque', 'especes', 'traite', 'mobile_money', 'autre'] as const
+export const LIBELLES_MODE: Record<ModeReglement, string> = {
+  virement: 'Virement', cheque: 'Chèque', especes: 'Espèces', traite: 'Traite', mobile_money: 'Mobile money', autre: 'Autre',
+}
 
 type Meta = Record<string, unknown>
 
@@ -16,7 +22,9 @@ const nombre = (v: unknown) => {
 }
 const texte = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null)
 const date = (v: unknown) => {
-  const d = texte(v) ? new Date(String(v)) : null
+  // « 2026-10-19 » (champ date) : midi, pour ne pas changer de jour selon le fuseau
+  const brut = texte(v)
+  const d = brut ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(brut) ? `${brut}T12:00:00` : brut) : null
   return d && !isNaN(d.getTime()) ? d : new Date()
 }
 
@@ -33,6 +41,26 @@ export async function enregistrerDepuisSousEtape(
   if (meta.enregistrement_id) return null // déjà créé (révision puis revalidation)
   const dossier = await prisma.dossier.findUnique({ where: { id: dossierId } })
   if (!dossier) return null
+
+  // Paiement par le client → règlement client (mode, payeur, référence), rattaché à la fiche CRM
+  if (cle === 'paiement_client') {
+    const montant = nombre(meta.reglement_montant)
+    const mode = texte(meta.reglement_mode)
+    if (!montant || !mode || !(MODES_REGLEMENT as readonly string[]).includes(mode)) return null
+    const clientNom = texte(meta.reglement_client) ?? dossier.client
+    const client = await clientParNom(clientNom, userId).catch(() => null)
+    const r = await prisma.reglementClient.create({
+      data: {
+        dossierId, clientId: client?.id ?? dossier.clientId, clientNom, mode: mode as ModeReglement, montant,
+        payeur: texte(meta.reglement_payeur), reference: texte(meta.reglement_reference), banque: texte(meta.reglement_banque),
+        dateReglement: date(meta.reglement_date),
+        dateEcheance: texte(meta.reglement_echeance) ? date(meta.reglement_echeance) : null,
+        observations: texte(meta.reglement_observations), saisiParId: userId,
+      },
+    })
+    await logAudit(dossierId, userId, 'REGLEMENT_CLIENT', `Règlement client (${LIBELLES_MODE[mode as ModeReglement]}) : ${montant.toLocaleString('fr-FR')} FCFA — ${clientNom}`)
+    return { enregistrement_id: r.id, enregistrement_type: 'reglement_client' }
+  }
 
   // Paiement des droits et taxes → paiement douane (payé)
   if (cle === 'paiement_droits') {

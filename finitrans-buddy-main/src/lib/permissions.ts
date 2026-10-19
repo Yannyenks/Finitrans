@@ -5,7 +5,7 @@ export type Module =
   | "dashboard" | "mon_espace" | "bibliotheque" | "repertoire" | "supervision" | "exploitation" | "dossiers" | "codage"
   | "sorties" | "logistique" | "messagerie" | "alertes" | "finance" | "di" | "comptabilite"
   | "comptabilite_avancee" | "administratif" | "employes" | "kribi" | "reporting"
-  | "performance" | "administration" | "parametres";
+  | "performance" | "administration" | "parametres" | "crm";
 
 const RANK: Record<string, number> = { complet: 3, partiel: 2, lecture: 1, non: 0 };
 
@@ -14,8 +14,8 @@ export type Level = "lecture" | "partiel" | "complet";
 
 /** Modules par défaut si la session date d'avant le système de rôles (repli). */
 const FALLBACK: Record<string, Module[]> = {
-  dg: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "comptabilite_avancee", "administratif", "employes", "kribi", "reporting", "performance", "administration", "parametres"],
-  exploitation: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "administratif", "employes", "kribi", "reporting", "performance", "parametres"],
+  dg: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "comptabilite_avancee", "administratif", "employes", "kribi", "reporting", "performance", "administration", "parametres", "crm"],
+  exploitation: ["dashboard", "mon_espace", "supervision", "exploitation", "dossiers", "codage", "sorties", "logistique", "messagerie", "bibliotheque", "repertoire", "alertes", "finance", "di", "comptabilite", "administratif", "employes", "kribi", "reporting", "performance", "parametres", "crm"],
 };
 
 export function userModules(user: AuthUser | null): Module[] {

@@ -10,7 +10,7 @@ import { recevoirFichier } from '../services/televersement'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
-  isStatus, loadAttribution, notify, stageCompletion,
+  isStatus, loadAttribution, notifierDirection, notify, stageCompletion,
 } from '../services/workflow'
 
 export { SOUS_ETAPES_CONFIG }
@@ -73,18 +73,33 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const body  = updateSchema.parse(request.body)
     const isOwnStep = !!existing?.responsableId && existing.responsableId === actor.id
 
-    // Superviseurs (DG / Exploitation) : contrôle total. Sinon : uniquement ses propres sous-étapes.
-    if (!actor.superviseur && !isOwnStep) {
+    // Passage de relais : le responsable du dossier, le titulaire de la tâche, ou un intervenant
+    // qui a terminé sa propre tâche dans la même étape peut désigner qui fait une tâche non terminée.
+    const seulementAssignation = body.responsableId !== undefined
+      && body.statut === undefined && body.metadata === undefined
+    let peutAssigner = actor.superviseur || isOwnStep || dossier.responsableId === actor.id
+    if (!peutAssigner && seulementAssignation) {
+      peutAssigner = (await prisma.sousEtapeDossier.count({ where: { dossierId: id, etape, responsableId: actor.id, statut: 'valide' } })) > 0
+    }
+
+    // Superviseurs (DG / Exploitation) : contrôle total. Sinon : ses propres sous-étapes (ou une assignation autorisée).
+    if (!actor.superviseur && !isOwnStep && !(seulementAssignation && peutAssigner)) {
       return reply.code(403).send({
         error: 'FORBIDDEN',
         message: 'Vous ne pouvez modifier que les sous-étapes qui vous sont attribuées.',
       })
     }
-    if (body.responsableId !== undefined && !actor.superviseur) {
+    if (body.responsableId !== undefined && !peutAssigner) {
       return reply.code(403).send({
         error: 'FORBIDDEN',
-        message: 'Seuls le DG et le Responsable Exploitation peuvent réattribuer une sous-étape.',
+        message: 'Seuls la Direction, le responsable du dossier et les intervenants de l\'étape peuvent assigner cette tâche.',
       })
+    }
+    if (body.responsableId !== undefined && !actor.superviseur && existing?.statut === 'valide') {
+      return reply.code(422).send({ error: 'TACHE_TERMINEE', message: 'Cette tâche est déjà terminée.' })
+    }
+    if (body.responsableId === null && !actor.superviseur) {
+      return reply.code(422).send({ error: 'RESPONSABLE_REQUIS', message: 'Choisissez la personne qui prend la tâche.' })
     }
     if (body.responsableId) {
       const target = await prisma.user.findUnique({ where: { id: body.responsableId }, select: { actif: true } })
@@ -101,14 +116,21 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
       data.metadata = { ...existingMeta, ...body.metadata } as Prisma.InputJsonValue
     }
+    const maintenant = new Date()
     if (body.statut === 'valide') {
-      data.completedAt   = new Date()
+      data.completedAt   = maintenant
       data.completedById = actor.id
+      // Tâche terminée sans démarrage explicite : le chronomètre part de l'entrée dans l'étape
+      if (!existing?.startedAt) {
+        const timing = await prisma.dossierTiming.findFirst({ where: { dossierId: id, etape }, orderBy: { dateDebut: 'desc' }, select: { dateDebut: true } })
+        data.startedAt = timing && timing.dateDebut <= maintenant ? timing.dateDebut : (existing?.createdAt ?? maintenant)
+      }
     }
     if (body.statut === 'todo' || body.statut === 'en_cours') {
       data.completedAt   = null
       data.completedById = null
     }
+    if (body.statut === 'en_cours' && !existing?.startedAt) data.startedAt = maintenant
 
     let row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
@@ -133,6 +155,14 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         valide: 'SOUS_ETAPE_VALIDEE', rejete: 'SOUS_ETAPE_REJETEE', en_cours: 'SOUS_ETAPE_DEMARREE', todo: 'SOUS_ETAPE_REINITIALISEE',
       }
       await logAudit(id, actor.id, actions[body.statut], `${STATUS_LABELS[etape]} — ${label}`)
+    }
+
+    if (body.statut === 'rejete' && existing?.statut !== 'rejete') {
+      await notifierDirection({
+        titre: 'Blocage signalé sur un dossier',
+        message: `${dossier.numero} (${dossier.client}) — ${STATUS_LABELS[etape]} : « ${label} » signalée bloquée par ${actor.nom}.`,
+        dossierId: id, actionUrl: `/dossiers/${id}`,
+      }, actor.id)
     }
 
     if (body.responsableId && body.responsableId !== existing?.responsableId) {
@@ -183,8 +213,12 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
     const row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
-      create: { dossierId: id, etape, cle, responsableId: actor.id, statut: 'en_cours' },
-      update: { responsableId: actor.id, statut: existing?.statut === 'todo' ? 'en_cours' : undefined },
+      create: { dossierId: id, etape, cle, responsableId: actor.id, statut: 'en_cours', startedAt: new Date() },
+      update: {
+        responsableId: actor.id,
+        statut: existing?.statut === 'todo' ? 'en_cours' : undefined,
+        startedAt: existing?.startedAt ? undefined : new Date(),
+      },
       include: includeUsers,
     })
     await logAudit(id, actor.id, 'SOUS_ETAPE_PRISE_EN_CHARGE', `${STATUS_LABELS[etape]} — ${labelOf(etape, cle)}`)

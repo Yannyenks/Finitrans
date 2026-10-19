@@ -1,0 +1,176 @@
+/**
+ * Cahier des modifications d'octobre : passage de relais au niveau des tâches, chronométrage
+ * précis, SLA des tâches, paiement client, CRM, alertes Direction, nomenclature RVC / SI.
+ */
+import { describe, it, before, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { api, closeApp, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
+
+let ids: Record<UserKey, string>
+let dossierId = ''
+const CLIENT = `CLIENT CADRAGE ${Date.now() % 100000}`
+const nom = (uid: string) => Object.entries(ids).find(([, v]) => v === uid)?.[0] as UserKey
+
+async function taches(etape?: string) {
+  const r = await api('delba', 'GET', `/api/dossiers/${dossierId}/sous-etapes`)
+  return (r.body as any[]).filter(t => !etape || t.etape === etape)
+}
+
+before(async () => {
+  ids = await userIds()
+  const r = await api('yasmine', 'POST', '/api/dossiers', {
+    client: CLIENT, compagnie: 'MSC', conteneur: 'MSCU3333333', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+  })
+  expectStatus(r, 201)
+  dossierId = r.body.id
+})
+after(closeApp)
+
+describe('Chronométrage et SLA des tâches', () => {
+  it('à la création, les tâches de réception démarrent avec une échéance issue du SLA', async () => {
+    const t = await taches('reception')
+    assert.ok(t.length >= 5)
+    for (const x of t) {
+      assert.ok(x.startedAt, `${x.cle} démarrée`)
+      assert.ok(x.deadline, `${x.cle} a une échéance`)
+      assert.ok(new Date(x.deadline) > new Date(x.startedAt))
+    }
+  })
+
+  it('une tâche terminée garde son début et sa fin (à la seconde)', async () => {
+    const bl = (await taches('reception')).find(x => x.cle === 'bl')
+    const r = await api(nom(bl.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { statut: 'valide' })
+    expectStatus(r, 200)
+    assert.ok(r.body.startedAt && r.body.completedAt)
+    assert.ok(new Date(r.body.completedAt).getTime() >= new Date(r.body.startedAt).getTime())
+  })
+
+  it('les SLA des tâches sont définis par la Direction et M. Soudi uniquement', async () => {
+    expectStatus(await api('yasmine', 'PATCH', '/api/parametres/sla_sous_etapes', { valeur: { 'codage.declaration': 2 } }), 403)
+    expectStatus(await api('soudi', 'PATCH', '/api/parametres/sla_sous_etapes', { valeur: { 'codage.declaration': 2.5 } }), 200)
+    const l = await api('yasmine', 'GET', '/api/parametres/sla-sous-etapes')
+    expectStatus(l, 200)
+    assert.equal(l.body.find((x: any) => x.cle === 'codage.declaration').heures, 2.5)
+    assert.ok(l.body.some((x: any) => x.label === 'Obtention du RVC'))
+    assert.ok(l.body.some((x: any) => x.label === 'Suivi et traitement SI'))
+  })
+})
+
+describe('Passage de relais au niveau des tâches', () => {
+  it('un intervenant de l\'étape confie une tâche à un collègue ; un compte extérieur ne peut pas', async () => {
+    const pr = (await taches('reception')).find(x => x.cle === 'saisie_pr')
+    assert.equal(nom(pr.responsableId), 'odette')
+    // Mme Yasmine (intervenante de la réception) passe la saisie du PR à Mr Honoré
+    const r = await api('yasmine', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/saisie_pr`, { responsableId: ids.honore })
+    expectStatus(r, 200)
+    assert.equal(r.body.responsableId, ids.honore)
+    const notifs = await api('honore', 'GET', '/api/notifications?limit=20')
+    assert.ok(notifs.body.data.some((n: any) => n.dossierId === dossierId && n.titre === 'Nouvelle tâche attribuée'))
+    // Mr Yaya n'intervient pas à la réception
+    expectStatus(await api('yaya', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/saisie_pr`, { responsableId: ids.yaya }), 403)
+    // Le relais ne permet pas de terminer la tâche d'un autre
+    expectStatus(await api('yasmine', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/saisie_pr`, { statut: 'valide' }), 403)
+    // Retirer le titulaire est réservé à la Direction
+    expectStatus(await api('yasmine', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/saisie_pr`, { responsableId: null }), 422)
+  })
+
+  it('paiement par le client : mode de règlement + client → règlement enregistré dans le CRM', async () => {
+    const t = (await taches('reception')).find(x => x.cle === 'paiement_client')
+    const ref = unique('CHQ')
+    const r = await api(nom(t.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/paiement_client`, {
+      statut: 'valide',
+      metadata: { reglement_client: CLIENT, reglement_mode: 'cheque', reglement_montant: '750 000', reglement_reference: ref, reglement_banque: 'Afriland', reglement_date: '2026-10-15' },
+    })
+    expectStatus(r, 200)
+    assert.equal(r.body.metadata.enregistrement_type, 'reglement_client')
+    const d = await api('delba', 'GET', `/api/dossiers/${dossierId}`)
+    const fiche = await api('honore', 'GET', `/api/crm/clients/${d.body.clientId}`)
+    expectStatus(fiche, 200)
+    const regl = fiche.body.reglements.find((x: any) => x.reference === ref)
+    assert.ok(regl, 'règlement visible dans la fiche client')
+    assert.equal(regl.mode, 'cheque')
+    assert.equal(regl.montant, 750000)
+    assert.equal(fiche.body.indicateurs.encaisse, 750000)
+  })
+
+  it('passation : chaque tâche de l\'étape suivante peut être confiée à un compte précis, et son chronomètre démarre', async () => {
+    for (const t of await taches('reception')) {
+      if (t.statut !== 'valide') expectStatus(await api(nom(t.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/${t.cle}`, { statut: 'valide' }), 200)
+    }
+    expectStatus(await upload('yasmine', `/api/dossiers/${dossierId}/upload`, { name: 'r.pdf', type: 'application/pdf', content: `%PDF ${Date.now()}` }, { etape: 'reception' }), 201)
+    const avance = await api('yasmine', 'PATCH', `/api/dossiers/${dossierId}/status`, {
+      status: 'soumission_sgs', responsableId: ids.soudi, taches: { pvc: ids.delba },
+    })
+    expectStatus(avance, 200)
+    const sgs = await taches('soumission_sgs')
+    assert.equal(nom(sgs.find(x => x.cle === 'pvc').responsableId), 'delba')
+    assert.equal(nom(sgs.find(x => x.cle === 'ff_soumission').responsableId), 'soudi')
+    assert.ok(sgs.every(x => x.startedAt && x.deadline))
+    // Une tâche inconnue est refusée
+    const bad = await api('soudi', 'PATCH', `/api/dossiers/${dossierId}/status`, { status: 'codage', taches: { inexistante: ids.odette } })
+    expectStatus(bad, 422)
+  })
+})
+
+describe('Alerte Direction Générale', () => {
+  it('un blocage signalé par un titulaire est notifié au DG', async () => {
+    const ff = (await taches('soumission_sgs')).find(x => x.cle === 'ff_soumission')
+    expectStatus(await api('soudi', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'en_cours' }), 200)
+    expectStatus(await api(nom(ff.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'rejete' }), 200)
+    const n = await api('delba', 'GET', '/api/notifications?limit=30')
+    assert.ok(n.body.data.some((x: any) => x.dossierId === dossierId && x.type === 'alerte' && x.titre === 'Blocage signalé sur un dossier'))
+  })
+})
+
+describe('CRM', () => {
+  let clientId = ''
+
+  it('accès réservé aux profils commerciaux / financiers et à la Direction', async () => {
+    expectStatus(await api('yaya', 'GET', '/api/crm/synthese'), 403)
+    const s = await api('honore', 'GET', '/api/crm/synthese')
+    expectStatus(s, 200)
+    assert.ok(s.body.clients.total >= 1)
+    assert.equal(s.body.evolution.length, 12)
+  })
+
+  it('le dossier est rattaché automatiquement à la fiche de son client', async () => {
+    const l = await api('yasmine', 'GET', `/api/crm/clients?q=${encodeURIComponent(CLIENT)}`)
+    expectStatus(l, 200)
+    const c = l.body.find((x: any) => x.nom === CLIENT)
+    assert.ok(c)
+    assert.ok(c.indicateurs.dossiers >= 1)
+    clientId = c.id
+  })
+
+  it('création, doublon refusé, modification de la fiche', async () => {
+    const nomClient = unique('SOCIETE BETA')
+    const r = await api('yasmine', 'POST', '/api/crm/clients', { nom: nomClient, segment: 'premium', secteur: 'BTP', plafondCredit: 5_000_000 })
+    expectStatus(r, 201)
+    expectStatus(await api('yasmine', 'POST', '/api/crm/clients', { nom: nomClient.toLowerCase() }), 409)
+    const m = await api('delba', 'PATCH', `/api/crm/clients/${r.body.id}`, { segment: 'strategique', contactNom: 'M. Beta' })
+    expectStatus(m, 200)
+    assert.equal(m.body.segment, 'strategique')
+  })
+
+  it('échanges, relances et règlements manuels', async () => {
+    const demain = new Date(Date.now() + 86_400_000).toISOString()
+    const it1 = await api('yasmine', 'POST', `/api/crm/clients/${clientId}/interactions`, {
+      type: 'appel', sujet: 'Point arrivée conteneur', contenu: 'Client informé', prochaineAction: 'Relancer pour le solde', dateProchaineAction: demain,
+    })
+    expectStatus(it1, 201)
+    const rel = await api('honore', 'GET', '/api/crm/relances')
+    assert.ok(rel.body.some((x: any) => x.id === it1.body.id))
+    expectStatus(await api('honore', 'PATCH', `/api/crm/interactions/${it1.body.id}`, { faite: true }), 200)
+    const rel2 = await api('honore', 'GET', '/api/crm/relances')
+    assert.ok(!rel2.body.some((x: any) => x.id === it1.body.id))
+    // Seul l'auteur (ou la Direction) supprime un échange
+    expectStatus(await api('honore', 'DELETE', `/api/crm/interactions/${it1.body.id}`), 403)
+
+    const regl = await api('honore', 'POST', '/api/crm/reglements', { clientId, mode: 'traite', montant: 250000, reference: unique('TRT'), dateEcheance: demain })
+    expectStatus(regl, 201)
+    const fiche = await api('honore', 'GET', `/api/crm/clients/${clientId}`)
+    assert.equal(fiche.body.indicateurs.encaisse, 1_000_000)
+    assert.ok(fiche.body.interactions.length >= 1)
+    assert.ok(fiche.body.dossiers.some((d: any) => d.id === dossierId))
+  })
+})

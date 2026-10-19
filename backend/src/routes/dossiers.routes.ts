@@ -13,9 +13,10 @@ import { AuthUser } from '../types'
 import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import {
-  STATUS_ORDER, STATUS_LABELS, assignStage, initSousEtapes, loadAttribution, nextStage,
-  notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
+  STATUS_ORDER, STATUS_LABELS, applicableSousEtapes, assignStage, demarrerEtape, initSousEtapes, loadAttribution,
+  nextStage, notifierDirection, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
 } from '../services/workflow'
+import { rattacherClient } from '../services/crm'
 
 const createDossierSchema = z.object({
   client:            z.string().min(2),
@@ -165,6 +166,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
 
     await initSousEtapes(dossier.id)
+    await demarrerEtape(dossier.id, 'reception')
+    await rattacherClient(dossier.id, dossier.client, user.id)
     await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
 
     const receptionTasks = await prisma.sousEtapeDossier.findMany({
@@ -385,6 +388,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       include: { responsable: { select: { id: true, nom: true, role: true } } },
     })
 
+    if (body.client && body.client !== existing.client) await rattacherClient(id, body.client, user.id)
     await logAudit(id, user.id, 'MODIFICATION_DOSSIER', 'Dossier modifié', body as Record<string, unknown>)
     return reply.send(updated)
   })
@@ -410,6 +414,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       status:        z.enum(STATUS_ORDER as [DossierStatus, ...DossierStatus[]]),
       responsableId: z.string().uuid().optional(),
       note:          z.string().optional(),
+      /** Répartition choisie des tâches de la nouvelle étape : clé de sous-étape → compte */
+      taches:        z.record(z.string(), z.string().uuid()).optional(),
     }).parse(request.body)
     const user = request.user
 
@@ -451,6 +457,15 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       const resp = await prisma.user.findUnique({ where: { id: body.responsableId }, select: { actif: true } })
       if (!resp?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
     }
+    const repartition = Object.entries(body.taches ?? {})
+    if (repartition.length > 0) {
+      const cles = new Set(applicableSousEtapes(body.status, dossier.site).map(s => s.cle))
+      const inconnue = repartition.find(([cle]) => !cles.has(cle))
+      if (inconnue) return reply.code(422).send({ error: 'SOUS_ETAPE_INVALIDE', message: `Tâche inconnue pour l'étape « ${STATUS_LABELS[body.status]} » : ${inconnue[0]}` })
+      const ids = [...new Set(repartition.map(([, uid]) => uid))]
+      const actifs = await prisma.user.count({ where: { id: { in: ids }, actif: true } })
+      if (actifs !== ids.length) return reply.code(422).send({ error: 'INVALID_USER', message: 'Un des comptes choisis est introuvable ou inactif' })
+    }
 
     // Créer les sous-étapes manquantes et attribuer celles de la nouvelle étape
     await initSousEtapes(id)
@@ -465,6 +480,15 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         data: { responsableId: body.responsableId },
       })
     }
+    // Répartition tâche par tâche (prioritaire sur la passation globale)
+    for (const [cle, uid] of repartition) {
+      await prisma.sousEtapeDossier.updateMany({
+        where: { dossierId: id, etape: body.status, cle, statut: { not: 'valide' } },
+        data: { responsableId: uid },
+      })
+    }
+    // Le chronomètre des tâches de la nouvelle étape démarre maintenant (échéances selon le SLA)
+    await demarrerEtape(id, body.status)
 
     // Clôturer le timing actuel en enregistrant le responsable qui a traité l'étape
     await prisma.dossierTiming.updateMany({
@@ -512,6 +536,11 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       try {
         const cr = await archiverCompteRendu(id, user.id, { nom: user.nom })
         if (cr) await logAudit(id, user.id, 'COMPTE_RENDU_ARCHIVE', `Compte rendu de clôture archivé (${cr.nom})`)
+        await notifierDirection({
+          titre: `Dossier ${updated.numero} clôturé`,
+          message: `${updated.client} — dossier clôturé par ${user.nom}. Le compte rendu est disponible dans la bibliothèque.`,
+          dossierId: id, actionUrl: `/dossiers/${id}`,
+        }, user.id)
       } catch (err) {
         request.log.error({ err }, 'Compte rendu de clôture non généré')
       }

@@ -18,7 +18,8 @@ import { useSousEtapes, SousEtape, SousEtapeStatut } from "@/hooks/useSousEtapes
 import { api, getStoredUser, openDocument } from "@/lib/api";
 import { isSupervisor } from "@/lib/permissions";
 import { useLiensExternes, urlValide } from "@/lib/liens";
-import { useQuery } from "@tanstack/react-query";
+import { dateHeure, dureeEntre } from "@/lib/temps";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 
@@ -45,6 +46,8 @@ export type SousEtapeConfig = {
   facture?:            { montant: string; numero: string; date: string; titre: string };
   outputLabel?:        string;
   fields?:             FieldDef[];
+  /** Règlement du client à saisir en terminant la tâche (mode, client, référence…) */
+  reglementClient?:    boolean;
   /** Sites où la sous-étape s'applique (toutes si absent) */
   sites?:              ("Douala" | "Kribi")[];
 };
@@ -77,16 +80,11 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       ],
     },
     {
-      cle: "paiement_client", label: "Paiement par le client", description: "Confirmation du règlement client avant engagement SGS",
-      fields: [
-        { key: "pc_montant",    label: "Montant reçu (XAF)",   type: "number", placeholder: "0" },
-        { key: "pc_date",       label: "Date de paiement",      type: "date" },
-        { key: "pc_reference",  label: "Référence / N° virement", type: "text", placeholder: "Ex : VIR-2025-00421" },
-        { key: "pc_mode",       label: "Mode de règlement",     type: "text", placeholder: "Virement, Chèque, Espèces…" },
-      ],
+      cle: "paiement_client", label: "Paiement par le client", description: "Confirmation du règlement client avant engagement SGS — enregistré dans la fiche client (CRM)",
+      reglementClient: true, outputLabel: "Reçu / preuve du règlement",
     },
     {
-      cle: "traitement_sgs", label: "Traitement SGS", description: "Soumission et traitement du dossier par la Société Générale de Surveillance",
+      cle: "traitement_sgs", label: "Suivi et traitement SI", description: "Suivi et traitement du dossier dans le système d'information (SI)",
       fields: [
         { key: "sgs_reference",  label: "Référence SGS",       type: "text", placeholder: "Ex : SGS-CM-2025-0042" },
         { key: "sgs_date_soum",  label: "Date de soumission",  type: "date" },
@@ -112,10 +110,10 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       ],
     },
     {
-      cle: "pvc", label: "Obtention du PVC",
-      description: "Réception du Procès-Verbal de Constatation délivré par la SGS", hasPvcResult: true,
+      cle: "pvc", label: "Obtention du RVC",
+      description: "Obtention du RVC délivré par la SGS — étape suivie par la Direction (M. Delba, M. Soudi)", hasPvcResult: true,
       fields: [
-        { key: "pvc_numero",       label: "N° PVC",             type: "text", placeholder: "Ex : PVC-2025-0042" },
+        { key: "pvc_numero",       label: "N° RVC",             type: "text", placeholder: "Ex : RVC-2025-0042" },
         { key: "pvc_date_reception",label: "Date de réception", type: "date" },
       ],
     },
@@ -313,7 +311,7 @@ const PvcDialog = ({
             <Stamp className="w-5 h-5 text-indigo-600" />
           </div>
           <div>
-            <h3 className="font-display font-bold text-foreground">Résultat du PVC</h3>
+            <h3 className="font-display font-bold text-foreground">Résultat du RVC</h3>
             <p className="text-xs text-muted-foreground">Procès-Verbal de Constatation SGS</p>
           </div>
         </div>
@@ -343,7 +341,7 @@ const PvcDialog = ({
             <Textarea
               value={motif}
               onChange={e => setMotif(e.target.value)}
-              placeholder={resultat === "succes" ? "Ex : PVC N°2025-0847 reçu — marchandise conforme à la déclaration" : "Ex : Non-conformité documentaire — facture proforma incomplète"}
+              placeholder={resultat === "succes" ? "Ex : RVC N°2025-0847 reçu — marchandise conforme à la déclaration" : "Ex : Non-conformité documentaire — facture proforma incomplète"}
               className="bg-muted/40 text-sm h-20 resize-none"
             />
           </div>
@@ -433,6 +431,190 @@ const PaiementDialog = ({
           </div>
         </div>
       </motion.div>
+    </div>
+  );
+};
+
+// ── Dialogue Paiement par le client (crée le règlement client, rattaché au CRM) ─
+export const MODES_REGLEMENT: { value: string; label: string; aide?: string }[] = [
+  { value: "virement",     label: "Virement bancaire" },
+  { value: "cheque",       label: "Chèque",       aide: "Indiquez le n° de chèque et la banque tirée." },
+  { value: "especes",      label: "Espèces",      aide: "Joignez le reçu de caisse en preuve." },
+  { value: "traite",       label: "Traite",       aide: "Indiquez le n° de la traite, la banque et l'échéance." },
+  { value: "mobile_money", label: "Mobile money" },
+  { value: "autre",        label: "Autre" },
+];
+export const LIBELLE_MODE: Record<string, string> = Object.fromEntries(MODES_REGLEMENT.map(m => [m.value, m.label]));
+
+const ReglementClientDialog = ({
+  onConfirm, onCancel, loading, meta, clientParDefaut,
+}: {
+  onConfirm:       (data: Record<string, string>) => void;
+  onCancel:        () => void;
+  loading:         boolean;
+  meta:            Record<string, string>;
+  clientParDefaut: string;
+}) => {
+  const [mode,      setMode]      = useState(meta.reglement_mode ?? "virement");
+  const [client,    setClient]    = useState(meta.reglement_client ?? clientParDefaut ?? "");
+  const [payeur,    setPayeur]    = useState(meta.reglement_payeur ?? "");
+  const [montant,   setMontant]   = useState(meta.reglement_montant ?? "");
+  const [dateRegl,  setDateRegl]  = useState(meta.reglement_date ?? new Date().toISOString().slice(0, 10));
+  const [reference, setReference] = useState(meta.reglement_reference ?? "");
+  const [banque,    setBanque]    = useState(meta.reglement_banque ?? "");
+  const [echeance,  setEcheance]  = useState(meta.reglement_echeance ?? "");
+  const [obs,       setObs]       = useState(meta.reglement_observations ?? "");
+  const montantOk = Number(String(montant).replace(/\s/g, "")) > 0;
+  const avecBanque = mode === "cheque" || mode === "traite" || mode === "virement";
+  const aide = MODES_REGLEMENT.find(m => m.value === mode)?.aide;
+  const refLabel = mode === "cheque" ? "N° de chèque" : mode === "traite" ? "N° de traite" : mode === "especes" ? "N° de reçu" : mode === "mobile_money" ? "ID de transaction" : "Référence du virement";
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl p-6 w-full max-w-lg shadow-2xl border border-border max-h-[92vh] overflow-y-auto" role="dialog" aria-label="Paiement par le client">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-emerald-100 flex items-center justify-center"><Receipt className="w-5 h-5 text-emerald-700" /></div>
+          <div>
+            <h3 className="font-display font-bold text-foreground">Paiement par le client</h3>
+            <p className="text-xs text-muted-foreground">Le règlement est enregistré dans la fiche du client (CRM)</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5 col-span-2 sm:col-span-1">
+              <Label className="text-xs font-semibold">Client *</Label>
+              <Input value={client} onChange={e => setClient(e.target.value)} placeholder="Nom du client" className="bg-muted/40" />
+            </div>
+            <div className="space-y-1.5 col-span-2 sm:col-span-1">
+              <Label className="text-xs font-semibold">Payé par (si différent)</Label>
+              <Input value={payeur} onChange={e => setPayeur(e.target.value)} placeholder="Ex : maison mère, transitaire…" className="bg-muted/40" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Mode de règlement *</Label>
+            <Select value={mode} onValueChange={setMode}>
+              <SelectTrigger className="bg-muted/40" aria-label="Mode de règlement"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {MODES_REGLEMENT.map(m => <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {aide && <p className="text-[11px] text-muted-foreground">{aide}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Montant reçu (FCFA) *</Label>
+              <Input type="number" min={1} value={montant} onChange={e => setMontant(e.target.value)} className="bg-muted/40 font-mono" aria-label="Montant reçu" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Date du règlement</Label>
+              <Input type="date" value={dateRegl} onChange={e => setDateRegl(e.target.value)} className="bg-muted/40" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">{refLabel}</Label>
+              <Input value={reference} onChange={e => setReference(e.target.value)} className="bg-muted/40 font-mono" />
+            </div>
+            {avecBanque && (
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Banque</Label>
+                <Input value={banque} onChange={e => setBanque(e.target.value)} placeholder="Ex : Afriland, SGC, UBA…" className="bg-muted/40" />
+              </div>
+            )}
+          </div>
+          {(mode === "traite" || mode === "cheque") && (
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold">Échéance {mode === "traite" ? "*" : "(chèque post-daté)"}</Label>
+              <Input type="date" value={echeance} onChange={e => setEcheance(e.target.value)} className="bg-muted/40" />
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">Observations</Label>
+            <Textarea value={obs} onChange={e => setObs(e.target.value)} className="bg-muted/40 h-16 resize-none text-sm" placeholder="Acompte, solde, conditions particulières…" />
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button
+              onClick={() => onConfirm({
+                reglement_client: client.trim(), reglement_payeur: payeur.trim(), reglement_mode: mode,
+                reglement_montant: String(montant), reglement_date: dateRegl, reglement_reference: reference.trim(),
+                reglement_banque: avecBanque ? banque.trim() : "", reglement_echeance: (mode === "traite" || mode === "cheque") ? echeance : "",
+                reglement_observations: obs.trim(),
+              })}
+              disabled={!client.trim() || !montantOk || (mode === "traite" && !echeance) || loading}
+              className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer le règlement
+            </Button>
+            <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
+// ── Revue : toutes les informations enregistrées sur la tâche ─────────────────
+const LIBELLES_META: Record<string, string> = {
+  mode_paiement: "Mode de paiement", reference: "Référence", paiement_quittance: "N° de quittance",
+  paiement_montant: "Montant payé", paiement_date: "Date de paiement",
+  pvc_resultat: "Résultat RVC", pvc_motif: "Motif / observations",
+  immatriculation: "Immatriculation", gp_chauffeur: "Chauffeur", gp_telephone: "Téléphone du chauffeur", gp_destination: "Destination",
+  gate_pass_numero: "N° gate pass", preuve_nom: "Preuve jointe",
+  reglement_client: "Client", reglement_payeur: "Payé par", reglement_mode: "Mode de règlement", reglement_montant: "Montant reçu",
+  reglement_date: "Date du règlement", reglement_reference: "Référence", reglement_banque: "Banque", reglement_echeance: "Échéance",
+  reglement_observations: "Observations",
+  pc_montant: "Montant reçu", pc_date: "Date de paiement", pc_reference: "Référence", pc_mode: "Mode de règlement",
+  enregistrement_type: "Enregistrement créé",
+};
+const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id"]);
+const ENREGISTREMENTS: Record<string, string> = {
+  paiement_douane: "Paiement douane (Finance)", paiement_compagnie: "Paiement compagnie (Finance)",
+  gate_pass: "Gate pass", reglement_client: "Règlement client (CRM)",
+};
+
+function valeurLisible(cle: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") return "";
+  const s = String(v);
+  if (cle === "reglement_mode" || cle === "pc_mode") return LIBELLE_MODE[s] ?? s;
+  if (cle === "mode_paiement") return s === "cash" ? "Cash / espèces" : s === "autres" ? "Autres" : s === "virement" ? "Virement" : s;
+  if (cle === "pvc_resultat") return s === "succes" ? "Succès" : "Rejet";
+  if (cle === "enregistrement_type") return ENREGISTREMENTS[s] ?? s;
+  if (/montant/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).toLocaleDateString("fr-FR");
+  return s;
+}
+
+const RevueInformations = ({ config, data }: { config: SousEtapeConfig; data?: SousEtape }) => {
+  const meta = (data?.metadata ?? {}) as Record<string, unknown>;
+  const libelles: Record<string, string> = { ...LIBELLES_META };
+  (config.fields ?? []).forEach(f => { libelles[f.key] = f.label; });
+  // Ordre de lecture : champs de l'étape, puis saisies des formulaires, puis le reste
+  const ordre = [...(config.fields ?? []).map(f => f.key), ...Object.keys(LIBELLES_META)];
+  const rang = (k: string) => { const i = ordre.indexOf(k); return i < 0 ? ordre.length : i; };
+  const lignes = Object.entries(meta)
+    .filter(([k, v]) => !META_CACHEES.has(k) && valeurLisible(k, v) !== "")
+    .sort(([a], [b]) => rang(a) - rang(b))
+    .map(([k, v]) => ({ k, label: libelles[k] ?? k.replace(/_/g, " "), valeur: valeurLisible(k, v) }));
+  const temps: { label: string; valeur: string }[] = [];
+  if (data?.startedAt)   temps.push({ label: "Début", valeur: dateHeure(data.startedAt) });
+  if (data?.completedAt) temps.push({ label: "Terminée", valeur: dateHeure(data.completedAt) });
+  if (data?.startedAt && data?.completedAt) temps.push({ label: "Durée de traitement", valeur: dureeEntre(data.startedAt, data.completedAt) });
+  if (data?.completedBy) temps.push({ label: "Validée par", valeur: data.completedBy.nom });
+  if (data?.notes)       temps.push({ label: "Notes", valeur: data.notes });
+  if (lignes.length === 0 && temps.length === 0) return null;
+  return (
+    <div className="rounded-xl border border-border/60 bg-card p-3 space-y-2" data-testid={`revue-${config.cle}`}>
+      <p className="text-[11px] font-semibold text-foreground flex items-center gap-1.5">
+        <FileText className="w-3 h-3 text-secondary" /> Informations enregistrées
+      </p>
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1.5">
+        {[...lignes, ...temps].map(l => (
+          <div key={l.label + l.valeur} className="min-w-0">
+            <dt className="text-[10px] text-muted-foreground">{l.label}</dt>
+            <dd className="text-xs text-foreground font-medium break-words">{l.valeur}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 };
@@ -760,7 +942,7 @@ const TimingSection = ({
       {data?.deadline && !editing ? (
         <div className={`flex items-center gap-2 text-xs font-medium ${isRetard ? "text-amber-600" : daysLeft !== null && daysLeft <= 2 ? "text-orange-500" : "text-foreground"}`}>
           <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-          {format(new Date(data.deadline), "dd MMM yyyy", { locale: fr })}
+          {format(new Date(data.deadline), "dd MMM yyyy HH:mm", { locale: fr })}
           {daysLeft !== null && !isRetard && (
             <span className="text-muted-foreground font-normal">
               — {daysLeft <= 0 ? "aujourd'hui" : `${daysLeft}j restant${daysLeft > 1 ? "s" : ""}`}
@@ -810,6 +992,8 @@ const SousEtapeCard = ({
   canManage,
   dossierId,
   peutPrendre,
+  peutAssigner,
+  clientDossier,
 }: {
   etape:      string;
   config:     SousEtapeConfig;
@@ -818,6 +1002,9 @@ const SousEtapeCard = ({
   canManage:  boolean;
   dossierId:  string;
   peutPrendre: boolean;
+  /** Direction, responsable du dossier ou intervenant de l'étape : peut désigner qui fait la tâche */
+  peutAssigner: boolean;
+  clientDossier: string;
 }) => {
   const currentUser  = getStoredUser();
   const { update, prendre } = useSousEtapes(dossierId);
@@ -833,6 +1020,7 @@ const SousEtapeCard = ({
   const [showPaiement, setShowPaiement] = useState(false);
   const [showGatePass, setShowGatePass] = useState(false);
   const [showFacture,  setShowFacture]  = useState(false);
+  const [showReglement, setShowReglement] = useState(false);
   const [notes,        setNotes]        = useState(data?.notes ?? "");
 
   const statut    = data?.statut ?? "todo";
@@ -846,6 +1034,7 @@ const SousEtapeCard = ({
     if (config.hasModePaiement)     { setShowPaiement(true); return; }
     if (config.hasImmatriculation)  { setShowGatePass(true); return; }
     if (config.facture)             { setShowFacture(true);  return; }
+    if (config.reglementClient)     { setShowReglement(true); return; }
     update.mutate(
       { etape, cle: config.cle, data: { statut: "valide" } },
       { onSuccess: () => notif.sousEtapeValidee(config.label), ...onErr }
@@ -894,6 +1083,20 @@ const SousEtapeCard = ({
             update.mutate(
               { etape, cle: config.cle, data: { statut: "valide", metadata, notes: n || undefined } },
               { onSuccess: () => { setShowGatePass(false); notif.sousEtapeValidee(config.label); }, ...onErr }
+            );
+          }}
+        />
+      )}
+      {showReglement && (
+        <ReglementClientDialog
+          loading={isPending}
+          meta={meta}
+          clientParDefaut={clientDossier}
+          onCancel={() => setShowReglement(false)}
+          onConfirm={metadata => {
+            update.mutate(
+              { etape, cle: config.cle, data: { statut: "valide", metadata } },
+              { onSuccess: () => { setShowReglement(false); notif.sousEtapeValidee(config.label); }, ...onErr }
             );
           }}
         />
@@ -955,7 +1158,7 @@ const SousEtapeCard = ({
               {data?.deadline && (
                 <span className={`text-[10px] flex items-center gap-1 ${isRetard ? "text-amber-600" : "text-muted-foreground"}`}>
                   <Calendar className="w-2.5 h-2.5" />
-                  {format(new Date(data.deadline), "dd MMM yyyy", { locale: fr })}
+                  {format(new Date(data.deadline), "dd MMM yyyy HH:mm", { locale: fr })}
                 </span>
               )}
               {meta.preuve_url && (
@@ -968,7 +1171,7 @@ const SousEtapeCard = ({
             {/* Métadonnées PVC */}
             {meta.pvc_resultat && (
               <p className={`text-[10px] mt-0.5 font-medium ${meta.pvc_resultat === "succes" ? "text-success" : "text-destructive"}`}>
-                PVC : {meta.pvc_resultat === "succes" ? "Succès" : "Rejet"} — {meta.pvc_motif}
+                RVC : {meta.pvc_resultat === "succes" ? "Succès" : "Rejet"} — {meta.pvc_motif}
               </p>
             )}
             {meta.mode_paiement && (
@@ -980,6 +1183,7 @@ const SousEtapeCard = ({
               <p className="text-[10px] mt-0.5 text-success font-medium">
                 ✓ {meta.enregistrement_type === "paiement_douane" ? "Paiement douane enregistré en Finance"
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
+                  : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
             )}
@@ -988,11 +1192,20 @@ const SousEtapeCard = ({
                 Immat : {meta.immatriculation}
               </p>
             )}
+            {/* Chronométrage précis de la tâche */}
+            {(data?.startedAt || data?.completedAt) && (
+              <p className="text-[10px] mt-0.5 text-muted-foreground font-mono" data-testid={`chrono-${config.cle}`}>
+                {data?.startedAt && <>Début {dateHeure(data.startedAt)}</>}
+                {data?.completedAt
+                  ? <> · Fin {dateHeure(data.completedAt)}{data?.startedAt && <> · <span className="text-success font-semibold">{dureeEntre(data.startedAt, data.completedAt)}</span></>}</>
+                  : data?.startedAt && <> · en cours depuis {dureeEntre(data.startedAt)}</>}
+              </p>
+            )}
           </div>
 
           {/* Actions rapides */}
           <div className="flex items-center gap-1 flex-shrink-0">
-            {statut !== "valide" && canManage && (
+            {statut !== "valide" && (canManage || peutAssigner) && (
               <button
                 title="Assigner"
                 className="w-7 h-7 rounded-lg hover:bg-muted flex items-center justify-center text-muted-foreground hover:text-secondary transition-colors"
@@ -1036,6 +1249,9 @@ const SousEtapeCard = ({
                   </div>
                 )}
 
+                {/* Revue : tout ce qui a été saisi sur la tâche */}
+                <RevueInformations config={config} data={data} />
+
                 {/* Informations de l'étape (responsable ou canManage) */}
                 {canEdit && (
                   <StepInfoSection
@@ -1078,14 +1294,14 @@ const SousEtapeCard = ({
                 )}
 
                 {/* Panel Assignation (DG/Exploitation seulement) */}
-                {showAssign && canManage && statut !== "valide" && (
+                {showAssign && (canManage || peutAssigner) && statut !== "valide" && (
                   <motion.div
                     initial={{ opacity: 0, y: -4 }}
                     animate={{ opacity: 1, y: 0 }}
                     className="rounded-xl border border-secondary/20 bg-secondary/5 p-3 space-y-2.5"
                   >
                     <p className="text-[11px] font-semibold text-secondary flex items-center gap-1.5">
-                      <UserCheck className="w-3 h-3" /> Assignation du responsable
+                      <UserCheck className="w-3 h-3" /> {canManage ? "Assignation du responsable" : "Passer le relais : qui fait cette tâche ?"}
                     </p>
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
@@ -1095,7 +1311,7 @@ const SousEtapeCard = ({
                             <SelectValue placeholder="Choisir..." />
                           </SelectTrigger>
                           <SelectContent>
-                            <SelectItem value="__none__">— Aucun —</SelectItem>
+                            {canManage && <SelectItem value="__none__">— Aucun —</SelectItem>}
                             {users.map(u => (
                               <SelectItem key={u.id} value={u.id}>{u.nom}</SelectItem>
                             ))}
@@ -1125,7 +1341,7 @@ const SousEtapeCard = ({
                       <Button
                         size="sm"
                         className="flex-1 h-7 text-xs bg-secondary text-secondary-foreground gap-1"
-                        disabled={isPending}
+                        disabled={isPending || (!canManage && (!assignee || assignee === "__none__"))}
                         onClick={() => {
                           const newResp = (assignee && assignee !== "__none__") ? assignee : null;
                           const respNom = users.find(u => u.id === newResp)?.nom ?? "";
@@ -1134,7 +1350,8 @@ const SousEtapeCard = ({
                               responsableId: newResp,
                               deadline: deadline ? new Date(deadline).toISOString() : null,
                               notes: notes || null,
-                              statut: statut === "todo" ? "en_cours" : statut,
+                              // Direction : la tâche passe « en cours » ; passage de relais : seule l'assignation change
+                              ...(canManage ? { statut: statut === "todo" ? "en_cours" as const : statut } : {}),
                             }},
                             { onSuccess: () => {
                                 setShowAssign(false);
@@ -1268,6 +1485,8 @@ export default function SousEtapesPanel({
   const user       = getStoredUser();
   const canManage  = isSupervisor(user);
   const { query, byEtape } = useSousEtapes(dossierId);
+  // Dossier déjà chargé par la page (responsable, client)
+  const dossierInfo = useQueryClient().getQueryData<any>(["dossier", dossierId]);
 
   // Qui traite quoi (Administration → Attribution des étapes)
   const { data: attribution } = useQuery({
@@ -1331,6 +1550,8 @@ export default function SousEtapesPanel({
         canManage={canManage}
         dossierId={dossierId}
         peutPrendre={!!user && profilDe(cfg.cle) === user.profil}
+        peutAssigner={canManage || (!!user && (dossierInfo?.responsableId === user.id || rows.some(r => r.responsableId === user.id)))}
+        clientDossier={dossierInfo?.client ?? ""}
       />
     );
   };

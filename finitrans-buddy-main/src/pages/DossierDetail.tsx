@@ -24,8 +24,9 @@ import { toast } from "@/hooks/use-toast";
 import { notif } from "@/hooks/useNotification";
 import DIBlock from "@/components/di/DIBlock";
 import FactureDialog from "@/components/di/FactureDialog";
-import SousEtapesPanel, { SOUS_ETAPES_CONFIG } from "@/components/dossier/SousEtapesPanel";
+import SousEtapesPanel, { SOUS_ETAPES_CONFIG, applicableConfigs } from "@/components/dossier/SousEtapesPanel";
 import { useSousEtapes } from "@/hooks/useSousEtapes";
+import { dateHeure, dureeEntre } from "@/lib/temps";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -382,6 +383,8 @@ const DossierDetail = () => {
   const [handoffResponsableId, setHandoffResponsableId] = useState("");
   const [handoffNote, setHandoffNote]             = useState("");
   const [handoffRecherche, setHandoffRecherche]   = useState("");
+  // Répartition tâche par tâche de l'étape suivante (clé de sous-étape → compte)
+  const [handoffTaches, setHandoffTaches]         = useState<Record<string, string>>({});
 
   const toggleStep = (stepKey: string) =>
     setExpandedSteps(prev => { const s = new Set(prev); s.has(stepKey) ? s.delete(stepKey) : s.add(stepKey); return s; });
@@ -390,12 +393,14 @@ const DossierDetail = () => {
     queryKey: ["dossier", id],
     queryFn:  () => api.get<any>(`/api/dossiers/${id}`),
     enabled:  !!id,
+    refetchInterval: 20_000,
   });
 
   const { data: parcoursData } = useQuery({
     queryKey: ["dossier-parcours", id],
     queryFn:  () => api.get<any>(`/api/dossiers/${id}/parcours`),
     enabled:  !!id,
+    refetchInterval: 30_000,
   });
 
   const { data: commentsData } = useQuery({
@@ -421,6 +426,7 @@ const DossierDetail = () => {
     queryKey: ["dossier-next", id],
     queryFn:  () => api.get<any>(`/api/dossiers/${id}/next-step`),
     enabled:  !!id,
+    refetchInterval: 20_000,
   });
 
   // Utilisateurs pour assignation sous-étapes
@@ -475,8 +481,11 @@ const DossierDetail = () => {
   });
 
   const advanceStatus = useMutation({
-    mutationFn: ({ status, responsableId, note }: { status: string; responsableId?: string; note?: string }) =>
-      api.patch(`/api/dossiers/${id}/status`, { status, responsableId: responsableId || undefined, note: note || undefined }),
+    mutationFn: ({ status, responsableId, note, taches }: { status: string; responsableId?: string; note?: string; taches?: Record<string, string> }) =>
+      api.patch(`/api/dossiers/${id}/status`, {
+        status, responsableId: responsableId || undefined, note: note || undefined,
+        taches: taches && Object.keys(taches).length > 0 ? taches : undefined,
+      }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["dossier", id] });
       qc.invalidateQueries({ queryKey: ["dossier-parcours", id] });
@@ -561,6 +570,7 @@ const DossierDetail = () => {
     setHandoffResponsableId(targetStatus === nextStatus && nextStep?.responsableSuggere?.id ? nextStep.responsableSuggere.id : "");
     setHandoffRecherche("");
     setHandoffNote("");
+    setHandoffTaches({});
     setHandoffDialog(true);
   };
 
@@ -570,6 +580,7 @@ const DossierDetail = () => {
       status: handoffStatus,
       responsableId: handoffResponsableId && handoffResponsableId !== "__auto__" ? handoffResponsableId : undefined,
       note: handoffNote || undefined,
+      taches: Object.fromEntries(Object.entries(handoffTaches).filter(([, v]) => v && v !== "__meme__")),
     });
     setHandoffDialog(false);
     setHandoffStatus(null);
@@ -709,7 +720,7 @@ const DossierDetail = () => {
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
-            className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border"
+            className="bg-card rounded-2xl p-6 w-full max-w-lg max-h-[92vh] overflow-y-auto shadow-2xl border border-border"
           >
             <div className="flex items-start justify-between mb-4">
               <div className="flex items-center gap-3">
@@ -753,6 +764,32 @@ const DossierDetail = () => {
                     })}
                 </div>
               </div>
+              {applicableConfigs(handoffStatus, dossier.site).length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Qui fait chaque tâche de « {STATUS_LABELS[handoffStatus]} » ?</Label>
+                  <p className="text-[11px] text-muted-foreground">Par défaut, la personne choisie ci-dessus reçoit toutes les tâches. Vous pouvez en confier certaines à d'autres comptes.</p>
+                  <div className="rounded-lg border border-border divide-y divide-border/50">
+                    {applicableConfigs(handoffStatus, dossier.site).map(cfg => {
+                      const actuelle = (sousEtapesQuery.data ?? []).find(t => t.etape === handoffStatus && t.cle === cfg.cle);
+                      return (
+                        <div key={cfg.cle} className="flex items-center gap-2 px-3 py-2">
+                          <div className="flex-1 min-w-0">
+                            <p className="text-xs font-medium text-foreground truncate">{cfg.label}</p>
+                            {actuelle?.responsable && <p className="text-[10px] text-muted-foreground">Prévu : {actuelle.responsable.nom}</p>}
+                          </div>
+                          <Select value={handoffTaches[cfg.cle] ?? "__meme__"} onValueChange={v => setHandoffTaches(p => ({ ...p, [cfg.cle]: v }))}>
+                            <SelectTrigger className="h-7 w-48 text-[11px] bg-muted/40" aria-label={`Responsable de ${cfg.label}`}><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__meme__">Comme ci-dessus</SelectItem>
+                              {usersList.map((u: any) => <SelectItem key={u.id} value={u.id}>{u.nom}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Note de passation (optionnelle)</Label>
                 <Textarea
@@ -966,6 +1003,14 @@ const DossierDetail = () => {
                             <p className="text-[11px] text-success font-medium mt-0.5 flex items-center gap-1">
                               <User className="w-2.5 h-2.5" />
                               Traité par {timingByStep[stepKey].responsable.nom}
+                            </p>
+                          )}
+                          {(isCompleted || isCurrent) && timingByStep[stepKey]?.dateDebut && (
+                            <p className="text-[10px] text-muted-foreground mt-0.5 font-mono" data-testid={`timing-${stepKey}`}>
+                              Début {dateHeure(timingByStep[stepKey].dateDebut)}
+                              {timingByStep[stepKey].dateFin
+                                ? <> · Fin {dateHeure(timingByStep[stepKey].dateFin)} · Durée {dureeEntre(timingByStep[stepKey].dateDebut, timingByStep[stepKey].dateFin)}</>
+                                : <> · En cours depuis {dureeEntre(timingByStep[stepKey].dateDebut)}</>}
                             </p>
                           )}
                           {isCurrent && dossier.responsable?.nom && (

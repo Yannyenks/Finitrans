@@ -31,13 +31,32 @@ async function choisir(page: Page, declencheur: ReturnType<Page["locator"]>, opt
 async function terminerMesTaches(page: Page) {
   await page.goto("/mon-espace");
   await page.waitForLoadState("networkidle");
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 12; i++) {
     const ligne = page.locator("div.rounded-xl", { hasText: CLIENT }).filter({ has: page.getByRole("button", { name: "Terminer" }) }).first();
     if (await ligne.count() === 0) break;
-    await ligne.getByRole("button", { name: "Terminer" }).click();
-    await expect(page.getByText("Tâche terminée").first()).toBeVisible();
+    // La liste se réactualise seule après chaque action : une ligne déjà terminée peut disparaître avant le clic
+    const ok = await ligne.getByRole("button", { name: "Terminer" }).click({ timeout: 10_000 }).then(() => true, () => false);
+    if (ok) await expect(page.getByText("Tâche terminée").first()).toBeVisible();
     await page.waitForLoadState("networkidle");
   }
+}
+
+/** Le comptable enregistre le règlement du client (mode de règlement en menu déroulant) depuis le dossier. */
+async function reglerPaiementClient(page: Page) {
+  await page.goto("/dossiers");
+  await page.getByPlaceholder(/Rechercher par numéro/).fill(CLIENT);
+  await page.getByText(CLIENT).first().click();
+  await page.waitForURL(/\/dossiers\/[0-9a-f-]+$/);
+  await page.waitForLoadState("networkidle");
+  const carte = page.locator("div.rounded-xl.border", { has: page.locator("span.text-sm.font-semibold", { hasText: /^Paiement par le client$/ }) }).last();
+  await carte.locator("span.text-sm.font-semibold", { hasText: "Paiement par le client" }).click();
+  await carte.getByRole("button", { name: /Terminer la tâche/ }).click();
+  const dlg = page.getByRole("dialog", { name: "Paiement par le client" });
+  await choisir(page, dlg.getByLabel("Mode de règlement"), "Virement bancaire");
+  await dlg.getByLabel("Montant reçu").fill("1500000");
+  await dlg.getByRole("button", { name: "Enregistrer le règlement" }).click();
+  await expect(page.getByText("Sous-étape validée").first()).toBeVisible();
+  await expect(carte.getByText("Règlement client enregistré (CRM)")).toBeVisible();
 }
 
 test("parcours réel : création, chaque compte termine sa tâche, passage d'étape, supervision", async ({ browser }) => {
@@ -61,6 +80,7 @@ test("parcours réel : création, chaque compte termine sa tâche, passage d'ét
   for (const compte of ["odette", "honore"]) {
     const p = await session(browser, compte);
     await terminerMesTaches(p);
+    if (compte === "honore") await reglerPaiementClient(p);
     await p.context().close();
   }
 

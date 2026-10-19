@@ -11,6 +11,7 @@ export interface SousEtape {
   statut:        SousEtapeStatut
   responsableId: string | null
   deadline:      string | null
+  startedAt?:    string | null
   completedAt:   string | null
   completedById: string | null
   notes:         string | null
@@ -43,7 +44,9 @@ export function useSousEtapes(dossierId: string) {
     queryKey: key,
     queryFn:  () => api.get<SousEtape[]>(`/api/dossiers/${dossierId}/sous-etapes`),
     enabled:  !!dossierId,
-    staleTime: 30_000,
+    staleTime: 15_000,
+    // Réactualisation automatique : les actions des autres comptes apparaissent sans recharger
+    refetchInterval: 20_000,
   })
 
   const update = useMutation({

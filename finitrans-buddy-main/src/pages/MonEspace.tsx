@@ -17,8 +17,8 @@ import { STATUS_LABELS, useAuth } from "@/lib/permissions";
 import { useLiensExternes, urlValide } from "@/lib/liens";
 import { toast } from "@/hooks/use-toast";
 
-/** Tâches qui demandent une saisie spécifique (résultat PVC, quittance, gate pass) : à terminer depuis le dossier. */
-const SAISIE_DEDIEE = new Set(["pvc", "paiement_droits", "gate_pass", "facturation_compagnie", "facturation_terminal"]);
+/** Tâches qui demandent une saisie spécifique (résultat RVC, quittance, gate pass, règlement client) : à terminer depuis le dossier. */
+const SAISIE_DEDIEE = new Set(["pvc", "paiement_client", "paiement_droits", "gate_pass", "facturation_compagnie", "facturation_terminal"]);
 
 const CONGE_TYPES: Record<string, string> = {
   annuel: "Congé annuel", maladie: "Maladie", maternite: "Maternité", paternite: "Paternité",

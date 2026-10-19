@@ -70,7 +70,8 @@ test("un responsable confie l'étape « Bon Compagnie » ; à la clôture le com
 
   await bandeau.getByRole("button", { name: "Bibliothèque" }).click();
   await expect(yasmine).toHaveURL(/\/bibliotheque\?dossier=/);
-  await expect(yasmine.getByText(`Dossier ${dossier.numero}`)).toBeVisible();
+  // Filtre « Dossier DOS-… — CLIENT » (à distinguer de la notification « Dossier DOS-… : Clôture »)
+  await expect(yasmine.getByText(new RegExp(`Dossier ${dossier.numero} —`))).toBeVisible();
   const carte = yasmine.getByTestId("document").filter({ hasText: `Compte-rendu-${dossier.numero}.pdf` });
   await expect(carte).toBeVisible();
   await carte.getByRole("button", { name: /Aperçu de/ }).click();

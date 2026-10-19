@@ -70,7 +70,10 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(owner('bon_compagnie', 'gate_pass'), 'wandala')
     assert.equal(owner('cloture', 'rapport_final'), 'yasmine')
     assert.ok(!all.some(t => t.etape === 'operations_kribi'), 'pas d\'étape Kribi pour Douala')
-    assert.ok(all.every(t => t.responsableId !== ids.delba && t.responsableId !== ids.soudi), 'DG/Exploitation supervisent seulement')
+    // Fournisseur & soumission + RVC : M. Soudi ; ailleurs, la Direction supervise
+    assert.equal(owner('soumission_sgs', 'ff_soumission'), 'soudi')
+    assert.equal(owner('soumission_sgs', 'pvc'), 'soudi')
+    assert.ok(all.filter(t => t.etape !== 'soumission_sgs').every(t => t.responsableId !== ids.delba && t.responsableId !== ids.soudi), 'DG/Exploitation supervisent seulement')
   })
 
   it('les tâches apparaissent dans « Mon espace » de chaque compte', async () => {
@@ -88,8 +91,9 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
   it('un compte ne peut pas valider ni réattribuer la tâche d\'un autre', async () => {
     const r = await api('odette', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { statut: 'valide' })
     expectStatus(r, 403)
-    const r2 = await api('yasmine', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { responsableId: ids.yaya })
-    expectStatus(r2, 403, 'réattribution réservée aux superviseurs')
+    // Odette n'a encore rien terminé à la réception : elle ne peut pas réattribuer la tâche de Yasmine
+    const r2 = await api('odette', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { responsableId: ids.yaya })
+    expectStatus(r2, 403, 'réattribution par un compte non habilité')
   })
 
   it('l\'étape ne peut pas être terminée tant que les tâches ne sont pas validées', async () => {
@@ -125,9 +129,11 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(ns.body.peutAvancer, true, JSON.stringify(ns.body.raisons))
     const d1 = await advance('yasmine', dossierId, 'soumission_sgs')
     assert.equal(d1.status, 'soumission_sgs')
+    // Fournisseur & soumission + RVC : M. Soudi (Exploitation)
+    assert.equal(d1.responsableId, ids.soudi, 'soumission SGS → Mr Soudi')
     await completeStage(dossierId, 'soumission_sgs')
-    await preuve('yasmine', dossierId, 'soumission_sgs')
-    const d2 = await advance('yasmine', dossierId, 'codage')
+    await preuve('soudi', dossierId, 'soumission_sgs')
+    const d2 = await advance('soudi', dossierId, 'codage')
     assert.equal(d2.responsableId, ids.odette, 'codage → Mme Odette')
     const notifs = await api('odette', 'GET', '/api/notifications?limit=50')
     assert.ok(notifs.body.data.some((n: any) => n.dossierId === dossierId && n.type === 'action_requise'))

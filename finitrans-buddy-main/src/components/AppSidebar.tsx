@@ -5,7 +5,7 @@ import {
   MapPin, ChevronLeft, ChevronRight, LogOut, Settings,
   ClipboardList, MessageSquare, BarChart3, Banknote,
   CheckSquare, PackageOpen, Truck, BookOpen, Trophy,
-  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library,
+  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library, Gem,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -49,6 +49,7 @@ const NAV: NavGroup[] = [
     titre: "Finance",
     items: [
       { label: "Finance",              icon: DollarSign, path: "/finance",              module: "finance" },
+      { label: "CRM clients",          icon: Gem,        path: "/crm",                  module: "crm" },
       { label: "Gestion DI",           icon: Banknote,   path: "/di",                   module: "di" },
       { label: "Comptabilité",         icon: BookOpen,   path: "/comptabilite",         module: "comptabilite" },
       { label: "Comptabilité avancée", icon: Calculator, path: "/comptabilite-avancee", module: "comptabilite_avancee" },
