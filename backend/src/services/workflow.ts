@@ -193,6 +193,7 @@ export async function initSousEtapes(dossierId: string, tx: Prisma.TransactionCl
     }
   }
   if (rows.length > 0) await tx.sousEtapeDossier.createMany({ data: rows, skipDuplicates: true })
+  return rows.length
 }
 
 /**
@@ -251,7 +252,7 @@ export async function stageCompletion(dossierId: string, etape: DossierStatus, s
 
 export async function notify(
   userIds: (string | null | undefined)[],
-  data: { type: 'alerte' | 'message' | 'dossier' | 'action_requise'; titre: string; message: string; dossierId?: string; actionUrl?: string },
+  data: { type: 'alerte' | 'message' | 'dossier' | 'action_requise'; titre: string; message: string; dossierId?: string; actionUrl?: string; echeance?: Date | null },
 ) {
   const ids = [...new Set(userIds.filter((u): u is string => !!u))]
   if (ids.length === 0) return
@@ -280,21 +281,54 @@ export async function loadSlaSousEtapes(): Promise<Record<string, number>> {
 }
 
 /**
- * Le dossier entre dans une étape : le chronomètre de chaque sous-étape démarre
- * et son échéance est calculée d'après le SLA (sauf délai déjà fixé).
+ * Le dossier entre dans une étape : chaque tâche attribuée démarre automatiquement
+ * (plus de bouton « Démarrer ») et son échéance est calculée d'après le SLA (sauf délai déjà fixé).
  */
 export async function demarrerEtape(dossierId: string, etape: DossierStatus, debut = new Date()) {
   const sla = await loadSlaSousEtapes()
   const rows = await prisma.sousEtapeDossier.findMany({
     where: { dossierId, etape, statut: { not: 'valide' } },
-    select: { id: true, cle: true, startedAt: true, deadline: true },
+    select: { id: true, cle: true, statut: true, responsableId: true, startedAt: true, deadline: true },
   })
   for (const r of rows) {
     const heures = sla[`${etape}.${r.cle}`]
     const data: Prisma.SousEtapeDossierUpdateInput = {}
     if (!r.startedAt) data.startedAt = debut
     if (!r.deadline && heures > 0) data.deadline = new Date(debut.getTime() + heures * 3_600_000)
+    if (r.statut === 'todo' && r.responsableId) data.statut = 'en_cours'
     if (Object.keys(data).length > 0) await prisma.sousEtapeDossier.update({ where: { id: r.id }, data })
+  }
+}
+
+/** Échéance d'une tâche qui démarre maintenant (SLA de la sous-étape). */
+export async function echeanceSla(etape: string, cle: string, debut = new Date()): Promise<Date | null> {
+  const heures = (await loadSlaSousEtapes())[`${etape}.${cle}`]
+  return heures > 0 ? new Date(debut.getTime() + heures * 3_600_000) : null
+}
+
+/**
+ * Prévient chaque titulaire des tâches ouvertes d'une étape, avec l'échéance de sa tâche la plus urgente :
+ * le compte à rebours s'affiche dès la réception de la notification.
+ */
+export async function notifierTitulaires(
+  dossierId: string,
+  etape: DossierStatus,
+  data: { titre: string; message: string },
+  options: { sauf?: string; aussi?: (string | null | undefined)[] } = {},
+) {
+  const taches = await prisma.sousEtapeDossier.findMany({
+    where: { dossierId, etape, statut: { not: 'valide' }, responsableId: { not: null } },
+    select: { responsableId: true, deadline: true },
+  })
+  const parCompte = new Map<string, Date | null>()
+  for (const t of taches) {
+    const actuelle = parCompte.get(t.responsableId!)
+    if (!parCompte.has(t.responsableId!) || (t.deadline && (!actuelle || t.deadline < actuelle))) parCompte.set(t.responsableId!, t.deadline)
+  }
+  for (const id of options.aussi ?? []) if (id && !parCompte.has(id)) parCompte.set(id, null)
+  for (const [userId, echeance] of parCompte) {
+    if (userId === options.sauf) continue
+    await notify([userId], { type: 'action_requise', ...data, dossierId, actionUrl: `/dossiers/${dossierId}`, echeance })
   }
 }
 

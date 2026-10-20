@@ -117,7 +117,7 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       SOUS_ETAPES_CONFIG[etape as keyof typeof SOUS_ETAPES_CONFIG]?.find(s => s.cle === cle)?.label ?? cle
     const toTask = (t: (typeof mesTaches)[number] | (typeof aPrendre)[number]) => ({
       id: t.id, etape: t.etape, cle: t.cle, label: label(t.etape, t.cle), statut: t.statut,
-      deadline: t.deadline, notes: t.notes, dossier: t.dossier,
+      deadline: t.deadline, startedAt: t.startedAt, notes: t.notes, dossier: t.dossier,
       actionnable: t.dossier.status === t.etape,
       enRetard: !!t.deadline && t.deadline < now,
     })

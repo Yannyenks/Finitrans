@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { api, getStoredUser } from "@/lib/api";
 import { playSound, SoundType } from "@/lib/sound";
 import { useNavigate } from "react-router-dom";
+import CompteARebours from "@/components/CompteARebours";
 
 const typeIcons: Record<string, any> = {
   detention: AlertTriangle,
@@ -22,6 +23,8 @@ const typeIcons: Record<string, any> = {
 interface Notif {
   id: string; type: "alerte" | "message" | "dossier" | "action_requise"; titre: string; message: string;
   lu: boolean; createdAt: string; dossierId?: string | null; actionUrl?: string | null;
+  /** Échéance de la tâche notifiée : compte à rebours affiché dès la réception */
+  echeance?: string | null;
   dossier?: { numero: string; client: string } | null;
 }
 
@@ -130,6 +133,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
             <p className={`text-[10px] font-bold uppercase tracking-wider ${st.couleur}`}>{st.libelle}</p>
             <p className="text-sm font-semibold text-foreground leading-snug">{n.titre}</p>
             <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{n.message}</p>
+            {n.echeance && <CompteARebours variant="barre" echeance={n.echeance} debut={n.createdAt} className="mt-2.5" />}
             <div className="flex gap-2 mt-2.5">
               {(n.actionUrl || n.dossierId) && (
                 <button className={`text-xs font-semibold px-3 py-1.5 rounded-lg ${st.fond} text-white hover:opacity-90`}
@@ -147,7 +151,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
           </button>
         </div>
       </div>
-    ), { duration: 12_000, position: "top-right" });
+    ), { duration: n.echeance ? 20_000 : 12_000, position: "top-right" });
 
     // Onglet en arrière-plan : notification du système
     if (document.hidden && "Notification" in window && Notification.permission === "granted") {
@@ -255,7 +259,10 @@ const NotificationPanel = () => {
                 <div className="flex-1 min-w-0">
                   <p className={`text-sm leading-snug ${n.lu ? "text-muted-foreground" : "text-foreground font-semibold"}`}>{n.titre}</p>
                   <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
-                  <p className="text-[10px] text-muted-foreground/70 mt-1">{quand(n.createdAt)}</p>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className="text-[10px] text-muted-foreground/70">{quand(n.createdAt)}</span>
+                    {n.echeance && !n.lu && <CompteARebours echeance={n.echeance} debut={n.createdAt} />}
+                  </div>
                 </div>
               </button>
             );

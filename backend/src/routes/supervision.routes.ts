@@ -9,7 +9,8 @@ import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { requireSupervisor } from '../middleware/authorize'
 import { logActivity, logAudit } from '../utils/audit'
-import { SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, notify } from '../services/workflow'
+import { DossierStatus } from '@prisma/client'
+import { SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, demarrerEtape, notify } from '../services/workflow'
 
 const labelOf = (etape: string, cle: string) =>
   SOUS_ETAPES_CONFIG[etape as keyof typeof SOUS_ETAPES_CONFIG]?.find(s => s.cle === cle)?.label ?? cle
@@ -158,8 +159,15 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
       dossier: { status: { not: 'cloture' as const } },
       ...(body.dossierId ? { dossierId: body.dossierId } : {}),
     }
-    const concernees = await prisma.sousEtapeDossier.findMany({ where, select: { dossierId: true } })
+    const concernees = await prisma.sousEtapeDossier.findMany({ where, select: { dossierId: true, etape: true, deadline: true, dossier: { select: { status: true } } } })
     const res = await prisma.sousEtapeDossier.updateMany({ where, data: { responsableId: body.versUserId } })
+    // Les tâches des étapes en cours démarrent aussitôt chez le nouveau titulaire
+    const enCours = new Set(concernees.filter(c => c.dossier.status === c.etape).map(c => `${c.dossierId}|${c.etape}`))
+    for (const cle of enCours) {
+      const [dossierId, etape] = cle.split('|')
+      await demarrerEtape(dossierId, etape as DossierStatus)
+    }
+    const echeances = concernees.filter(c => c.dossier.status === c.etape && c.deadline).map(c => c.deadline!.getTime())
 
     let dossiers = 0
     if (body.inclureResponsabiliteDossiers) {
@@ -181,6 +189,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
         titre: 'Tâches qui vous sont transférées',
         message: `${res.count} tâche(s) de ${de.nom} vous ont été attribuées.`,
         actionUrl: '/mon-espace',
+        echeance: echeances.length ? new Date(Math.min(...echeances)) : null,
       })
     }
     return reply.send({ tachesTransferees: res.count, dossiersTransferes: dossiers })

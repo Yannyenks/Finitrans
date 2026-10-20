@@ -589,6 +589,8 @@ model Notification {
   luAt      DateTime?        @map("lu_at")
   dossierId String?          @map("dossier_id") @db.Uuid
   actionUrl String?          @map("action_url") @db.VarChar(500)
+  /// Échéance de la tâche notifiée : le compte à rebours démarre dès la réception
+  echeance  DateTime?
   createdAt DateTime         @default(now()) @map("created_at")
   dossier   Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)

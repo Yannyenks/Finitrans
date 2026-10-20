@@ -16,6 +16,7 @@ import { api, refreshSessionUser } from "@/lib/api";
 import { STATUS_LABELS, useAuth } from "@/lib/permissions";
 import { useLiensExternes, urlValide } from "@/lib/liens";
 import { toast } from "@/hooks/use-toast";
+import CompteARebours from "@/components/CompteARebours";
 
 /** Tâches qui demandent une saisie spécifique (résultat RVC, quittance, gate pass, règlement client) : à terminer depuis le dossier. */
 const SAISIE_DEDIEE = new Set(["pvc", "paiement_client", "paiement_droits", "gate_pass", "facturation_compagnie", "facturation_terminal"]);
@@ -30,7 +31,7 @@ const CONGE_STATUT: Record<string, string> = {
 };
 
 type Tache = {
-  id: string; etape: string; cle: string; label: string; statut: string; deadline: string | null;
+  id: string; etape: string; cle: string; label: string; statut: string; deadline: string | null; startedAt?: string | null;
   actionnable: boolean; enRetard: boolean;
   dossier: { id: string; numero: string; client: string; status: string; site: string; compagnie: string; priorite: string };
 };
@@ -48,11 +49,10 @@ const TacheRow = ({ t, action }: { t: Tache; action?: React.ReactNode }) => {
           {t.dossier.priorite === "haute" && <span className="ml-1 text-destructive font-semibold">· priorité haute</span>}
         </p>
       </div>
-      {t.deadline && (
-        <span className={`text-[11px] flex items-center gap-1 ${t.enRetard ? "text-amber-700 font-semibold" : "text-muted-foreground"}`}>
-          <Clock className="w-3 h-3" /> {new Date(t.deadline).toLocaleDateString("fr-FR")}
-        </span>
-      )}
+      {/* Compte à rebours en temps réel sur les tâches de l'étape en cours */}
+      {t.deadline && (t.actionnable
+        ? <CompteARebours echeance={t.deadline} debut={t.startedAt} />
+        : <span className="text-[11px] flex items-center gap-1 text-muted-foreground"><Clock className="w-3 h-3" /> {new Date(t.deadline).toLocaleDateString("fr-FR")}</span>)}
       {lien && urlValide(lien.url) && (
         <a href={lien.url} target="_blank" rel="noopener noreferrer" className="h-8 px-3 rounded-md text-xs font-semibold bg-secondary/10 text-secondary inline-flex items-center gap-1 hover:bg-secondary/20">
           {lien.label} ↗

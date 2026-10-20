@@ -19,6 +19,7 @@ import { api, getStoredUser, openDocument } from "@/lib/api";
 import { isSupervisor } from "@/lib/permissions";
 import { useLiensExternes, urlValide } from "@/lib/liens";
 import { dateHeure, dureeEntre } from "@/lib/temps";
+import CompteARebours from "@/components/CompteARebours";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -907,57 +908,33 @@ const TimingSection = ({
   onSave:    (deadline: string | null) => void;
   isPending: boolean;
 }) => {
-  const [dl, setDl] = useState(data?.deadline ? data.deadline.slice(0, 10) : "");
+  // Saisie à la minute près (heure locale)
+  const local = (iso?: string | null) => iso ? format(new Date(iso), "yyyy-MM-dd'T'HH:mm") : "";
+  const [dl, setDl] = useState(local(data?.deadline));
   const [editing, setEditing] = useState(false);
-
-  const isRetard = data?.deadline && data.statut !== "valide" && isAfter(new Date(), new Date(data.deadline));
-  const daysLeft = data?.deadline && data.statut !== "valide"
-    ? differenceInDays(new Date(data.deadline), new Date())
-    : null;
 
   return (
     <div className="rounded-xl border border-border/40 bg-muted/20 p-3 space-y-2">
       <div className="flex items-center justify-between">
         <p className="text-[11px] font-semibold text-muted-foreground flex items-center gap-1.5">
-          <Timer className="w-3 h-3" /> Mon délai cible
+          <Timer className="w-3 h-3" /> Mon échéance
         </p>
         {!editing && (
-          <button
-            className="text-[10px] text-secondary hover:underline"
-            onClick={() => setEditing(true)}
-          >
-            {data?.deadline ? "Modifier" : "Définir"}
+          <button className="text-[10px] text-secondary hover:underline" onClick={() => { setDl(local(data?.deadline)); setEditing(true); }}>
+            {data?.deadline ? "Ajuster" : "Définir"}
           </button>
         )}
       </div>
-
-      {data?.deadline && !editing ? (
-        <div className={`flex items-center gap-2 text-xs font-medium ${isRetard ? "text-amber-600" : daysLeft !== null && daysLeft <= 2 ? "text-orange-500" : "text-foreground"}`}>
-          <Calendar className="w-3.5 h-3.5 flex-shrink-0" />
-          {format(new Date(data.deadline), "dd MMM yyyy HH:mm", { locale: fr })}
-          {daysLeft !== null && !isRetard && (
-            <span className="text-muted-foreground font-normal">
-              — {daysLeft <= 0 ? "aujourd'hui" : `${daysLeft}j restant${daysLeft > 1 ? "s" : ""}`}
-            </span>
-          )}
-          {isRetard && (
-            <span className="text-amber-600 font-semibold flex items-center gap-1">
-              <AlertTriangle className="w-3 h-3" /> Retard
-            </span>
-          )}
-        </div>
-      ) : !editing ? (
-        <p className="text-[11px] text-muted-foreground/60 italic">Aucun délai défini</p>
-      ) : null}
-
+      {!editing && (
+        <p className="text-[11px] text-muted-foreground">
+          {data?.deadline
+            ? <>Fixée au {format(new Date(data.deadline), "dd MMM yyyy 'à' HH:mm", { locale: fr })} — le compte à rebours s'ajuste aussitôt.</>
+            : "Aucune échéance : définissez-en une pour lancer le compte à rebours."}
+        </p>
+      )}
       {editing && (
         <div className="flex items-center gap-2">
-          <Input
-            type="date"
-            value={dl}
-            onChange={e => setDl(e.target.value)}
-            className="h-7 text-xs bg-card flex-1"
-          />
+          <Input type="datetime-local" value={dl} onChange={e => setDl(e.target.value)} className="h-7 text-xs bg-card flex-1" aria-label="Échéance" />
           <Button
             size="sm"
             className="h-7 text-xs gap-1 bg-secondary text-secondary-foreground px-3"
@@ -966,9 +943,7 @@ const TimingSection = ({
           >
             {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "OK"}
           </Button>
-          <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setEditing(false)}>
-            ✕
-          </Button>
+          <Button size="sm" variant="outline" className="h-7 text-xs px-2" onClick={() => setEditing(false)}>✕</Button>
         </div>
       )}
     </div>
@@ -1147,11 +1122,9 @@ const SousEtapeCard = ({
                   {data.responsable.nom}
                 </span>
               )}
+              {/* Compte à rebours en temps réel jusqu'à l'échéance (démarre dès que la tâche est reçue) */}
               {data?.deadline && (
-                <span className={`text-[10px] flex items-center gap-1 ${isRetard ? "text-amber-600" : "text-muted-foreground"}`}>
-                  <Calendar className="w-2.5 h-2.5" />
-                  {format(new Date(data.deadline), "dd MMM yyyy HH:mm", { locale: fr })}
-                </span>
+                <CompteARebours echeance={data.deadline} debut={data.startedAt} terminee={statut === "valide" ? data.completedAt : null} />
               )}
               {meta.preuve_url && (
                 <span className="text-[10px] text-success flex items-center gap-1">
@@ -1190,7 +1163,7 @@ const SousEtapeCard = ({
                 {data?.startedAt && <>Début {dateHeure(data.startedAt)}</>}
                 {data?.completedAt
                   ? <> · Fin {dateHeure(data.completedAt)}{data?.startedAt && <> · <span className="text-success font-semibold">{dureeEntre(data.startedAt, data.completedAt)}</span></>}</>
-                  : data?.startedAt && <> · en cours depuis {dureeEntre(data.startedAt)}</>}
+                  : null}
               </p>
             )}
           </div>
@@ -1221,6 +1194,11 @@ const SousEtapeCard = ({
               className="overflow-hidden"
             >
               <div className="px-3 pb-3 pt-2 border-t border-border/10 space-y-3">
+
+                {/* Compte à rebours détaillé pour une tâche ouverte */}
+                {statut !== "valide" && data?.deadline && (
+                  <CompteARebours variant="anneau" echeance={data.deadline} debut={data.startedAt} />
+                )}
 
                 {/* Description */}
                 <p className="text-[11px] text-muted-foreground leading-relaxed">{config.description}</p>
@@ -1380,17 +1358,6 @@ const SousEtapeCard = ({
                     </Button>
                   )}
 
-                  {statut === "todo" && isResponsable && (
-                    <Button size="sm" variant="outline" className="h-7 text-xs gap-1"
-                      disabled={isPending}
-                      onClick={() => update.mutate(
-                        { etape, cle: config.cle, data: { statut: "en_cours" } },
-                        { onSuccess: () => notif.sousEtapeDemarree(config.label), ...onErr }
-                      )}>
-                      {isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <PlayCircle className="w-3 h-3" />}
-                      Démarrer
-                    </Button>
-                  )}
 
                   {/* Le titulaire (ou la Direction) termine la tâche */}
                   {(statut === "todo" || statut === "en_cours") && canEdit && (

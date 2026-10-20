@@ -10,7 +10,7 @@ import { recevoirFichier } from '../services/televersement'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
-  isStatus, loadAttribution, notifierDirection, notify, stageCompletion,
+  demarrerEtape, echeanceSla, isStatus, loadAttribution, notifierDirection, notify, stageCompletion,
 } from '../services/workflow'
 
 export { SOUS_ETAPES_CONFIG }
@@ -52,11 +52,11 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // GET /api/dossiers/:id/sous-etapes
   fastify.get('/:id/sous-etapes', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
-    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true } })
+    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true, status: true } })
     if (!dossier) throw new NotFoundError('Dossier', id)
 
-    // Crée et attribue automatiquement les sous-étapes manquantes
-    await initSousEtapes(id)
+    // Crée et attribue automatiquement les sous-étapes manquantes ; celles de l'étape en cours démarrent
+    if (((await initSousEtapes(id)) ?? 0) > 0 && dossier.status !== 'cloture') await demarrerEtape(id, dossier.status)
 
     const rows = await prisma.sousEtapeDossier.findMany({
       where: { dossierId: id },
@@ -132,6 +132,13 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     }
     if (body.statut === 'en_cours' && !existing?.startedAt) data.startedAt = maintenant
 
+    // Tâche confiée sur l'étape en cours : elle démarre automatiquement (compte à rebours jusqu'à l'échéance)
+    if (body.responsableId && body.statut === undefined && dossier.status === etape && (existing?.statut ?? 'todo') === 'todo') {
+      data.statut = 'en_cours'
+      if (!existing?.startedAt) data.startedAt = maintenant
+      if (!existing?.deadline && body.deadline === undefined) data.deadline = await echeanceSla(etape, cle, maintenant)
+    }
+
     let row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
       create: { dossierId: id, etape, cle, ...data },
@@ -172,6 +179,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         message: `${dossier.numero} — ${STATUS_LABELS[etape]} : ${label}`,
         dossierId: id,
         actionUrl: `/dossiers/${id}`,
+        echeance: dossier.status === etape ? row.deadline : null,
       })
     }
 
@@ -218,6 +226,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         responsableId: actor.id,
         statut: existing?.statut === 'todo' ? 'en_cours' : undefined,
         startedAt: existing?.startedAt ? undefined : new Date(),
+        deadline: existing?.deadline || dossier.status !== etape ? undefined : await echeanceSla(etape, cle),
       },
       include: includeUsers,
     })

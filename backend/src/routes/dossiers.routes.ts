@@ -14,7 +14,7 @@ import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import {
   STATUS_ORDER, STATUS_LABELS, applicableSousEtapes, assignStage, demarrerEtape, initSousEtapes, loadAttribution,
-  nextStage, notifierDirection, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
+  nextStage, notifierDirection, notifierTitulaires, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
 } from '../services/workflow'
 import { rattacherClient } from '../services/crm'
 
@@ -170,16 +170,11 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     await rattacherClient(dossier.id, dossier.client, user.id)
     await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
 
-    const receptionTasks = await prisma.sousEtapeDossier.findMany({
-      where: { dossierId: dossier.id, etape: 'reception' }, select: { responsableId: true },
-    })
-    await notify([responsableId, ...receptionTasks.map(t => t.responsableId)].filter(u => u !== user.id), {
-      type: 'action_requise',
+    // Chaque titulaire est prévenu avec l'échéance de sa tâche : le compte à rebours démarre aussitôt
+    await notifierTitulaires(dossier.id, 'reception', {
       titre: 'Nouveau dossier à traiter',
       message: `${dossier.numero} — ${dossier.client} : des tâches de réception vous sont attribuées`,
-      dossierId: dossier.id,
-      actionUrl: `/dossiers/${dossier.id}`,
-    })
+    }, { sauf: user.id, aussi: [responsableId] })
 
     return reply.code(201).send(dossier)
   })
@@ -313,11 +308,16 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       where: { dossierId: dossier.id, etape: params.etape, statut: { not: 'valide' } },
       data: { responsableId: cible.id },
     })
-    // Étape en cours : la personne désignée devient aussi responsable du dossier
+    // Étape en cours : la personne désignée devient aussi responsable du dossier et ses tâches démarrent
     if (params.etape === dossier.status) {
       await prisma.dossier.update({ where: { id: dossier.id }, data: { responsableId: cible.id } })
       await prisma.dossierTiming.updateMany({ where: { dossierId: dossier.id, etape: params.etape, dateFin: null }, data: { responsableId: cible.id } })
+      await demarrerEtape(dossier.id, params.etape)
     }
+    const prochaine = await prisma.sousEtapeDossier.findFirst({
+      where: { dossierId: dossier.id, etape: params.etape, responsableId: cible.id, statut: { not: 'valide' }, deadline: { not: null } },
+      orderBy: { deadline: 'asc' }, select: { deadline: true },
+    })
 
     await logAudit(dossier.id, actor.id, 'AFFECTATION_ETAPE', `Étape « ${STATUS_LABELS[params.etape]} » confiée à ${cible.nom} (${count} tâche(s))`,
       { etape: params.etape, responsableId: cible.id })
@@ -328,6 +328,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         message: `${actor.nom} vous confie l'étape « ${STATUS_LABELS[params.etape]} » du dossier ${dossier.numero} (${dossier.client})${body.note?.trim() ? ` : ${body.note.trim()}` : ''}.`,
         dossierId: dossier.id,
         actionUrl: `/dossiers/${dossier.id}`,
+        echeance: params.etape === dossier.status ? prochaine?.deadline ?? null : null,
       })
     }
     return reply.send({ ...affectation, tachesAttribuees: count })
@@ -547,16 +548,10 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
 
     // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
-    const taches = await prisma.sousEtapeDossier.findMany({
-      where: { dossierId: id, etape: body.status }, select: { responsableId: true },
-    })
-    await notify([nouveauResponsable, ...taches.map(t => t.responsableId)].filter(u => u !== user.id), {
-      type: 'action_requise',
+    await notifierTitulaires(id, body.status, {
       titre: `Dossier ${updated.numero} : ${STATUS_LABELS[body.status]}`,
       message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Des tâches vous attendent.`,
-      dossierId: id,
-      actionUrl: `/dossiers/${id}`,
-    })
+    }, { sauf: user.id, aussi: [nouveauResponsable] })
 
     return reply.send(updated)
   })

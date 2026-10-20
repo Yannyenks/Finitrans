@@ -37,6 +37,16 @@ describe('Chronométrage et SLA des tâches', () => {
     }
   })
 
+  it('démarrage automatique : les tâches reçues sont « en cours » et la notification porte l\'échéance', async () => {
+    const t = await taches('reception')
+    assert.ok(t.filter(x => x.responsableId).every(x => x.statut === 'en_cours'), 'plus besoin de « Démarrer »')
+    const n = await api('honore', 'GET', '/api/notifications?limit=20')
+    const notif = n.body.data.find((x: any) => x.dossierId === dossierId && x.titre === 'Nouveau dossier à traiter')
+    assert.ok(notif?.echeance, 'compte à rebours dès la réception')
+    const sienne = t.find(x => nom(x.responsableId) === 'honore')
+    assert.equal(new Date(notif.echeance).getTime(), new Date(sienne.deadline).getTime())
+  })
+
   it('une tâche terminée garde son début et sa fin (à la seconde)', async () => {
     const bl = (await taches('reception')).find(x => x.cle === 'bl')
     const r = await api(nom(bl.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { statut: 'valide' })
