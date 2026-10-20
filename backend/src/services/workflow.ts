@@ -42,7 +42,6 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'facture_proforma', label: 'Facture proforma' },
     { cle: 'saisie_pr',        label: 'Saisie du PR' },
     { cle: 'paiement_client',  label: 'Paiement par le client' },
-    { cle: 'traitement_sgs',   label: 'Suivi et traitement SI' },
     { cle: 'di',               label: 'DI' },
   ],
   soumission_sgs: [
@@ -97,7 +96,7 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
     owner: 'administration',
     sousEtapes: {
       bl: 'administration', facture_proforma: 'administration', saisie_pr: 'validation',
-      paiement_client: 'comptabilite', traitement_sgs: 'administration', di: 'administration',
+      paiement_client: 'comptabilite', di: 'administration',
     },
   },
   // Fournisseur & soumission : M. Soudi (et Mme Samira) ; RVC : M. Delba et M. Soudi
@@ -264,7 +263,7 @@ export async function notify(
 /** SLA par défaut d'une sous-étape, en heures (clé « etape.cle »). */
 export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
   'reception.bl': 4, 'reception.facture_proforma': 8, 'reception.saisie_pr': 8, 'reception.paiement_client': 24,
-  'reception.traitement_sgs': 24, 'reception.di': 24,
+  'reception.di': 24,
   'soumission_sgs.ff_soumission': 24, 'soumission_sgs.pvc': 48,
   'codage.etat_codage': 8, 'codage.declaration': 8, 'codage.regulation': 8,
   'validation.validation_docs': 8,

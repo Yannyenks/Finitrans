@@ -52,7 +52,8 @@ describe('Chronométrage et SLA des tâches', () => {
     expectStatus(l, 200)
     assert.equal(l.body.find((x: any) => x.cle === 'codage.declaration').heures, 2.5)
     assert.ok(l.body.some((x: any) => x.label === 'Obtention du RVC'))
-    assert.ok(l.body.some((x: any) => x.label === 'Suivi et traitement SI'))
+    // La sous-étape SGS de la réception a été retirée
+    assert.ok(!l.body.some((x: any) => x.cle === 'reception.traitement_sgs'))
   })
 })
 

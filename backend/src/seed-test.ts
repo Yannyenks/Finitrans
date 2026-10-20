@@ -260,7 +260,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  odette,  odette, dt, { fp_reference: 'INV-CAM-2025-0099', fp_montant: '45000000', fp_fournisseur: 'ALSTOM TRANSPORT SA' }))
     se.push(valide(id, 'reception', 'saisie_pr',         odette,  odette, dt, { pr_numero: 'PR-2025-0087' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,   dt, { montant_paye: '6200000', date_paiement: '2025-07-15', reference_paiement: 'VIR-CAM-2025-0089' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,  d('2025-07-16'), { reference_sgs: 'SGS-DLA-2025-0312', date_soumission: '2025-07-15' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine,d('2025-07-16'), { numero_di: 'DI-2025-1042' }))
 
     // soumission_sgs — validé
@@ -288,7 +287,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-ORA-2025-0211', fp_montant: '82000000', fp_fournisseur: 'ERICSSON CAMEROUN' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0086' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '10500000', date_paiement: '2025-07-13', reference_paiement: 'VIR-ORA-2025-0088' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-15'), { reference_sgs: 'SGS-DLA-2025-0311', date_soumission: '2025-07-14' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-15'), { numero_di: 'DI-2025-1041' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi, soudi, d('2025-07-15'), { reference_ff: 'FF-DLA-2025-0087', date_soumission: '2025-07-14' }))
@@ -316,7 +314,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-MTN-2025-0178', fp_montant: '125000000', fp_fournisseur: 'HUAWEI TECHNOLOGIES' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0090' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '15800000', date_paiement: '2025-07-15', reference_paiement: 'VIR-MTN-2025-0091' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-17'), { reference_sgs: 'SGS-DLA-2025-0315', date_soumission: '2025-07-16' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-17'), { numero_di: 'DI-2025-1039' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi, soudi, d('2025-07-17'), { reference_ff: 'FF-DLA-2025-0091', date_soumission: '2025-07-16' }))
@@ -340,7 +337,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-CIM-2025-0067', fp_montant: '68000000', fp_fournisseur: 'FLSmidth A/S' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0082' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '9200000', date_paiement: '2025-07-09', reference_paiement: 'VIR-CIM-2025-0081' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-11'), { reference_sgs: 'SGS-KRI-2025-0141', date_soumission: '2025-07-10' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-11'), { numero_di: 'DI-2025-1038' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi,  soudi,   d('2025-07-11'), { reference_ff: 'FF-KRI-2025-0081', date_soumission: '2025-07-10' }))
@@ -380,7 +376,6 @@ async function main() {
     se.push(todo(id, 'reception', 'facture_proforma', yasmine, FUTURE_1, 'Attente envoi proforma par le fournisseur Castel Paris'))
     se.push(todo(id, 'reception', 'saisie_pr',        yasmine, FUTURE_2))
     se.push(todo(id, 'reception', 'paiement_client',  yaya))
-    se.push(todo(id, 'reception', 'traitement_sgs',   soudi))
     se.push(todo(id, 'reception', 'di',               yasmine))
   }
 
@@ -393,7 +388,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-ALU-2025-0041', fp_montant: '98000000', fp_fournisseur: 'RIO TINTO ALCAN' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0071' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '12500000', date_paiement: '2025-06-30', reference_paiement: 'VIR-ALU-2025-0071' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-02'), { reference_sgs: 'SGS-KRI-2025-0121', date_soumission: '2025-07-01' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-02'), { numero_di: 'DI-2025-1036' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi,   soudi,   d('2025-07-02'), { reference_ff: 'FF-KRI-2025-0071', date_soumission: '2025-07-01' }))
@@ -428,7 +422,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-SAC-2025-0155', fp_montant: '22000000', fp_fournisseur: 'YARA INTERNATIONAL' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0084' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '3200000', date_paiement: '2025-07-12', reference_paiement: 'VIR-SAC-2025-0083' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-14'), { reference_sgs: 'SGS-KRI-2025-0151', date_soumission: '2025-07-13' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-14'), { numero_di: 'DI-2025-1040' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi,   soudi,   d('2025-07-14'), { reference_ff: 'FF-KRI-2025-0084', date_soumission: '2025-07-13' }))
@@ -460,7 +453,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-FOV-2025-0133', fp_montant: '185000000', fp_fournisseur: 'TOYOTA MOTOR FRANCE' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0080' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '23000000', date_paiement: '2025-07-10', reference_paiement: 'VIR-FOV-2025-0079' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-12'), { reference_sgs: 'SGS-DLA-2025-0308', date_soumission: '2025-07-11' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-12'), { numero_di: 'DI-2025-1034' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi, soudi, d('2025-07-12'), { reference_ff: 'FF-DLA-2025-0080', date_soumission: '2025-07-11' }))
@@ -487,7 +479,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-GUI-2025-0112', fp_montant: '72000000', fp_fournisseur: 'MALTEUROP GROUP' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0077' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '9500000', date_paiement: '2025-07-08', reference_paiement: 'VIR-GUI-2025-0076' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-10'), { reference_sgs: 'SGS-DLA-2025-0305', date_soumission: '2025-07-09' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-10'), { numero_di: 'DI-2025-1033' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi, soudi, d('2025-07-10'), { reference_ff: 'FF-DLA-2025-0077', date_soumission: '2025-07-09' }))
@@ -511,7 +502,6 @@ async function main() {
     se.push(valide(id, 'reception', 'facture_proforma',  yasmine, yasmine, dt, { fp_reference: 'INV-SEM-2025-0144', fp_montant: '42000000', fp_fournisseur: 'KRONES AG' }))
     se.push(valide(id, 'reception', 'saisie_pr',         yasmine, yasmine, dt, { pr_numero: 'PR-2025-0083' }))
     se.push(valide(id, 'reception', 'paiement_client',   yaya,    yaya,    dt, { montant_paye: '7200000', date_paiement: '2025-07-11', reference_paiement: 'VIR-SEM-2025-0081' }))
-    se.push(valide(id, 'reception', 'traitement_sgs',    soudi,   soudi,   d('2025-07-13'), { reference_sgs: 'SGS-DLA-2025-0312', date_soumission: '2025-07-12' }))
     se.push(valide(id, 'reception', 'di',                yasmine, yasmine, d('2025-07-13'), { numero_di: 'DI-2025-1035' }))
 
     se.push(valide(id, 'soumission_sgs', 'ff_soumission', soudi,  soudi,  d('2025-07-13'), { reference_ff: 'FF-DLA-2025-0083', date_soumission: '2025-07-12' }))

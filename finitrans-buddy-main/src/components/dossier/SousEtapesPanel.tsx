@@ -84,14 +84,6 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       reglementClient: true, outputLabel: "Reçu / preuve du règlement",
     },
     {
-      cle: "traitement_sgs", label: "Suivi et traitement SI", description: "Suivi et traitement du dossier dans le système d'information (SI)",
-      fields: [
-        { key: "sgs_reference",  label: "Référence SGS",       type: "text", placeholder: "Ex : SGS-CM-2025-0042" },
-        { key: "sgs_date_soum",  label: "Date de soumission",  type: "date" },
-        { key: "sgs_date_retour",label: "Date de retour prévu",type: "date" },
-      ],
-    },
-    {
       cle: "di", label: "DI", description: "Création et liaison de la Déclaration d'Importation au dossier",
       fields: [
         { key: "di_numero", label: "N° DI", type: "text", placeholder: "Ex : DI-2025-0042" },

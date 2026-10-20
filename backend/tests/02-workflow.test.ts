@@ -231,7 +231,7 @@ describe('Workflow Kribi (MAERSK) et supervision', () => {
     const p = await api('soudi', 'GET', '/api/supervision/pipeline')
     expectStatus(p, 200)
     const row = p.body.dossiers.find((d: any) => d.id === id)
-    assert.ok(row && row.etape.total === 6)
+    assert.ok(row && row.etape.total === 5, 'réception : 5 tâches (sous-étape SGS retirée)')
     const charge = await api('delba', 'GET', '/api/supervision/charge')
     expectStatus(charge, 200)
     assert.ok(charge.body.find((u: any) => u.id === ids.aliou).tachesOuvertes >= 3)
