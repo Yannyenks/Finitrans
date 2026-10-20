@@ -15,6 +15,7 @@ import {
 import { motion, useMotionValue, useTransform, animate as framerAnimate } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Progress } from "@/components/ui/progress";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 /* ─── Animated counter ──────────────────────────────────────── */
 const AnimatedCounter = ({ value, className = "" }: { value: number; className?: string }) => {
@@ -64,9 +65,6 @@ const TiltCard = ({ children, delay = 0, className = "" }: { children: React.Rea
 };
 
 /* ─── Constants ─────────────────────────────────────────────── */
-const COMPAGNIE_COLORS: Record<string, string> = {
-  MSC: "#F07B37", COSCO: "#1A9AD6", MAERSK: "#22c55e", CMA_CGM: "#a855f7",
-};
 
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", codage: "Codage", validation: "Validation",
@@ -83,6 +81,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 /* ─── Component ─────────────────────────────────────────────── */
 const Dashboard = () => {
+  const referentiel = useCompagnies();
   const navigate = useNavigate();
   const user     = getStoredUser();
 
@@ -106,7 +105,7 @@ const Dashboard = () => {
       : { label: "Mes tâches à traiter", value: mesTaches?.resume?.actionnables ?? 0, icon: Banknote, color: "text-warning", bg: "bg-warning/10", gradient: "from-amber-500/10 to-transparent" },
   ];
 
-  const pieData     = (charts?.parCompagnie ?? []).map((c: any) => ({ name: c.compagnie, value: c.count, color: COMPAGNIE_COLORS[c.compagnie] ?? "#6b7280" }));
+  const pieData     = (charts?.parCompagnie ?? []).map((c: any) => ({ name: referentiel.nom(c.compagnie), value: c.count, color: couleurCompagnie(c.compagnie) }));
   const parSite     = charts?.parSite ?? [];
   const douala      = parSite.find((s: any) => s.site === "Douala") ?? { count: 0 };
   const kribi       = parSite.find((s: any) => s.site === "Kribi")  ?? { count: 0 };

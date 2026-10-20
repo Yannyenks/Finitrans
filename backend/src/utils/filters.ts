@@ -1,9 +1,6 @@
-export type CompagnieCode = 'MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM'
-const COMPAGNIES: CompagnieCode[] = ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']
-
-/** « MSC,COSCO » → filtre Prisma `{ in: [...] }` (valeurs inconnues ignorées). */
-export function compagniesIn(value?: string): { in: CompagnieCode[] } | undefined {
+/** « MSC,HAPAG_LLOYD » → filtre Prisma `{ in: [...] }` (liste de compagnies ouverte). */
+export function compagniesIn(value?: string): { in: string[] } | undefined {
   if (!value) return undefined
-  const list = value.split(',').map(v => v.trim()).filter((v): v is CompagnieCode => COMPAGNIES.includes(v as CompagnieCode))
+  const list = value.split(',').map(v => v.trim()).filter(v => v.length >= 2 && v.length <= 80)
   return list.length ? { in: list } : undefined
 }

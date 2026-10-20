@@ -218,3 +218,27 @@ describe('Notifications pour chaque action et visibilité des sorties', () => {
     assert.equal(notif.actionUrl, `/crm/${c.body.id}`)
   })
 })
+
+describe('Compagnies maritimes : liste ouverte', () => {
+  it('la Direction ajoute une compagnie ; un dossier peut l\'utiliser et ses tâches « Bon compagnie » sont attribuées', async () => {
+    expectStatus(await api('yasmine', 'POST', '/api/compagnies', { nom: 'Hapag-Lloyd' }), 403)
+    const a = await api('soudi', 'POST', '/api/compagnies', { nom: 'Hapag-Lloyd' })
+    expectStatus(a, [201, 409])
+    const liste = await api('yasmine', 'GET', '/api/compagnies')
+    assert.ok(liste.body.some((c: any) => c.code === 'HAPAG_LLOYD' && c.nom === 'Hapag-Lloyd' && c.actif))
+
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT HAPAG'), compagnie: 'HAPAG_LLOYD', conteneur: 'HLXU1234567', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(d, 201)
+    assert.equal(d.body.compagnie, 'HAPAG_LLOYD')
+    const t = await api('delba', 'GET', `/api/dossiers/${d.body.id}/sous-etapes`)
+    const bc = t.body.find((x: any) => x.cle === 'facturation_compagnie')
+    assert.ok(['wandala', 'rasoul'].includes(nom(bc.responsableId)), 'attribuée à un responsable des sorties')
+
+    const inconnue = await api('yasmine', 'POST', '/api/dossiers', {
+      client: 'X', compagnie: 'COMPAGNIE FANTOME', conteneur: 'XXXU0000000', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(inconnue, [400, 422])
+  })
+})

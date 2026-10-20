@@ -45,7 +45,7 @@ export interface DICreateInput {
   client:          string;
   montant:         number;
   devise?:         string;
-  compagnie?:      "MSC" | "COSCO" | "MAERSK" | "CMA_CGM";
+  compagnie?:      string;
   dateEmission:    string;
   dateExpiration?: string;
   seuilAlerte1?:   number;

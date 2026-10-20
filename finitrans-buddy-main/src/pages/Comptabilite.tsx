@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 const annee = new Date().getFullYear();
 const debutMois = new Date(annee, new Date().getMonth(), 1);
@@ -78,6 +79,7 @@ const Fiscal = () => {
 };
 
 const Comptabilite = () => {
+  const referentiel = useCompagnies();
   const navigate = useNavigate();
   const { user, hasModule } = useAuth();
   const avancee = hasModule("comptabilite_avancee");
@@ -108,8 +110,8 @@ const Comptabilite = () => {
     ...factures.map(f => ({ id: `f-${f.id}`, date: f.dateFacture, ref: f.numero, libelle: `Facture ${f.dossier?.client ?? ""} — ${f.dossier?.numero ?? ""}`, nature: "Facture client", montant: Number(f.montant), statut: f.type })),
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [douaneList, cieList, virtsList, factures]);
 
-  const chartData = ["MSC", "COSCO", "MAERSK", "CMA_CGM"].map(c => ({
-    name: c.replace("_", "-"),
+  const chartData = [...new Set([...referentiel.actives.map(c => c.code), ...cieList.map((p: any) => p.compagnie).filter(Boolean)])].map(c => ({
+    name: referentiel.nom(c),
     cie: somme(cieList, p => p.compagnie === c),
   }));
   const pieData = [

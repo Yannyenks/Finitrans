@@ -356,7 +356,7 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
     // Agents terrain : uniquement leurs compagnies (MSC/COSCO ou MAERSK/CMA)
     const u = request.user
     const scope = u.profil === 'terrain_kribi' && u.compagniesAssignees.length > 0 && u.compagniesAssignees.length < 4
-      ? { compagnie: { in: u.compagniesAssignees as ('MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM')[] } }
+      ? { compagnie: { in: u.compagniesAssignees } }
       : {}
     const [dossiersKribi, bonsJour, gatePassJour, interchangesRetard, compteRenduHier] = await Promise.all([
       prisma.dossier.findMany({

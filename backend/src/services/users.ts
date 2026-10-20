@@ -5,10 +5,11 @@ import { prisma } from '../config/prisma'
 import { ALL_PROFILS, getRoleTemplate, getRoleTemplates, isSupervisor } from '../config/roles'
 import { AuthUser } from '../types'
 import { AppError, ConflictError, ForbiddenError } from '../utils/errors'
+import { loadCompagnies, zCompagnie } from './compagnies'
 
 export const permissionEnum = z.enum(['complet', 'partiel', 'lecture', 'non'])
 export const profilEnum = z.enum(ALL_PROFILS as [Profil, ...Profil[]])
-export const compagnieEnum = z.enum(['MSC', 'COSCO', 'MAERSK', 'CMA_CGM'])
+export const compagnieEnum = zCompagnie
 
 export const permissionsSchema = z.object({
   permDossier:        permissionEnum.optional(),
@@ -58,7 +59,7 @@ export async function createUser(actor: AuthUser, input: z.infer<typeof createUs
       site: input.site,
       telephone: input.telephone,
       profil: input.profil,
-      compagniesAssignees: input.compagniesAssignees ?? ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM'],
+      compagniesAssignees: input.compagniesAssignees ?? (await loadCompagnies()).filter(c => c.actif).map(c => c.code),
       permDossier:        input.permDossier        ?? template.permissions.permDossier,
       permValidation:     input.permValidation     ?? template.permissions.permValidation,
       permFinancier:      input.permFinancier      ?? template.permissions.permFinancier,

@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, uploadFile } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
 import { useDICreate, useDIUpdate, useDI, DIEnriched } from "@/hooks/useDI";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 interface Props {
   open:    boolean;
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export default function DICreateEditDialog({ open, onClose, di }: Props) {
+  const { actives: compagnies } = useCompagnies();
   const isEdit = !!di;
   const qc     = useQueryClient();
 
@@ -304,10 +306,7 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
                 <Select value={form.compagnie} onValueChange={v => setForm({ ...form, compagnie: v })}>
                   <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Optionnel" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="MSC">MSC</SelectItem>
-                    <SelectItem value="COSCO">COSCO</SelectItem>
-                    <SelectItem value="MAERSK">MAERSK</SelectItem>
-                    <SelectItem value="CMA_CGM">CMA-CGM</SelectItem>
+                    {compagnies.map(c => <SelectItem key={c.code} value={c.code}>{c.nom}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>

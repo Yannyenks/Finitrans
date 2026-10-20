@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import NouveauDossierDialog from "@/components/NouveauDossierDialog";
 import KanbanView from "@/components/KanbanView";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -33,6 +34,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const Dossiers = () => {
+  const { liste: compagnies } = useCompagnies();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [search, setSearch]               = useState(() => searchParams.get("search") ?? "");
@@ -101,10 +103,7 @@ const Dossiers = () => {
           </select>
           <select value={filterCompagnie} onChange={(e) => { setFilterCompagnie(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-border bg-card text-xs text-foreground">
             <option value="all">Toutes compagnies</option>
-            <option value="MSC">MSC</option>
-            <option value="COSCO">COSCO</option>
-            <option value="MAERSK">MAERSK</option>
-            <option value="CMA_CGM">CMA-CGM</option>
+            {compagnies.map(c => <option key={c.code} value={c.code}>{c.nom}</option>)}
           </select>
           <select value={filterSite} onChange={(e) => { setFilterSite(e.target.value); setPage(1); }} className="h-9 px-3 rounded-lg border border-border bg-card text-xs text-foreground">
             <option value="all">Tous sites</option>

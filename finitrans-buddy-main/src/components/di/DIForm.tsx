@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useDI, useDICreate, DICreateInput } from "@/hooks/useDI";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 // ── Schémas de validation ─────────────────────────────────────────────────────
 
@@ -84,6 +85,7 @@ export default function DIForm({
 // ── Création ──────────────────────────────────────────────────────────────────
 
 function CreateForm({ onSuccess, onCancel }: Pick<DIFormProps, "onSuccess" | "onCancel">) {
+  const { actives: compagnies } = useCompagnies();
   const create = useDICreate();
   const [errors, setErrors] = useState<CreateErrors>({});
   const [form, setForm] = useState({
@@ -175,10 +177,7 @@ function CreateForm({ onSuccess, onCancel }: Pick<DIFormProps, "onSuccess" | "on
         <Select value={form.compagnie} onValueChange={v => set("compagnie", v)}>
           <SelectTrigger className="h-9 text-sm bg-muted/40"><SelectValue placeholder="Optionnel" /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="MSC">MSC</SelectItem>
-            <SelectItem value="COSCO">COSCO</SelectItem>
-            <SelectItem value="MAERSK">MAERSK</SelectItem>
-            <SelectItem value="CMA_CGM">CMA CGM</SelectItem>
+            {compagnies.map(c => <SelectItem key={c.code} value={c.code}>{c.nom}</SelectItem>)}
           </SelectContent>
         </Select>
       </Field>

@@ -13,8 +13,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { api, refreshSessionUser } from "@/lib/api";
 import { PROFIL_LABELS, useAuth } from "@/lib/permissions";
 import { toast } from "@/hooks/use-toast";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
-const COMPAGNIES = ["MSC", "COSCO", "MAERSK", "CMA_CGM"];
 const PERMS: [string, string][] = [
   ["permDossier", "Dossiers"], ["permValidation", "Validation"], ["permFinancier", "Finance"],
   ["permRapports", "Rapports"], ["permAdministration", "Administration"],
@@ -27,20 +27,23 @@ function profilsAttribuables(roles: any[], estDG: boolean) {
   return roles.filter(r => estDG || r.profil !== "dg");
 }
 
-const CompagniesPicker = ({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) => (
-  <div className="flex flex-wrap gap-3">
-    {COMPAGNIES.map(c => (
-      <label key={c} className="flex items-center gap-1.5 text-xs cursor-pointer">
-        <Checkbox checked={value.includes(c)} onCheckedChange={v => onChange(v ? [...value, c] : value.filter(x => x !== c))} />
-        {c.replace("_", "-")}
-      </label>
-    ))}
-  </div>
-);
+const CompagniesPicker = ({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) => {
+  const { actives } = useCompagnies();
+  return (
+    <div className="flex flex-wrap gap-3">
+      {actives.map(c => (
+        <label key={c.code} className="flex items-center gap-1.5 text-xs cursor-pointer">
+          <Checkbox checked={value.includes(c.code)} onCheckedChange={v => onChange(v ? [...value, c.code] : value.filter(x => x !== c.code))} />
+          {c.nom}
+        </label>
+      ))}
+    </div>
+  );
+};
 
 const NouveauCompte = ({ roles, estDG, onClose }: { roles: any[]; estDG: boolean; onClose: () => void }) => {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ nom: "", email: "", password: "", site: "Douala", profil: "operations", telephone: "", compagnies: [...COMPAGNIES] });
+  const [form, setForm] = useState({ nom: "", email: "", password: "", site: "Douala", profil: "operations", telephone: "", compagnies: ["MSC", "COSCO", "MAERSK", "CMA_CGM"] });
   const role = roles.find(r => r.profil === form.profil);
   const creer = useMutation({
     mutationFn: () => api.post("/api/employes", {

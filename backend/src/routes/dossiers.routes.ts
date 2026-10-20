@@ -17,10 +17,11 @@ import {
   nextStage, notifierDirection, notifierTitulaires, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
 } from '../services/workflow'
 import { rattacherClient } from '../services/crm'
+import { compagnieConnue, zCompagnie } from '../services/compagnies'
 
 const createDossierSchema = z.object({
   client:            z.string().min(2),
-  compagnie:         z.enum(['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']),
+  compagnie:         zCompagnie,
   conteneur:         z.string().min(3),
   marchandise:       z.string().min(2),
   site:              z.enum(['Douala', 'Kribi']),
@@ -92,7 +93,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
     if (q.site && ['Douala', 'Kribi'].includes(q.site)) and.push({ site: q.site as 'Douala' | 'Kribi' })
     if (q.compagnie) {
-      const compagnies = q.compagnie.split(',').filter((c): c is 'MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM' => ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM'].includes(c))
+      const compagnies = q.compagnie.split(',').map(c => c.trim()).filter(c => c.length >= 2)
       if (compagnies.length) and.push({ compagnie: { in: compagnies } })
     }
     if (q.priorite && ['haute', 'moyenne', 'basse'].includes(q.priorite)) and.push({ priorite: q.priorite as 'haute' | 'moyenne' | 'basse' })
@@ -134,6 +135,9 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // POST /api/dossiers — enregistrement + attribution automatique des tâches
   fastify.post('/', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const body = createDossierSchema.parse(request.body)
+    if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
+      return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
+    }
     const user = request.user
 
     let responsableId = body.responsableId
@@ -367,6 +371,9 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.patch('/:id', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
     const body    = updateDossierSchema.parse(request.body)
+    if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
+      return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
+    }
     const user    = request.user
 
     const existing = await prisma.dossier.findUnique({ where: { id } })

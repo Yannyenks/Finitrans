@@ -139,6 +139,8 @@ export const EVENEMENTS: Record<string, Evenement> = {
   'PATCH /api/alertes/config/:id': { libelle: 'Seuil d\'alerte modifié' },
   'POST /api/alertes': { libelle: 'Alerte créée' },
   'PUT /api/admin/entreprise': { libelle: 'Informations de l\'entreprise modifiées' },
+  'POST /api/compagnies': { libelle: 'Compagnie maritime ajoutée' },
+  'PATCH /api/compagnies/:code': { libelle: 'Compagnie maritime modifiée' },
 }
 
 const objet = (v: unknown): Record<string, unknown> => (v && typeof v === 'object' ? v as Record<string, unknown> : {})
@@ -205,7 +207,7 @@ function pageDe(route: string, payload: Record<string, unknown>, params: Record<
     ['/api/logistique', '/logistique'], ['/api/vehicules', '/logistique'], ['/api/detentions', '/sorties'],
     ['/api/interchanges', '/sorties'], ['/api/sgs', '/dossiers'], ['/api/rh', '/employes'], ['/api/employes', '/employes'],
     ['/api/roles', '/employes'], ['/api/parametres', '/parametres'], ['/api/alertes', '/alertes'], ['/api/admin', '/administration'],
-    ['/api/supervision', '/supervision'],
+    ['/api/supervision', '/supervision'], ['/api/compagnies', '/parametres'],
   ]
   return pages.find(([p]) => route.startsWith(p))?.[1] ?? null
 }

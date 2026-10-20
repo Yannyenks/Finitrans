@@ -8,6 +8,7 @@ import { NotFoundError } from '../utils/errors'
 import { compagniesIn } from '../utils/filters'
 import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
+import { zCompagnie } from '../services/compagnies'
 
 const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess  = [authenticate, authorize('permFinancier', 'lecture')]
@@ -107,7 +108,7 @@ const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.post('/paiements-compagnie', { preHandler: writeAccess }, async (request, reply) => {
     const body = z.object({
       dossierId:    z.string().uuid(),
-      compagnie:    z.enum(['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']),
+      compagnie:    zCompagnie,
       type:         z.enum(['surestaries', 'frais_portuaires', 'manutention', 'terminal']),
       montant:      z.number().positive(),
       datePaiement: z.string().datetime(),

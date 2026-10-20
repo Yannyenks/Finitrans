@@ -12,6 +12,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { Progress } from "@/components/ui/progress";
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 const paiementDouaneLabel: Record<string, string> = { droits: "Droits", taxes: "Taxes", redevances: "Redevances", penalite: "Pénalité" };
 const paiementCompagnieLabel: Record<string, string> = { surestaries: "Surestaries", frais_portuaires: "Frais portuaires", manutention: "Manutention", terminal: "Terminal" };
@@ -25,6 +26,7 @@ const TYPE_FACTURE: Record<string, { label: string; cls: string }> = {
 };
 
 const Finance = () => {
+  const referentiel = useCompagnies();
   const qc = useQueryClient();
   const { can } = useAuth();
   const peutAgir = can("permFinancier", "partiel");
@@ -85,9 +87,9 @@ const Finance = () => {
   const cieAttente     = cieList.filter((p: any) => p.statut !== "paye").reduce((s: number, p: any) => s + Number(p.montant), 0);
 
   // Chart par compagnie
-  const compagnies = ["MSC", "COSCO", "MAERSK", "CMA_CGM"];
+  const compagnies = [...new Set([...referentiel.actives.map(c => c.code), ...cieList.map((p: any) => p.compagnie).filter(Boolean)])];
   const compagnieData = compagnies.map(c => ({
-    compagnie: c.replace("_", "-"),
+    compagnie: referentiel.nom(c),
     douane:       douaneList.filter((p: any) => p.dossier?.compagnie === c || p.compagnie === c).reduce((s: number, p: any) => s + Number(p.montant), 0),
     compagnieFrais: cieList.filter((p: any) => p.compagnie === c).reduce((s: number, p: any) => s + Number(p.montant), 0),
   }));

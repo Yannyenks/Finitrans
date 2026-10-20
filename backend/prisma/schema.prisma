@@ -77,7 +77,7 @@ model Dossier {
   clientId           String?                 @map("client_id") @db.Uuid
   clientCrm          Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
   reglementsClient   ReglementClient[]
-  compagnie          Compagnie
+  compagnie          String @db.VarChar(80)
   conteneur          String                  @db.VarChar(100)
   marchandise        String
   site               Site
@@ -414,7 +414,7 @@ model PaiementDouane {
 model PaiementCompagnie {
   id           String                @id @default(uuid()) @db.Uuid
   dossierId    String                @map("dossier_id") @db.Uuid
-  compagnie    Compagnie
+  compagnie    String @db.VarChar(80)
   type         TypePaiementCompagnie
   montant      Decimal               @db.Decimal(15, 2)
   datePaiement DateTime              @map("date_paiement")
@@ -465,7 +465,7 @@ model DeclarationImportation {
   notes          String?
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
-  compagnie      Compagnie?
+  compagnie      String? @db.VarChar(80)
   seuilAlerte1   Int           @default(20) @map("seuil_alerte_1")
   seuilAlerte2   Int           @default(10) @map("seuil_alerte_2")
   gestionnaire   User          @relation("GestionnaireDI", fields: [gestionnaireId], references: [id])
@@ -498,7 +498,7 @@ model Detention {
   id              String          @id @default(uuid()) @db.Uuid
   dossierId       String          @map("dossier_id") @db.Uuid
   conteneur       String          @db.VarChar(100)
-  compagnie       Compagnie
+  compagnie       String @db.VarChar(80)
   dateDebut       DateTime        @map("date_debut")
   dateFin         DateTime?       @map("date_fin")
   joursDetention  Int             @default(0) @map("jours_detention")
@@ -564,7 +564,7 @@ model Interchange {
   id            String            @id @default(uuid()) @db.Uuid
   dossierId     String            @map("dossier_id") @db.Uuid
   conteneur     String            @db.VarChar(100)
-  compagnie     Compagnie
+  compagnie     String @db.VarChar(80)
   dateEmission  DateTime          @default(now()) @map("date_emission")
   dateRetour    DateTime?         @map("date_retour")
   dateLimite    DateTime          @map("date_limite")
@@ -666,14 +666,6 @@ enum Site {
   @@map("site_enum")
 }
 
-enum Compagnie {
-  MSC
-  COSCO
-  MAERSK
-  CMA_CGM
-
-  @@map("compagnie_enum")
-}
 
 enum Profil {
   dg

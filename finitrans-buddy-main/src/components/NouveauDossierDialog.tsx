@@ -10,10 +10,7 @@ import { toast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getStoredUser } from "@/lib/api";
 import { can } from "@/lib/permissions";
-
-const COMPAGNIE_MAP: Record<string, string> = {
-  MSC: "MSC", COSCO: "COSCO", MAERSK: "MAERSK", CMA_CGM: "CMA-CGM",
-};
+import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
 // Taux de change vers XAF (approximatifs — à ajuster selon cours du jour)
 const TAUX_CHANGE: Record<string, number> = {
@@ -31,6 +28,7 @@ const FOURNISSEURS_FREQUENTS = [
 ];
 
 const NouveauDossierDialog = () => {
+  const { actives: compagnies } = useCompagnies();
   const qc = useQueryClient();
   const user = getStoredUser();
   const [open, setOpen] = useState(false);
@@ -143,9 +141,7 @@ const NouveauDossierDialog = () => {
               <Select value={form.compagnie} onValueChange={v => setForm({...form, compagnie: v})}>
                 <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Choisir..." /></SelectTrigger>
                 <SelectContent>
-                  {Object.entries(COMPAGNIE_MAP).map(([val, label]) => (
-                    <SelectItem key={val} value={val}>{label}</SelectItem>
-                  ))}
+                  {compagnies.map(c => <SelectItem key={c.code} value={c.code}>{c.nom}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>

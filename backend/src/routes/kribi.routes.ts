@@ -9,16 +9,11 @@ import { buildPagination, paginate } from '../utils/pagination'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { logAudit } from '../utils/audit'
 
-type Compagnie = 'MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM'
-const COMPAGNIES: Compagnie[] = ['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']
-
 /** Périmètre compagnies : filtre demandé, sinon compagnies assignées d'un agent terrain. */
-function perimetreCompagnies(user: AuthUser, demande?: string): Compagnie[] | null {
-  const voulues = demande?.split(',').map(c => c.trim()).filter((c): c is Compagnie => COMPAGNIES.includes(c as Compagnie))
+function perimetreCompagnies(user: AuthUser, demande?: string): string[] | null {
+  const voulues = demande?.split(',').map(c => c.trim()).filter(c => c.length >= 2)
   if (voulues?.length) return voulues
-  if (user.profil === 'terrain_kribi' && user.compagniesAssignees.length > 0 && user.compagniesAssignees.length < 4) {
-    return user.compagniesAssignees as Compagnie[]
-  }
+  if (user.profil === 'terrain_kribi' && user.compagniesAssignees.length > 0) return user.compagniesAssignees
   return null
 }
 

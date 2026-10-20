@@ -9,6 +9,7 @@ import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { logActivity } from '../utils/audit'
 import { createHash } from 'crypto'
 import { differenceInDays, subDays, format, eachDayOfInterval } from 'date-fns'
+import { zCompagnie } from '../services/compagnies'
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -491,7 +492,7 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       client:         z.string().min(2),
       montant:        z.number().positive(),
       devise:         z.string().default('XAF'),
-      compagnie:      z.enum(['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']).optional(),
+      compagnie:      zCompagnie.optional(),
       dateEmission:   z.string().datetime(),
       dateExpiration: z.string().datetime().optional(),
       seuilAlerte1:   z.number().min(1).max(100).default(20),

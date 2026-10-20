@@ -7,6 +7,7 @@ import { buildPagination, paginate } from '../utils/pagination'
 import { NotFoundError } from '../utils/errors'
 import { compagniesIn } from '../utils/filters'
 import { differenceInDays } from 'date-fns'
+import { zCompagnie } from '../services/compagnies'
 
 const detentionsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   const readAccess  = [authenticate, authorize('permFinancier', 'lecture')]
@@ -112,7 +113,7 @@ const detentionsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     const body = z.object({
       dossierId:       z.string().uuid(),
       conteneur:       z.string().min(3),
-      compagnie:       z.enum(['MSC', 'COSCO', 'MAERSK', 'CMA_CGM']),
+      compagnie:       zCompagnie,
       dateDebut:       z.string().datetime(),
       tarifJournalier: z.number().positive(),
       notes:           z.string().optional(),

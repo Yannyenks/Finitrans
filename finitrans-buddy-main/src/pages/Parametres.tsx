@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
-import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2 } from "lucide-react";
+import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship } from "lucide-react";
+import CompagniesMaritimes from "@/components/CompagniesMaritimes";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -111,6 +112,7 @@ const Parametres = () => {
         <TabsList className="mb-6 flex-wrap gap-1">
           <TabsTrigger value="alertes"  className="gap-1.5"><Bell   className="w-3.5 h-3.5" /> Alertes</TabsTrigger>
           <TabsTrigger value="sla"      className="gap-1.5"><Timer  className="w-3.5 h-3.5" /> SLA &amp; Délais</TabsTrigger>
+          <TabsTrigger value="compagnies" className="gap-1.5"><Ship className="w-3.5 h-3.5" /> Compagnies maritimes</TabsTrigger>
           <TabsTrigger value="liens"    className="gap-1.5"><Link2  className="w-3.5 h-3.5" /> Liens &amp; portails</TabsTrigger>
           <TabsTrigger value="securite" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Sécurité</TabsTrigger>
           <TabsTrigger value="general"  className="gap-1.5"><Globe  className="w-3.5 h-3.5" /> Général</TabsTrigger>
@@ -250,6 +252,10 @@ const Parametres = () => {
               </ul>
             </div>
           </motion.div>
+        </TabsContent>
+
+        <TabsContent value="compagnies">
+          <CompagniesMaritimes />
         </TabsContent>
 
         <TabsContent value="liens">

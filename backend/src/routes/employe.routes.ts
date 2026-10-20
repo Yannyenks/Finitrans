@@ -106,7 +106,7 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         statut: { not: 'valide' },
         OR: cles.map(c => ({ etape: c.etape, cle: c.cle })),
         ...(['gestion_sorties', 'terrain_kribi'].includes(user.profil) && user.compagniesAssignees.length > 0
-          ? { dossier: { compagnie: { in: user.compagniesAssignees as ('MSC' | 'COSCO' | 'MAERSK' | 'CMA_CGM')[] } } }
+          ? { dossier: { compagnie: { in: user.compagniesAssignees } } }
           : {}),
       },
       include: { dossier: { select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true } } },
