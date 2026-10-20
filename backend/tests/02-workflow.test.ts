@@ -260,9 +260,12 @@ describe('Workflow Kribi (MAERSK) et supervision', () => {
     expectStatus(await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/reception/saisie_pr`, { statut: 'valide' }), 200)
   })
 
-  it('cloisonnement par compagnie : Mr Wandala ne voit pas les dossiers MAERSK', async () => {
+  it('gestion des sorties : Mr Wandala suit aussi les dossiers MAERSK, mais ne peut pas les faire avancer', async () => {
     const w = await api('wandala', 'GET', '/api/dossiers?limit=100')
-    assert.ok(!w.body.data.some((d: any) => d.id === dossierId))
+    assert.ok(w.body.data.some((d: any) => d.id === dossierId), 'visible par toute la gestion des sorties')
+    const d = (await api('delba', 'GET', `/api/dossiers/${dossierId}`)).body
+    const suivante = (await api('delba', 'GET', `/api/dossiers/${dossierId}/next-step`)).body.etapeSuivante
+    if (suivante && d.responsableId !== ids.wandala) await advance('wandala', dossierId, suivante, 403)
     const ra = await api('rasoul', 'GET', '/api/dossiers?limit=100')
     assert.ok(ra.body.data.some((d: any) => d.id === dossierId))
     const h = await api('honore', 'GET', '/api/dossiers?limit=100')

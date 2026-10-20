@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import {
   Bell, AlertTriangle, DollarSign, Clock, FileWarning, Users, Check, TrendingDown,
-  ArrowRightCircle, UserPlus, MessageSquare, CheckCheck, BellRing, X,
+  ArrowRightCircle, UserPlus, MessageSquare, CheckCheck, BellRing, X, Activity,
 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -37,6 +37,9 @@ function styleDe(n: Notif): { icon: any; couleur: string; fond: string; son: Sou
     return { icon: UserPlus, couleur: "text-secondary", fond: "bg-secondary", son: "assign", libelle: "Nouvelle assignation" };
   if (n.type === "message")
     return { icon: MessageSquare, couleur: "text-blue-600", fond: "bg-blue-600", son: "info", libelle: "Message" };
+  // Action posée par un collègue sur un dossier ou dans un module
+  if (n.type === "dossier" && !t.includes("passé à l'étape"))
+    return { icon: Activity, couleur: "text-accent", fond: "bg-accent", son: "info", libelle: "Nouvelle action" };
   if (t.includes("prête") || t.includes("clôtur"))
     return { icon: CheckCheck, couleur: "text-success", fond: "bg-success", son: "success", libelle: "Étape prête" };
   return { icon: ArrowRightCircle, couleur: "text-primary", fond: "bg-primary", son: "success", libelle: "Évolution du dossier" };
@@ -97,7 +100,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
       premierPassage.current = false;
       liste.forEach(n => vues.add(n.id));
       memoriserVues(userId, vues);
-      liste.filter(n => !n.lu && Date.now() - new Date(n.createdAt).getTime() < 15 * 60_000).slice(0, 3).reverse().forEach(n => afficher(n));
+      liste.filter(n => !n.lu && Date.now() - new Date(n.createdAt).getTime() < 15 * 60_000).slice(0, 3).reverse().forEach((n, i) => afficher(n, i === 0));
       return;
     }
     premierPassage.current = false;
@@ -105,8 +108,8 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
     if (nouvelles.length === 0) return;
     nouvelles.forEach(n => vues.add(n.id));
     memoriserVues(userId, vues);
-    nouvelles.slice(0, 4).reverse().forEach(n => afficher(n));
-    if (nouvelles.length > 4) toast(`${nouvelles.length - 4} autre(s) notification(s)`, { description: "Ouvrez la cloche pour tout voir." });
+    nouvelles.slice(0, 6).reverse().forEach((n, i) => afficher(n, i === 0));
+    if (nouvelles.length > 6) toast(`${nouvelles.length - 6} autre(s) notification(s)`, { description: "Ouvrez la cloche pour tout voir." });
     // Quelqu'un a fait avancer un dossier : toutes les données affichées sont rechargées
     qc.invalidateQueries({ predicate: q => q.queryKey[0] !== "mes-notifications" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -118,9 +121,10 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
     document.title = n > 0 ? `(${n}) ${TITRE_PAGE}` : TITRE_PAGE;
   }, [query.data?.nonLues]);
 
-  function afficher(n: Notif) {
+  function afficher(n: Notif, avecSon = true) {
     const st = styleDe(n);
-    playSound(st.son);
+    // Un seul son par arrivée de notifications (évite la cacophonie quand plusieurs arrivent ensemble)
+    if (avecSon) playSound(st.son);
     const Icon = st.icon;
     toast.custom(id => (
       <div className="w-[380px] max-w-[calc(100vw-32px)] rounded-2xl border border-border bg-card shadow-2xl overflow-hidden" role="alert">
@@ -151,7 +155,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
           </button>
         </div>
       </div>
-    ), { duration: n.echeance ? 20_000 : 12_000, position: "top-right" });
+    ), { duration: n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000, position: "top-right" });
 
     // Onglet en arrière-plan : notification du système
     if (document.hidden && "Notification" in window && Notification.permission === "granted") {

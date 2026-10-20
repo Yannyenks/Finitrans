@@ -17,7 +17,8 @@ import { AuthUser } from '../types'
 
 export const CATEGORIES = ['preuve', 'compte_rendu', 'contrat', 'procedure', 'modele', 'rh', 'juridique', 'administratif', 'finance', 'autre'] as const
 const FORMATS = ['pdf', 'image', 'tableur', 'texte', 'autre'] as const
-const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration']
+// Gestion des sorties : suit tous les dossiers, quelle que soit la compagnie (les tâches restent attribuées par compagnie)
+const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration', 'gestion_sorties']
 
 const formatWhere: Record<(typeof FORMATS)[number], Prisma.DocumentWhereInput> = {
   pdf:     { type: { contains: 'pdf', mode: 'insensitive' } },

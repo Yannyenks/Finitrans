@@ -185,3 +185,36 @@ describe('CRM', () => {
     assert.ok(fiche.body.dossiers.some((d: any) => d.id === dossierId))
   })
 })
+
+describe('Notifications pour chaque action et visibilité des sorties', () => {
+  it('Mr Wandala (MSC/COSCO) voit aussi un dossier CMA CGM, sans en être titulaire', async () => {
+    const r = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT CMA'), compagnie: 'CMA_CGM', conteneur: 'CMAU1234567', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(r, 201)
+    const l = await api('wandala', 'GET', `/api/dossiers?limit=100&search=${encodeURIComponent(r.body.numero)}`)
+    assert.ok(l.body.data.some((d: any) => d.id === r.body.id))
+    // Les tâches « Bon compagnie » restent à Mr Rasoul (MAERSK/CMA)
+    const t = await api('delba', 'GET', `/api/dossiers/${r.body.id}/sous-etapes`)
+    assert.equal(nom(t.body.find((x: any) => x.cle === 'facturation_compagnie').responsableId), 'rasoul')
+  })
+
+  it('une action sur un dossier est notifiée aux intervenants et à la Direction, pas à son auteur', async () => {
+    expectStatus(await api('yasmine', 'POST', `/api/dossiers/${dossierId}/commentaires`, { message: 'Point sur le dossier' }), 201)
+    const pour = async (u: UserKey) => (await api(u, 'GET', '/api/notifications?limit=10')).body.data
+      .some((n: any) => n.dossierId === dossierId && n.titre.endsWith('· Nouveau commentaire'))
+    assert.ok(await pour('delba'), 'DG notifié')
+    assert.ok(await pour('soudi'), 'Exploitation notifiée')
+    assert.ok(await pour('wandala'), 'titulaire d\'une étape suivante notifié')
+    assert.ok(!(await pour('yasmine')), 'l\'auteur n\'est pas notifié')
+  })
+
+  it('une action hors dossier est notifiée à la Direction', async () => {
+    const c = await api('honore', 'POST', '/api/crm/clients', { nom: unique('CLIENT NOTIF') })
+    expectStatus(c, 201)
+    const n = await api('delba', 'GET', '/api/notifications?limit=10')
+    const notif = n.body.data.find((x: any) => x.titre === 'Client créé' && x.message.includes(c.body.nom))
+    assert.ok(notif)
+    assert.equal(notif.actionUrl, `/crm/${c.body.id}`)
+  })
+})

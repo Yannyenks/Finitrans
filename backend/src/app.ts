@@ -10,6 +10,7 @@ import path from 'path'
 import { env } from './config/env'
 import { authenticate } from './middleware/authenticate'
 import { AppError } from './utils/errors'
+import { crochetNotifications, ouvrirContexteNotifications } from './services/evenements'
 
 import authRoutes          from './routes/auth.routes'
 import dossiersRoutes      from './routes/dossiers.routes'
@@ -131,6 +132,10 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
   }
 
   // ─── Routes API ───────────────────────────────────────────
+
+  // Chaque action réussie est notifiée aux personnes concernées (voir services/evenements.ts)
+  fastify.addHook('onRequest', ouvrirContexteNotifications)
+  fastify.addHook('onSend', crochetNotifications)
 
   fastify.register(authRoutes,          { prefix: '/api/auth' })
   fastify.register(dossiersRoutes,      { prefix: '/api/dossiers' })

@@ -60,7 +60,8 @@ const listQuerySchema = z.object({
 const commentSchema = z.object({ message: z.string().min(1) })
 
 /** Profils qui voient l'ensemble des dossiers (enregistrement, finance) en plus des superviseurs. */
-const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration']
+// Gestion des sorties : suit tous les dossiers, quelle que soit la compagnie (les tâches restent attribuées par compagnie)
+const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration', 'gestion_sorties']
 
 /** Le compte est-il impliqué dans le dossier (responsable ou titulaire d'une sous-étape) ? */
 async function isInvolved(actor: AuthUser, dossier: { id: string; responsableId: string }, etape?: DossierStatus) {
@@ -168,13 +169,13 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     await initSousEtapes(dossier.id)
     await demarrerEtape(dossier.id, 'reception')
     await rattacherClient(dossier.id, dossier.client, user.id)
-    await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
 
     // Chaque titulaire est prévenu avec l'échéance de sa tâche : le compte à rebours démarre aussitôt
     await notifierTitulaires(dossier.id, 'reception', {
       titre: 'Nouveau dossier à traiter',
       message: `${dossier.numero} — ${dossier.client} : des tâches de réception vous sont attribuées`,
     }, { sauf: user.id, aussi: [responsableId] })
+    await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
 
     return reply.code(201).send(dossier)
   })
@@ -319,8 +320,6 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       orderBy: { deadline: 'asc' }, select: { deadline: true },
     })
 
-    await logAudit(dossier.id, actor.id, 'AFFECTATION_ETAPE', `Étape « ${STATUS_LABELS[params.etape]} » confiée à ${cible.nom} (${count} tâche(s))`,
-      { etape: params.etape, responsableId: cible.id })
     if (cible.id !== actor.id) {
       await notify([cible.id], {
         type: 'action_requise',
@@ -331,6 +330,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         echeance: params.etape === dossier.status ? prochaine?.deadline ?? null : null,
       })
     }
+    await logAudit(dossier.id, actor.id, 'AFFECTATION_ETAPE', `Étape « ${STATUS_LABELS[params.etape]} » confiée à ${cible.nom} (${count} tâche(s))`,
+      { etape: params.etape, responsableId: cible.id })
     return reply.send({ ...affectation, tachesAttribuees: count })
   })
 
@@ -488,6 +489,16 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         data: { responsableId: uid },
       })
     }
+    // Retour à une étape antérieure : les tâches non terminées des étapes suivantes repartent de zéro
+    // (leur compte à rebours redémarrera quand le dossier y reviendra)
+    const parcoursDossier = stagesForSite(dossier.site)
+    const retour = parcoursDossier.indexOf(body.status) < parcoursDossier.indexOf(dossier.status)
+    if (retour) {
+      await prisma.sousEtapeDossier.updateMany({
+        where: { dossierId: id, etape: { in: parcoursDossier.slice(parcoursDossier.indexOf(body.status) + 1) }, statut: { not: 'valide' } },
+        data: { statut: 'todo', startedAt: null, deadline: null },
+      })
+    }
     // Le chronomètre des tâches de la nouvelle étape démarre maintenant (échéances selon le SLA)
     await demarrerEtape(id, body.status)
 
@@ -527,10 +538,16 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       })
     }
 
+    // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
+    await notifierTitulaires(id, body.status, {
+      titre: `Dossier ${updated.numero} : ${STATUS_LABELS[body.status]}`,
+      message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Des tâches vous attendent.`,
+    }, { sauf: user.id, aussi: [nouveauResponsable] })
+
     await logAudit(id, user.id, 'CHANGEMENT_STATUT',
       nouveauResponsable !== dossier.responsableId
-        ? `${dossier.status} → ${body.status} (nouveau responsable assigné)`
-        : `${dossier.status} → ${body.status}`)
+        ? `${STATUS_LABELS[dossier.status]} → ${STATUS_LABELS[body.status]} (nouveau responsable assigné)`
+        : `${STATUS_LABELS[dossier.status]} → ${STATUS_LABELS[body.status]}`)
 
     // Clôture : le compte rendu complet est généré et archivé dans la bibliothèque
     if (body.status === 'cloture') {
@@ -546,12 +563,6 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         request.log.error({ err }, 'Compte rendu de clôture non généré')
       }
     }
-
-    // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
-    await notifierTitulaires(id, body.status, {
-      titre: `Dossier ${updated.numero} : ${STATUS_LABELS[body.status]}`,
-      message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Des tâches vous attendent.`,
-    }, { sauf: user.id, aussi: [nouveauResponsable] })
 
     return reply.send(updated)
   })

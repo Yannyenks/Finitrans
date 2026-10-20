@@ -4,6 +4,7 @@
  */
 import { DossierStatus, Profil, Site, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
+import { marquerNotifies } from './evenements'
 
 export const STATUS_ORDER: DossierStatus[] = [
   'reception', 'soumission_sgs', 'codage', 'validation',
@@ -257,6 +258,7 @@ export async function notify(
   const ids = [...new Set(userIds.filter((u): u is string => !!u))]
   if (ids.length === 0) return
   await prisma.notification.createMany({ data: ids.map(userId => ({ userId, ...data })) })
+  marquerNotifies(ids)
 }
 
 // ── Délais des sous-étapes (SLA en heures, paramètre « sla_sous_etapes ») ──
