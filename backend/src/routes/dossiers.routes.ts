@@ -18,6 +18,7 @@ import {
 } from '../services/workflow'
 import { rattacherClient } from '../services/crm'
 import { compagnieConnue, zCompagnie } from '../services/compagnies'
+import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 
 const createDossierSchema = z.object({
   client:            z.string().min(2),
@@ -61,8 +62,7 @@ const listQuerySchema = z.object({
 const commentSchema = z.object({ message: z.string().min(1) })
 
 /** Profils qui voient l'ensemble des dossiers (enregistrement, finance) en plus des superviseurs. */
-// Gestion des sorties : suit tous les dossiers, quelle que soit la compagnie (les tâches restent attribuées par compagnie)
-const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration', 'gestion_sorties']
+const VOIT_TOUS_LES_DOSSIERS: string[] = PROFILS_TOUS_DOSSIERS
 
 /** Le compte est-il impliqué dans le dossier (responsable ou titulaire d'une sous-étape) ? */
 async function isInvolved(actor: AuthUser, dossier: { id: string; responsableId: string }, etape?: DossierStatus) {

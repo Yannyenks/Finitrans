@@ -120,6 +120,12 @@ export const DEFAULT_ROLES: Record<Profil, RoleTemplate> = {
 
 export const ALL_PROFILS = Object.keys(DEFAULT_ROLES) as Profil[]
 
+/**
+ * Profils qui voient tous les dossiers (en plus de la Direction) et en reçoivent toutes les notifications :
+ * enregistrement (administration), finance (comptabilité), sorties (suivi de toutes les compagnies).
+ */
+export const PROFILS_TOUS_DOSSIERS: Profil[] = ['comptabilite', 'administration', 'gestion_sorties']
+
 /** Modules qu'on ne peut jamais retirer au DG (évite de se verrouiller hors du système). */
 const DG_LOCKED: ModuleKey[] = ['administration', 'parametres', 'employes', 'supervision']
 

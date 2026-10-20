@@ -18,7 +18,7 @@ export async function logAudit(
   } catch { /* la notification ne doit pas faire échouer l'action */ }
 }
 
-const LIBELLES_ACTION: Record<string, string> = {
+export const LIBELLES_ACTION: Record<string, string> = {
   CREATION_DOSSIER: 'Dossier créé', MODIFICATION_DOSSIER: 'Dossier modifié', CHANGEMENT_STATUT: 'Changement d\'étape',
   SOUS_ETAPE_VALIDEE: 'Tâche terminée', SOUS_ETAPE_REJETEE: 'Blocage signalé', SOUS_ETAPE_DEMARREE: 'Tâche reprise',
   SOUS_ETAPE_REINITIALISEE: 'Tâche réinitialisée', SOUS_ETAPE_PRISE_EN_CHARGE: 'Tâche prise en charge',

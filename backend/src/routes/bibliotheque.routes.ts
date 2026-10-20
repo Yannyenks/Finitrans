@@ -14,11 +14,11 @@ import { NotFoundError } from '../utils/errors'
 import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { STATUS_ORDER } from '../services/workflow'
 import { AuthUser } from '../types'
+import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 
 export const CATEGORIES = ['preuve', 'compte_rendu', 'contrat', 'procedure', 'modele', 'rh', 'juridique', 'administratif', 'finance', 'autre'] as const
 const FORMATS = ['pdf', 'image', 'tableur', 'texte', 'autre'] as const
-// Gestion des sorties : suit tous les dossiers, quelle que soit la compagnie (les tâches restent attribuées par compagnie)
-const VOIT_TOUS_LES_DOSSIERS = ['comptabilite', 'administration', 'gestion_sorties']
+const VOIT_TOUS_LES_DOSSIERS: string[] = PROFILS_TOUS_DOSSIERS
 
 const formatWhere: Record<(typeof FORMATS)[number], Prisma.DocumentWhereInput> = {
   pdf:     { type: { contains: 'pdf', mode: 'insensitive' } },

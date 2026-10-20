@@ -1,7 +1,8 @@
 /**
  * Notifications « pour tout » : chaque action réussie sur la plateforme est notifiée.
- * - Action sur un dossier : intervenants du dossier (responsable, titulaires de ses tâches à toutes
- *   les étapes) et Direction (DG, Exploitation).
+ * - Action sur un dossier : toutes les personnes qui voient le dossier — intervenants (responsable,
+ *   titulaires de ses tâches), Direction (DG, Exploitation) et profils qui suivent tous les dossiers
+ *   (administration, comptabilité, gestion des sorties).
  * - Action hors dossier : Direction, et la personne directement concernée (rôle, congé, compte…).
  * L'auteur n'est jamais notifié ; au cours d'une même action, une personne déjà prévenue (notification
  * ciblée : tâche attribuée, passation…) ne reçoit pas de notification générale en plus.
@@ -9,6 +10,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import type { FastifyReply, FastifyRequest } from 'fastify'
 import { prisma } from '../config/prisma'
+import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 
 /** Personnes déjà notifiées pendant la requête en cours. */
 const notifiesDansLaRequete = new AsyncLocalStorage<Set<string>>()
@@ -152,7 +154,7 @@ export async function notifierDossier(dossierId: string, auteurId: string, libel
   if (!dossier) return false
   const [titulaires, direction, auteur] = await Promise.all([
     prisma.sousEtapeDossier.findMany({ where: { dossierId, responsableId: { not: null } }, select: { responsableId: true }, distinct: ['responsableId'] }),
-    prisma.user.findMany({ where: { profil: { in: ['dg', 'exploitation'] }, actif: true }, select: { id: true } }),
+    prisma.user.findMany({ where: { profil: { in: ['dg', 'exploitation', ...PROFILS_TOUS_DOSSIERS] }, actif: true }, select: { id: true } }),
     prisma.user.findUnique({ where: { id: auteurId }, select: { nom: true } }),
   ])
   const candidats = [...new Set([dossier.responsableId, ...titulaires.map(t => t.responsableId!), ...direction.map(u => u.id)])]

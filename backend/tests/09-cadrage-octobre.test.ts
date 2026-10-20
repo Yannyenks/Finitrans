@@ -242,3 +242,17 @@ describe('Compagnies maritimes : liste ouverte', () => {
     expectStatus(inconnue, [400, 422])
   })
 })
+
+describe('Mr Wandala est notifié comme tout le monde', () => {
+  it('il reçoit les notifications d\'un dossier MAERSK/CMA dont il n\'a aucune tâche', async () => {
+    const r = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT MAERSK'), compagnie: 'MAERSK', conteneur: 'MAEU1234567', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(r, 201)
+    const t = await api('delba', 'GET', `/api/dossiers/${r.body.id}/sous-etapes`)
+    assert.ok(!t.body.some((x: any) => x.responsableId === ids.wandala), 'aucune tâche pour Mr Wandala')
+    expectStatus(await api('honore', 'POST', `/api/dossiers/${r.body.id}/commentaires`, { message: 'Acompte reçu' }), 201)
+    const n = await api('wandala', 'GET', '/api/notifications?limit=10')
+    assert.ok(n.body.data.some((x: any) => x.dossierId === r.body.id && x.titre.endsWith('· Nouveau commentaire')))
+  })
+})
