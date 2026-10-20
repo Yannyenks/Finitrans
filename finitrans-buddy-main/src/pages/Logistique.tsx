@@ -32,14 +32,59 @@ function useRefresh() {
   return () => ["logistique-transports", "logistique-chauffeurs", "logistique-camions", "logistique-resume"].forEach(k => qc.invalidateQueries({ queryKey: [k] }));
 }
 
-// ── Transport : véhicule + chauffeur + TC + date ────────────────────────────
+/** Principales villes du Cameroun (départ et destination des transports). */
+export const VILLES_CAMEROUN = [
+  "Douala", "Yaoundé", "Kribi", "Bafoussam", "Bamenda", "Garoua", "Maroua", "Ngaoundéré", "Bertoua", "Ebolowa",
+  "Buea", "Limbé", "Kumba", "Tiko", "Mutengene", "Nkongsamba", "Edéa", "Dschang", "Foumban", "Mbouda",
+  "Bafang", "Bangangté", "Bafia", "Obala", "Mbalmayo", "Sangmélima", "Ambam", "Kyé-Ossi", "Lolodorf", "Eséka",
+  "Akonolinga", "Abong-Mbang", "Batouri", "Yokadouma", "Garoua-Boulaï", "Meiganga", "Tibati", "Guider", "Touboro",
+  "Mokolo", "Kaélé", "Yagoua", "Kousséri", "Mora", "Kumbo", "Nkambé", "Wum", "Mamfé", "Mbanga", "Loum", "Manjo",
+  "Penja", "Mbankomo", "Soa", "Nanga-Eboko", "Mfou",
+].sort((a, b) => a.localeCompare(b, "fr"));
+
+/** « Yaoundé — entrepôt client » → { ville: "Yaoundé", precision: "entrepôt client" } */
+function decouperLieu(lieu: string | null | undefined): { ville: string; precision: string } {
+  const l = (lieu ?? "").trim();
+  if (!l) return { ville: "", precision: "" };
+  const base = l.replace(/^Port de /i, "");
+  const ville = VILLES_CAMEROUN.find(v => base === v || base.startsWith(`${v} — `));
+  return ville ? { ville, precision: base.slice(ville.length).replace(/^ — /, "") } : { ville: "__autre__", precision: l };
+}
+const composerLieu = (ville: string, precision: string) =>
+  ville === "__autre__" ? precision.trim() : ville ? `${ville}${precision.trim() ? ` — ${precision.trim()}` : ""}` : "";
+
+/** Trajet lisible : « Douala → Kribi » ou « Douala ⇄ Kribi » (aller-retour) */
+export const trajet = (t: { origine?: string | null; destination: string; allerRetour?: boolean }) =>
+  `${t.origine || "—"} ${t.allerRetour ? "⇄" : "→"} ${t.destination}`;
+
+const ChoixVille = ({ libelle, ville, precision, onVille, onPrecision }: {
+  libelle: string; ville: string; precision: string; onVille: (v: string) => void; onPrecision: (v: string) => void;
+}) => (
+  <div className="space-y-1.5">
+    <Label className="text-xs">{libelle}</Label>
+    <Select value={ville} onValueChange={onVille}>
+      <SelectTrigger className="bg-muted/50" aria-label={libelle}><SelectValue placeholder="Ville du Cameroun…" /></SelectTrigger>
+      <SelectContent className="max-h-72">
+        {VILLES_CAMEROUN.map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}
+        <SelectItem value="__autre__">Autre lieu…</SelectItem>
+      </SelectContent>
+    </Select>
+    <Input value={precision} onChange={e => onPrecision(e.target.value)} className="bg-muted/50 h-8 text-xs"
+      placeholder={ville === "__autre__" ? "Lieu (saisie libre)" : "Précision : port, entrepôt, client…"} aria-label={`${libelle} — précision`} />
+  </div>
+);
+
+// ── Transport : véhicule + chauffeur + TC + trajet ──────────────────────────
 const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { dossiers: any[]; camions: any[]; chauffeurs: any[]; initial?: any; onClose: () => void }) => {
   const refresh = useRefresh();
   const [form, setForm] = useState(() => ({
     dossierId: initial?.dossierId ?? "", conteneur: initial?.conteneur ?? "", camionId: initial?.camionId ?? "",
     chauffeurId: initial?.chauffeurId ?? "", dateEnlevement: (initial?.dateEnlevement ?? new Date().toISOString()).slice(0, 10),
-    origine: initial?.origine ?? "", destination: initial?.destination ?? "", notes: initial?.notes ?? "",
+    notes: initial?.notes ?? "", allerRetour: !!initial?.allerRetour,
+    depart: decouperLieu(initial?.origine ?? "Douala — port"), arrivee: decouperLieu(initial?.destination),
   }));
+  const origine = composerLieu(form.depart.ville, form.depart.precision);
+  const destination = composerLieu(form.arrivee.ville, form.arrivee.precision);
   const dossier = dossiers.find(d => d.id === form.dossierId);
   const tcDuDossier: string[] = dossier?.conteneur ? String(dossier.conteneur).split(/[,;\s]+/).filter(Boolean) : [];
   const save = useMutation({
@@ -47,14 +92,14 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
       const payload = {
         dossierId: form.dossierId || null, conteneur: form.conteneur.trim(), camionId: form.camionId || null,
         chauffeurId: form.chauffeurId || null, dateEnlevement: new Date(`${form.dateEnlevement}T08:00:00`).toISOString(),
-        origine: form.origine || null, destination: form.destination.trim(), notes: form.notes || null,
+        origine: origine || null, destination, allerRetour: form.allerRetour, notes: form.notes || null,
       };
       return initial ? api.patch(`/api/logistique/transports/${initial.id}`, payload) : api.post("/api/logistique/transports", payload);
     },
     onSuccess: () => { refresh(); toast({ title: initial ? "Transport modifié" : "Transport planifié", description: `TC ${form.conteneur.toUpperCase()}` }); onClose(); },
     onError: erreur,
   });
-  const valide = form.conteneur.trim().length >= 3 && form.destination.trim().length >= 2 && !!form.dateEnlevement;
+  const valide = form.conteneur.trim().length >= 3 && destination.length >= 2 && !!form.dateEnlevement;
   return (
     <Dialog open onOpenChange={onClose}>
       <DialogContent className="bg-card sm:max-w-[520px]">
@@ -75,18 +120,7 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">TC (conteneur) *</Label>
-              <Input list="tc-dossier" value={form.conteneur} onChange={e => setForm({ ...form, conteneur: e.target.value.toUpperCase() })} placeholder="MSCU1234567" className="bg-muted/50 font-mono" />
-              <datalist id="tc-dossier">{tcDuDossier.map(tc => <option key={tc} value={tc} />)}</datalist>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Date *</Label>
-              <Input type="date" value={form.dateEnlevement} onChange={e => setForm({ ...form, dateEnlevement: e.target.value })} className="bg-muted/50" />
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Véhicule</Label>
+              <Label className="text-xs">1 · Véhicule</Label>
               <Select value={form.camionId || "__aucun__"} onValueChange={v => setForm({ ...form, camionId: v === "__aucun__" ? "" : v })}>
                 <SelectTrigger className="bg-muted/50"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -96,7 +130,7 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Chauffeur</Label>
+              <Label className="text-xs">2 · Chauffeur</Label>
               <Select value={form.chauffeurId || "__aucun__"} onValueChange={v => setForm({ ...form, chauffeurId: v === "__aucun__" ? "" : v })}>
                 <SelectTrigger className="bg-muted/50"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -107,8 +141,43 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5"><Label className="text-xs">Départ</Label><Input value={form.origine} onChange={e => setForm({ ...form, origine: e.target.value })} placeholder="Port de Douala" className="bg-muted/50" /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Destination *</Label><Input value={form.destination} onChange={e => setForm({ ...form, destination: e.target.value })} placeholder="Yaoundé — client" className="bg-muted/50" /></div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">3 · N° TC (conteneur) *</Label>
+              <Input list="tc-dossier" value={form.conteneur} onChange={e => setForm({ ...form, conteneur: e.target.value.toUpperCase() })} placeholder="MSCU1234567" className="bg-muted/50 font-mono" aria-label="N° TC" />
+              <datalist id="tc-dossier">{tcDuDossier.map(tc => <option key={tc} value={tc} />)}</datalist>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Date *</Label>
+              <Input type="date" value={form.dateEnlevement} onChange={e => setForm({ ...form, dateEnlevement: e.target.value })} className="bg-muted/50" />
+            </div>
+          </div>
+          <div className="rounded-xl border border-border/60 p-3 space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold text-foreground">4 · Trajet</p>
+              <div className="flex rounded-lg bg-muted p-0.5 text-[11px] font-semibold" role="radiogroup" aria-label="Type de trajet">
+                {[{ v: false, l: "Aller simple →" }, { v: true, l: "Aller-retour ⇄" }].map(o => (
+                  <button key={String(o.v)} type="button" role="radio" aria-checked={form.allerRetour === o.v}
+                    onClick={() => setForm({ ...form, allerRetour: o.v })}
+                    className={`px-2.5 py-1 rounded-md transition-colors ${form.allerRetour === o.v ? "bg-card shadow text-foreground" : "text-muted-foreground"}`}>
+                    {o.l}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-start">
+              <ChoixVille libelle="Départ" ville={form.depart.ville} precision={form.depart.precision}
+                onVille={v => setForm({ ...form, depart: { ...form.depart, ville: v } })} onPrecision={v => setForm({ ...form, depart: { ...form.depart, precision: v } })} />
+              <button type="button" title="Inverser départ et destination" aria-label="Inverser départ et destination"
+                onClick={() => setForm({ ...form, depart: form.arrivee, arrivee: form.depart })}
+                className="mt-6 w-8 h-8 rounded-lg border border-border hover:bg-muted flex items-center justify-center text-secondary font-bold">
+                {form.allerRetour ? "⇄" : "→"}
+              </button>
+              <ChoixVille libelle="Destination *" ville={form.arrivee.ville} precision={form.arrivee.precision}
+                onVille={v => setForm({ ...form, arrivee: { ...form.arrivee, ville: v } })} onPrecision={v => setForm({ ...form, arrivee: { ...form.arrivee, precision: v } })} />
+            </div>
+            {destination && (
+              <p className="text-[11px] text-muted-foreground">Trajet : <span className="font-semibold text-foreground">{trajet({ origine, destination, allerRetour: form.allerRetour })}</span></p>
+            )}
           </div>
           <div className="space-y-1.5"><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-muted/50" /></div>
           <div className="flex justify-end gap-2 pt-1">
@@ -218,60 +287,7 @@ const CamionDialog = ({ initial, onClose }: { initial?: any; onClose: () => void
   );
 };
 
-// ── Véhicules importés à dédouaner (existant) ───────────────────────────────
-const VEHICULE_STATUTS: Record<string, { label: string; cls: string; suivant?: string; action?: string }> = {
-  en_attente: { label: "En attente", cls: "bg-amber-100 text-amber-700", suivant: "en_cours", action: "Démarrer le dédouanement" },
-  en_cours:   { label: "Dédouanement en cours", cls: "bg-blue-100 text-blue-700", suivant: "cloture", action: "Marquer dédouané" },
-  cloture:    { label: "Dédouané", cls: "bg-green-100 text-green-700" },
-};
-
-const VehiculeImporteDialog = ({ dossiers, onClose }: { dossiers: any[]; onClose: () => void }) => {
-  const qc = useQueryClient();
-  const [form, setForm] = useState({ dossierId: "", marque: "", modele: "", annee: String(new Date().getFullYear()), numeroSerie: "", immatriculation: "", valeurCIF: "" });
-  const add = useMutation({
-    mutationFn: () => api.post("/api/vehicules", {
-      dossierId: form.dossierId, marque: form.marque.trim(), modele: form.modele.trim(), annee: Number(form.annee),
-      numeroSerie: form.numeroSerie.trim(), immatriculation: form.immatriculation.trim() || undefined, valeurCIF: Number(form.valeurCIF),
-    }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicules-logistique"] }); toast({ title: "Véhicule enregistré" }); onClose(); },
-    onError: erreur,
-  });
-  const valide = form.dossierId && form.marque.trim().length >= 2 && form.modele.trim() && form.numeroSerie.trim().length >= 5 && Number(form.valeurCIF) > 0;
-  return (
-    <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-card sm:max-w-[480px]">
-        <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Car className="w-4 h-4 text-secondary" /> Véhicule importé à dédouaner</DialogTitle></DialogHeader>
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Dossier *</Label>
-            <Select value={form.dossierId} onValueChange={v => setForm({ ...form, dossierId: v })}>
-              <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Choisir le dossier..." /></SelectTrigger>
-              <SelectContent>{dossiers.map(d => <SelectItem key={d.id} value={d.id}>{d.numero} — {d.client}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="space-y-1.5"><Label className="text-xs">Marque *</Label><Input value={form.marque} onChange={e => setForm({ ...form, marque: e.target.value })} className="bg-muted/50" /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Modèle *</Label><Input value={form.modele} onChange={e => setForm({ ...form, modele: e.target.value })} className="bg-muted/50" /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Année *</Label><Input type="number" value={form.annee} onChange={e => setForm({ ...form, annee: e.target.value })} className="bg-muted/50" /></div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5"><Label className="text-xs">N° de série (VIN) *</Label><Input value={form.numeroSerie} onChange={e => setForm({ ...form, numeroSerie: e.target.value.toUpperCase() })} className="bg-muted/50 font-mono text-sm" /></div>
-            <div className="space-y-1.5"><Label className="text-xs">Immatriculation</Label><Input value={form.immatriculation} onChange={e => setForm({ ...form, immatriculation: e.target.value.toUpperCase() })} className="bg-muted/50 font-mono text-sm" /></div>
-          </div>
-          <div className="space-y-1.5"><Label className="text-xs">Valeur CIF (FCFA) *</Label><Input type="number" value={form.valeurCIF} onChange={e => setForm({ ...form, valeurCIF: e.target.value })} className="bg-muted/50 font-mono" /></div>
-          <div className="flex justify-end gap-2">
-            <Button variant="outline" onClick={onClose}>Annuler</Button>
-            <Button onClick={() => add.mutate()} disabled={!valide || add.isPending} className="gap-2 bg-secondary text-secondary-foreground">
-              {add.isPending && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-};
-
-type Dlg = { type: "transport"; initial?: any } | { type: "chauffeur"; initial?: any } | { type: "camion"; initial?: any } | { type: "importe" } | null;
+type Dlg = { type: "transport"; initial?: any } | { type: "chauffeur"; initial?: any } | { type: "camion"; initial?: any } | null;
 
 const Logistique = () => {
   const navigate = useNavigate();
@@ -293,12 +309,10 @@ const Logistique = () => {
   const { data: chauffeurs = [] } = useQuery({ queryKey: ["logistique-chauffeurs"], queryFn: () => api.get<any[]>("/api/logistique/chauffeurs") });
   const { data: camions = [] } = useQuery({ queryKey: ["logistique-camions"], queryFn: () => api.get<any[]>("/api/logistique/camions") });
   const { data: resume } = useQuery({ queryKey: ["logistique-resume"], queryFn: () => api.get<any>("/api/logistique/resume") });
-  const { data: dossiersData } = useQuery({ queryKey: ["dossiers-logistique"], queryFn: () => api.get<any>("/api/dossiers?limit=100&status=paiement,bon_compagnie,operations_kribi,cloture") });
-  const { data: vehiculesData } = useQuery({ queryKey: ["vehicules-logistique"], queryFn: () => api.get<any>("/api/vehicules?limit=100") });
+  const { data: dossiersData } = useQuery({ queryKey: ["dossiers-logistique"], queryFn: () => api.get<any>("/api/dossiers?limit=100&status=paiement,bon_compagnie,operations_douala,operations_kribi,cloture") });
 
   const transports: any[] = transportsData?.data ?? [];
   const dossiers: any[] = dossiersData?.data ?? [];
-  const vehiculesImportes: any[] = vehiculesData?.data ?? [];
 
   const avancer = useMutation({
     mutationFn: ({ id, statut }: { id: string; statut: string }) => api.patch(`/api/logistique/transports/${id}`, { statut }),
@@ -308,11 +322,6 @@ const Logistique = () => {
   const basculer = useMutation({
     mutationFn: ({ type, item }: { type: "chauffeurs" | "camions"; item: any }) => api.patch(`/api/logistique/${type}/${item.id}`, { actif: !item.actif }),
     onSuccess: () => refresh(),
-    onError: erreur,
-  });
-  const majImporte = useMutation({
-    mutationFn: ({ id, statut }: { id: string; statut: string }) => api.patch(`/api/vehicules/${id}`, { statut, ...(statut === "cloture" ? { dateFin: new Date().toISOString() } : {}) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["vehicules-logistique"] }); toast({ title: "Véhicule mis à jour" }); },
     onError: erreur,
   });
 
@@ -333,12 +342,11 @@ const Logistique = () => {
         ))}
       </div>
 
-      <Tabs defaultValue="transports">
+      <Tabs defaultValue="vehicules">
         <TabsList className="mb-4 flex-wrap h-auto">
-          <TabsTrigger value="transports" className="gap-1.5"><Container className="w-3.5 h-3.5" /> Transports TC</TabsTrigger>
           <TabsTrigger value="vehicules" className="gap-1.5"><Truck className="w-3.5 h-3.5" /> Véhicules ({camions.length})</TabsTrigger>
           <TabsTrigger value="chauffeurs" className="gap-1.5"><UserRound className="w-3.5 h-3.5" /> Chauffeurs ({chauffeurs.length})</TabsTrigger>
-          <TabsTrigger value="importes" className="gap-1.5"><Car className="w-3.5 h-3.5" /> Véhicules à dédouaner ({vehiculesImportes.length})</TabsTrigger>
+          <TabsTrigger value="transports" className="gap-1.5"><Container className="w-3.5 h-3.5" /> Transports TC</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transports">
@@ -375,7 +383,7 @@ const Logistique = () => {
                         <td className="py-2 px-3 font-mono font-semibold">{t.conteneur}</td>
                         <td className="py-2 px-3 font-mono text-xs">{t.camion?.immatriculation ?? <span className="text-destructive">à attribuer</span>}</td>
                         <td className="py-2 px-3 text-xs">{t.chauffeur ? <>{t.chauffeur.nom}<div className="text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{t.chauffeur.telephone}</div></> : <span className="text-destructive">à attribuer</span>}</td>
-                        <td className="py-2 px-3 text-xs"><span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{t.origine ? `${t.origine} → ` : ""}{t.destination}</span></td>
+                        <td className="py-2 px-3 text-xs"><span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{trajet(t)}</span></td>
                         <td className="py-2 px-3 text-xs">{t.dossier ? <button className="text-secondary hover:underline" onClick={() => navigate(`/dossiers/${t.dossier.id}`)}>{t.dossier.numero}</button> : "—"}</td>
                         <td className="py-2 px-3"><span className={`status-badge ${st.cls}`}>{st.label}</span></td>
                         <td className="py-2 px-3">
@@ -436,31 +444,11 @@ const Logistique = () => {
           </div>
         </TabsContent>
 
-        <TabsContent value="importes">
-          <div className="space-y-3 max-w-3xl">
-            <Button size="sm" className="gap-1.5 bg-secondary text-secondary-foreground" onClick={() => setDlg({ type: "importe" })}><Plus className="w-3.5 h-3.5" /> Ajouter un véhicule importé</Button>
-            {vehiculesImportes.map(v => {
-              const st = VEHICULE_STATUTS[v.statut] ?? VEHICULE_STATUTS.en_attente;
-              return (
-                <div key={v.id} className="stat-card">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-semibold">{v.marque} {v.modele} ({v.annee}){v.immatriculation && <span className="font-mono text-xs text-muted-foreground ml-2">{v.immatriculation}</span>}</span>
-                    <span className={`status-badge ${st.cls}`}>{st.label}</span>
-                  </div>
-                  <p className="text-xs text-muted-foreground">VIN {v.numeroSerie} · {v.dossier?.numero} · {v.dossier?.client} · CIF {Number(v.valeurCIF).toLocaleString("fr-FR")} FCFA</p>
-                  {st.suivant && <Button size="sm" variant="outline" className="h-7 text-xs mt-2 gap-1" onClick={() => majImporte.mutate({ id: v.id, statut: st.suivant! })}><ChevronRight className="w-3 h-3" /> {st.action}</Button>}
-                </div>
-              );
-            })}
-            {vehiculesImportes.length === 0 && <p className="text-sm text-muted-foreground text-center py-10">Aucun véhicule importé</p>}
-          </div>
-        </TabsContent>
       </Tabs>
 
       {dlg?.type === "transport" && <TransportDialog dossiers={dossiers} camions={camions} chauffeurs={chauffeurs} initial={dlg.initial} onClose={() => setDlg(null)} />}
       {dlg?.type === "chauffeur" && <ChauffeurDialog initial={dlg.initial} onClose={() => setDlg(null)} />}
       {dlg?.type === "camion" && <CamionDialog initial={dlg.initial} onClose={() => setDlg(null)} />}
-      {dlg?.type === "importe" && <VehiculeImporteDialog dossiers={dossiers} onClose={() => setDlg(null)} />}
     </AppLayout>
   );
 };

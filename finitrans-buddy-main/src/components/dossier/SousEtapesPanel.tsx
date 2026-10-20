@@ -44,9 +44,11 @@ export type SousEtapeConfig = {
   hasModePaiement?:    boolean;
   hasImmatriculation?: boolean;
   /** Paiement à saisir en terminant la tâche (crée un paiement compagnie) */
-  facture?:            { montant: string; numero: string; date: string; titre: string };
+  facture?:            { montant: string; numero: string; date: string; titre: string; sousTitre?: string; libelleNumero?: string };
   outputLabel?:        string;
   fields?:             FieldDef[];
+  /** Bon de la compagnie : numéro et date à saisir en terminant la tâche (pas de montant) */
+  bonCompagnie?:       boolean;
   /** Règlement du client à saisir en terminant la tâche (mode, client, référence…) */
   reglementClient?:    boolean;
   /** Sites où la sous-étape s'applique (toutes si absent) */
@@ -95,8 +97,11 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   soumission_sgs: [
     {
       cle: "ff_soumission", label: "FF et soumission des documents fournisseurs",
-      description: "Fret Forwarding — compilation et transmission des documents fournisseurs à la SGS",
+      description: "Fret Forwarding — compilation et transmission des documents fournisseurs à la SGS ; la facture fournisseur est débitée sur la DI du dossier",
+      facture: { montant: "ff_montant_facture", numero: "ff_reference_facture", date: "ff_date_facture", titre: "Facture fournisseur", sousTitre: "Le montant est débité automatiquement sur la DI du dossier", libelleNumero: "N° de la facture fournisseur" },
       fields: [
+        { key: "ff_reference_facture", label: "N° facture fournisseur", type: "text", placeholder: "Ex : PI-2026-0042" },
+        { key: "ff_montant_facture",   label: "Montant de la facture (XAF)", type: "number", placeholder: "0" },
         { key: "ff_reference",    label: "Référence FF",       type: "text", placeholder: "Ex : FF-2025-0087" },
         { key: "ff_date_soum",    label: "Date de soumission", type: "date" },
         { key: "ff_docs_liste",   label: "Documents transmis", type: "textarea", placeholder: "Liste des documents joints…" },
@@ -131,28 +136,9 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
         { key: "decl_bureau",  label: "Bureau de douane", type: "text", placeholder: "Ex : Douala Port" },
       ],
     },
-    {
-      cle: "regulation", label: "Régulation",
-      description: "Conformité réglementaire — vérification des textes en vigueur et régimes douaniers",
-      fields: [
-        { key: "reg_regime",    label: "Régime douanier",       type: "text", placeholder: "Ex : Mise à la consommation" },
-        { key: "reg_reference", label: "Référence réglementaire", type: "text", placeholder: "Ex : Art. 123 Code douanier" },
-        { key: "reg_date",      label: "Date de régulation",    type: "date" },
-      ],
-    },
   ],
-  validation: [
-    {
-      cle: "validation_docs", label: "Validation administrative des documents",
-      description: "Examen, contrôle de cohérence et visa de l'ensemble des pièces constitutives du dossier",
-      fields: [
-        { key: "val_agent",   label: "Agent validateur",     type: "text", placeholder: "Nom et qualité" },
-        { key: "val_date",    label: "Date de validation",   type: "date" },
-        { key: "val_entite",  label: "Entité validatrice",   type: "text", placeholder: "Ex : Service douanier, agent DG…" },
-        { key: "val_obs",     label: "Observations / réserves", type: "textarea", placeholder: "Documents manquants, corrections…" },
-      ],
-    },
-  ],
+  // Plus de sous-étape : la validation se termine avec une preuve jointe à l'étape
+  validation: [],
   paiement: [
     {
       cle: "paiement_droits", label: "Paiement des droits et taxes",
@@ -167,13 +153,12 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   ],
   bon_compagnie: [
     {
-      cle: "facturation_compagnie", label: "Facturation & paiement",
-      facture: { montant: "bc_montant", numero: "bc_facture_numero", date: "bc_date_paiement", titre: "Facture de la compagnie maritime" },
-      description: "Règlement des frais de surestaries, THC et frais compagnie maritime", partie: "A", partieLabel: "Bon de Compagnie Maritime",
+      cle: "facturation_compagnie", label: "Bon de la compagnie maritime",
+      description: "Obtention du bon de la compagnie maritime : numéro du bon et date", partie: "A", partieLabel: "Bon de Compagnie Maritime",
+      bonCompagnie: true, outputLabel: "Bon de la compagnie",
       fields: [
-        { key: "bc_facture_numero", label: "N° Facture compagnie", type: "text",   placeholder: "Ex : MSC-INV-2025-0042" },
-        { key: "bc_montant",        label: "Montant (XAF)",        type: "number", placeholder: "0" },
-        { key: "bc_date_paiement",  label: "Date de paiement",     type: "date" },
+        { key: "bc_bon_numero", label: "N° du bon", type: "text", placeholder: "Ex : MSC-BON-2026-0042" },
+        { key: "bc_bon_date",   label: "Date du bon", type: "date" },
       ],
     },
     {
@@ -184,33 +169,25 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
         { key: "bad_date_obtention", label: "Date d'obtention", type: "date" },
       ],
     },
+  ],
+  // Opérations Douala : partie terminal (mêmes tâches que Kribi, sans gate pass ; bon à délivrer)
+  operations_douala: [
     {
       cle: "facturation_terminal", label: "Facturation & paiement (redevance portuaire)", sites: ["Douala"],
-      facture: { montant: "term_montant", numero: "term_facture_numero", date: "term_date_paiement", titre: "Redevance portuaire (terminal)" },
-      description: "Règlement des redevances portuaires auprès du terminal RTC de Douala (à Kribi : étape Opérations Kribi)", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
+      facture: { montant: "term_montant", numero: "term_facture_numero", date: "term_date_paiement", titre: "Redevance portuaire — terminal de Douala" },
+      description: "Règlement des redevances portuaires auprès du terminal de Douala",
       fields: [
-        { key: "term_facture_numero", label: "N° Facture terminal", type: "text",   placeholder: "Ex : KCT-INV-2025-0042" },
+        { key: "term_facture_numero", label: "N° Facture terminal", type: "text",   placeholder: "Ex : DIT-INV-2026-0042" },
         { key: "term_montant",        label: "Montant (XAF)",       type: "number", placeholder: "0" },
         { key: "term_date_paiement",  label: "Date de paiement",    type: "date" },
       ],
     },
     {
-      cle: "bon_livraison", label: "Bon de livraison", sites: ["Douala"],
-      description: "Obtention du bon de livraison terminal autorisant l'enlèvement physique de la marchandise", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
+      cle: "bad_terminal", label: "Bon à délivrer", sites: ["Douala"],
+      description: "Obtention du bon à délivrer autorisant l'enlèvement de la marchandise au port de Douala",
       fields: [
-        { key: "bl_term_numero",    label: "N° Bon de livraison",  type: "text", placeholder: "Ex : BL-T-2025-0042" },
-        { key: "bl_term_date",      label: "Date d'obtention",     type: "date" },
-        { key: "bl_term_observations", label: "Observations",      type: "textarea", placeholder: "État de la marchandise, réserves…" },
-      ],
-    },
-    {
-      cle: "gate_pass", label: "Gate Pass — Ticket de sortie", sites: ["Douala"],
-      description: "Récupération du gate pass et enregistrement de l'immatriculation du véhicule", partie: "B", partieLabel: "Terminal Portuaire (RTC)",
-      hasImmatriculation: true,
-      fields: [
-        { key: "gp_chauffeur",  label: "Nom du chauffeur",     type: "text", placeholder: "Ex : M. DUPONT Jean" },
-        { key: "gp_heure_sort", label: "Heure de sortie",      type: "text", placeholder: "Ex : 14h30" },
-        { key: "gp_observations",label: "Observations",        type: "textarea", placeholder: "Remarques particulières…" },
+        { key: "bad_terminal_numero", label: "N° du bon à délivrer", type: "text", placeholder: "Ex : BAD-DLA-2026-0042" },
+        { key: "bad_terminal_date",   label: "Date d'obtention",     type: "date" },
       ],
     },
   ],
@@ -562,7 +539,7 @@ const LIBELLES_META: Record<string, string> = {
 const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id"]);
 const ENREGISTREMENTS: Record<string, string> = {
   paiement_douane: "Paiement douane (Finance)", paiement_compagnie: "Paiement compagnie (Finance)",
-  gate_pass: "Gate pass", reglement_client: "Règlement client (CRM)",
+  gate_pass: "Gate pass", reglement_client: "Règlement client (CRM)", debit_di: "Débit de la DI",
 };
 
 function valeurLisible(cle: string, v: unknown): string {
@@ -612,11 +589,53 @@ const RevueInformations = ({ config, data }: { config: SousEtapeConfig; data?: S
   );
 };
 
+// ── Dialogue Bon de la compagnie maritime (numéro et date, sans montant) ──────
+const BonCompagnieDialog = ({
+  onConfirm, onCancel, loading, meta,
+}: {
+  onConfirm: (data: Record<string, string>) => void;
+  onCancel:  () => void;
+  loading:   boolean;
+  meta:      Record<string, string>;
+}) => {
+  const [numero, setNumero] = useState(meta.bc_bon_numero ?? "");
+  const [dateBon, setDateBon] = useState(meta.bc_bon_date ?? new Date().toISOString().slice(0, 10));
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
+        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border" role="dialog" aria-label="Bon de la compagnie maritime">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center"><Stamp className="w-5 h-5 text-blue-700" /></div>
+          <div>
+            <h3 className="font-display font-bold text-foreground">Bon de la compagnie maritime</h3>
+            <p className="text-xs text-muted-foreground">Numéro et date du bon délivré par la compagnie</p>
+          </div>
+        </div>
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">N° du bon *</Label>
+              <Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" aria-label="N° du bon" autoFocus /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Date du bon *</Label>
+              <Input type="date" value={dateBon} onChange={e => setDateBon(e.target.value)} className="bg-muted/40" aria-label="Date du bon" /></div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button onClick={() => onConfirm({ bc_bon_numero: numero.trim(), bc_bon_date: dateBon })}
+              disabled={!numero.trim() || !dateBon || loading} className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer le bon
+            </Button>
+            <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
+          </div>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
+
 // ── Dialogue Facture compagnie / terminal (crée le paiement compagnie) ────────
 const FactureCieDialog = ({
   champs, titre, onConfirm, onCancel, loading, meta,
 }: {
-  champs:    { montant: string; numero: string; date: string };
+  champs:    { montant: string; numero: string; date: string; sousTitre?: string; libelleNumero?: string };
   titre:     string;
   onConfirm: (data: Record<string, string>) => void;
   onCancel:  () => void;
@@ -634,11 +653,11 @@ const FactureCieDialog = ({
           <div className="w-9 h-9 rounded-xl bg-green-100 flex items-center justify-center"><Receipt className="w-5 h-5 text-green-700" /></div>
           <div>
             <h3 className="font-display font-bold text-foreground">{titre}</h3>
-            <p className="text-xs text-muted-foreground">Le paiement est enregistré automatiquement en Finance</p>
+            <p className="text-xs text-muted-foreground">{champs.sousTitre ?? "Le paiement est enregistré automatiquement en Finance"}</p>
           </div>
         </div>
         <div className="space-y-4">
-          <div className="space-y-1.5"><Label className="text-xs font-semibold">N° de facture</Label><Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" /></div>
+          <div className="space-y-1.5"><Label className="text-xs font-semibold">{champs.libelleNumero ?? "N° de facture"}</Label><Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" /></div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label className="text-xs font-semibold">Montant payé (FCFA) *</Label><Input type="number" min={1} value={montant} onChange={e => setMontant(e.target.value)} className="bg-muted/40 font-mono" /></div>
             <div className="space-y-1.5"><Label className="text-xs font-semibold">Date de paiement</Label><Input type="date" value={datePaie} onChange={e => setDatePaie(e.target.value)} className="bg-muted/40" /></div>
@@ -988,6 +1007,7 @@ const SousEtapeCard = ({
   const [showGatePass, setShowGatePass] = useState(false);
   const [showFacture,  setShowFacture]  = useState(false);
   const [showReglement, setShowReglement] = useState(false);
+  const [showBon,      setShowBon]      = useState(false);
   const [notes,        setNotes]        = useState(data?.notes ?? "");
 
   const statut    = data?.statut ?? "todo";
@@ -1002,6 +1022,7 @@ const SousEtapeCard = ({
     if (config.hasImmatriculation)  { setShowGatePass(true); return; }
     if (config.facture)             { setShowFacture(true);  return; }
     if (config.reglementClient)     { setShowReglement(true); return; }
+    if (config.bonCompagnie)        { setShowBon(true);       return; }
     update.mutate(
       { etape, cle: config.cle, data: { statut: "valide" } },
       { onSuccess: () => notif.sousEtapeValidee(config.label), ...onErr }
@@ -1050,6 +1071,19 @@ const SousEtapeCard = ({
             update.mutate(
               { etape, cle: config.cle, data: { statut: "valide", metadata, notes: n || undefined } },
               { onSuccess: () => { setShowGatePass(false); notif.sousEtapeValidee(config.label); }, ...onErr }
+            );
+          }}
+        />
+      )}
+      {showBon && (
+        <BonCompagnieDialog
+          loading={isPending}
+          meta={meta}
+          onCancel={() => setShowBon(false)}
+          onConfirm={metadata => {
+            update.mutate(
+              { etape, cle: config.cle, data: { statut: "valide", metadata } },
+              { onSuccess: () => { setShowBon(false); notif.sousEtapeValidee(config.label); }, ...onErr }
             );
           }}
         />
@@ -1149,6 +1183,7 @@ const SousEtapeCard = ({
                 ✓ {meta.enregistrement_type === "paiement_douane" ? "Paiement douane enregistré en Finance"
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
                   : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
+                  : meta.enregistrement_type === "debit_di" ? "Facture débitée sur la DI"
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
             )}

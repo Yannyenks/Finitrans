@@ -70,7 +70,7 @@ export const STATUS_LABELS: Record<string, string> = {
   validation:       "Validation",
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
-  operations_kribi: "Opérations Kribi",
+  operations_douala: "Opérations Douala", operations_kribi: "Opérations Kribi",
   cloture:          "Clôture",
 };
 

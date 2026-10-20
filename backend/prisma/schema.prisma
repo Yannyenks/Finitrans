@@ -79,6 +79,9 @@ model Dossier {
   reglementsClient   ReglementClient[]
   compagnie          String @db.VarChar(80)
   conteneur          String                  @db.VarChar(100)
+  /// Nombre de conteneurs du dossier et taille (20', 40', 40' HC, 45' HC, frigo…)
+  nombreConteneurs   Int                     @default(1) @map("nombre_conteneurs")
+  tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(30)
   marchandise        String
   site               Site
   status             DossierStatus           @default(reception)
@@ -645,6 +648,7 @@ enum DossierStatus {
   validation
   paiement
   bon_compagnie
+  operations_douala
   operations_kribi
   cloture
 
@@ -1219,6 +1223,8 @@ model Transport {
   dateLivraison  DateTime?       @map("date_livraison")
   origine        String?         @db.VarChar(255)
   destination    String          @db.VarChar(255)
+  /// Trajet aller-retour (départ ⇄ destination)
+  allerRetour    Boolean         @default(false) @map("aller_retour")
   statut         StatutTransport @default(planifie)
   notes          String?
   createdById    String          @map("created_by_id") @db.Uuid

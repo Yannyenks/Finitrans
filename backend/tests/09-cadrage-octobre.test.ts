@@ -256,3 +256,62 @@ describe('Mr Wandala est notifié comme tout le monde', () => {
     assert.ok(n.body.data.some((x: any) => x.dossierId === r.body.id && x.titre.endsWith('· Nouveau commentaire')))
   })
 })
+
+describe('Conteneurs, sous-étapes retirées et bon de compagnie sans montant', () => {
+  it('le dossier enregistre le nombre et la taille des conteneurs ; Régulation et Validation des documents n\'existent plus', async () => {
+    const r = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT TC'), compagnie: 'MSC', conteneur: 'MSCU1111111, MSCU2222222, MSCU3333333', nombreConteneurs: 3, tailleConteneur: '40\' HC',
+      marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(r, 201)
+    assert.equal(r.body.nombreConteneurs, 3)
+    assert.equal(r.body.tailleConteneur, '40\' HC')
+    const t = (await api('delba', 'GET', `/api/dossiers/${r.body.id}/sous-etapes`)).body
+    assert.ok(!t.some((x: any) => x.cle === 'regulation' || x.cle === 'validation_docs'))
+    assert.ok(!t.some((x: any) => x.etape === 'validation'), 'l\'étape Validation n\'a plus de tâche')
+
+    // Bon de la compagnie : numéro et date, aucun paiement créé
+    const bon = await api('delba', 'PUT', `/api/dossiers/${r.body.id}/sous-etapes/bon_compagnie/facturation_compagnie`, {
+      statut: 'valide', metadata: { bc_bon_numero: 'MSC-BON-001', bc_bon_date: '2026-10-20' },
+    })
+    expectStatus(bon, 200)
+    assert.equal(bon.body.metadata.bc_bon_numero, 'MSC-BON-001')
+    assert.equal(bon.body.metadata.enregistrement_type, undefined)
+    const pc = await api('delba', 'GET', `/api/finance/paiements-compagnie?dossierId=${r.body.id}`)
+    assert.equal(pc.body.data.length, 0)
+  })
+})
+
+describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
+  it('le montant saisi est décrémenté du solde de la DI ; solde insuffisant refusé ; sans DI refusé', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT DI'), compagnie: 'MSC', conteneur: 'MSCU4545454', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const id = d.body.id
+    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
+    // Sans DI liée : refus explicite
+    const sansDi = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
+      statut: 'valide', metadata: { ff_montant_facture: 100000, ff_reference_facture: unique('PI') },
+    })
+    expectStatus(sansDi, 422)
+    assert.equal(sansDi.body.error, 'DI_REQUISE')
+
+    const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-FF'), client: 'CLIENT DI', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    expectStatus(await api('yasmine', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: id }), 200)
+
+    // Solde insuffisant : refus, la tâche reste ouverte
+    const trop = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
+      statut: 'valide', metadata: { ff_montant_facture: 5_000_000, ff_reference_facture: unique('PI') },
+    })
+    expectStatus(trop, 422)
+    assert.equal(trop.body.error, 'SOLDE_DI_INSUFFISANT')
+
+    const ok = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
+      statut: 'valide', metadata: { ff_montant_facture: '250 000', ff_reference_facture: unique('PI') },
+    })
+    expectStatus(ok, 200)
+    assert.equal(ok.body.metadata.enregistrement_type, 'debit_di')
+    const apres = await api('yasmine', 'GET', `/api/di/${di.body.id}`)
+    assert.equal(Number(apres.body.soldeActuel), 750_000)
+  })
+})

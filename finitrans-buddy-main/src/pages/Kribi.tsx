@@ -22,7 +22,7 @@ const STATUS_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-700", soumission_sgs: "bg-indigo-100 text-indigo-700",
   codage: "bg-purple-100 text-purple-700", validation: "bg-amber-100 text-amber-700",
   paiement: "bg-orange-100 text-orange-700", bon_compagnie: "bg-green-100 text-green-700",
-  operations_kribi: "bg-teal-100 text-teal-700", cloture: "bg-gray-100 text-gray-600",
+  operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700", cloture: "bg-gray-100 text-gray-600",
 };
 
 const BON_TYPES = {

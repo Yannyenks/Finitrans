@@ -20,7 +20,8 @@ async function tasks(who: UserKey, dossierId: string, etape?: string): Promise<T
 /** Le titulaire de chaque tâche de l'étape la valide lui-même. */
 async function completeStage(dossierId: string, etape: string) {
   const list = await tasks('delba', dossierId, etape)
-  assert.ok(list.length > 0, `tâches de ${etape}`)
+  // L'étape Validation n'a plus de tâche : elle se termine avec une preuve
+  if (etape !== 'validation') assert.ok(list.length > 0, `tâches de ${etape}`)
   for (const t of list) {
     const owner = nameOf(t.responsableId) as UserKey
     assert.ok(ids[owner], `tâche ${etape}/${t.cle} attribuée (${t.responsableId})`)
@@ -67,7 +68,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(owner('codage', 'etat_codage'), 'odette')
     assert.equal(owner('paiement', 'paiement_droits'), 'yaya')
     assert.equal(owner('bon_compagnie', 'facturation_compagnie'), 'wandala', 'MSC → Wandala')
-    assert.equal(owner('bon_compagnie', 'gate_pass'), 'wandala')
+    assert.equal(owner('operations_douala', 'bad_terminal'), 'wandala', 'Opérations Douala → Mr Wandala (MSC)')
     assert.equal(owner('cloture', 'rapport_final'), 'yasmine')
     assert.ok(!all.some(t => t.etape === 'operations_kribi'), 'pas d\'étape Kribi pour Douala')
     // Fournisseur & soumission + RVC : M. Soudi ; ailleurs, la Direction supervise
@@ -157,10 +158,13 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(d.responsableId, ids.wandala)
   })
 
-  it('Bon compagnie → Clôture (pas d\'étape Kribi pour un dossier Douala)', async () => {
+  it('Bon compagnie → Opérations Douala → Clôture (pas d\'étape Kribi pour un dossier Douala)', async () => {
     await completeStage(dossierId, 'bon_compagnie')
     await preuve('wandala', dossierId, 'bon_compagnie')
     await advance('wandala', dossierId, 'operations_kribi', 422)
+    await advance('wandala', dossierId, 'operations_douala')
+    await completeStage(dossierId, 'operations_douala')
+    await preuve('wandala', dossierId, 'operations_douala')
     const d = await advance('wandala', dossierId, 'cloture')
     assert.equal(d.responsableId, ids.yasmine)
     await completeStage(dossierId, 'cloture')

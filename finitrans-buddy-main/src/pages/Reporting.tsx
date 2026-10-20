@@ -7,12 +7,12 @@ import { motion } from "framer-motion";
 
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", codage: "Codage", validation: "Validation",
-  paiement: "Paiement", bon_compagnie: "Bon Cie", operations_kribi: "Kribi", cloture: "Clôturé",
+  paiement: "Paiement", bon_compagnie: "Bon Cie", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé",
 };
 
 const STATUS_STEP: Record<string, number> = {
   reception: 1, codage: 2, validation: 3, paiement: 4,
-  bon_compagnie: 5, operations_kribi: 6, cloture: 7,
+  bon_compagnie: 5, operations_douala: 6, operations_kribi: 7, cloture: 8,
 };
 
 const Reporting = () => {

@@ -8,18 +8,18 @@ import { marquerNotifies } from './evenements'
 
 export const STATUS_ORDER: DossierStatus[] = [
   'reception', 'soumission_sgs', 'codage', 'validation',
-  'paiement', 'bon_compagnie', 'operations_kribi', 'cloture',
+  'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi', 'cloture',
 ]
 
 export const STATUS_LABELS: Record<DossierStatus, string> = {
   reception: 'Réception', soumission_sgs: 'Soumission SGS', codage: 'Codage',
   validation: 'Validation', paiement: 'Paiement', bon_compagnie: 'Bon Compagnie',
-  operations_kribi: 'Opérations Kribi', cloture: 'Clôture',
+  operations_douala: 'Opérations Douala', operations_kribi: 'Opérations Kribi', cloture: 'Clôture',
 }
 
-/** Parcours d'un dossier selon son site : l'étape Kribi n'existe que pour les dossiers Kribi. */
+/** Parcours d'un dossier selon son site : « Opérations Douala » pour Douala, « Opérations Kribi » pour Kribi. */
 export function stagesForSite(site: Site): DossierStatus[] {
-  return site === 'Kribi' ? STATUS_ORDER : STATUS_ORDER.filter(s => s !== 'operations_kribi')
+  return STATUS_ORDER.filter(s => site === 'Kribi' ? s !== 'operations_douala' : s !== 'operations_kribi')
 }
 
 export function nextStage(current: DossierStatus, site: Site): DossierStatus | null {
@@ -52,21 +52,20 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
   codage: [
     { cle: 'etat_codage', label: 'État de codage et validation' },
     { cle: 'declaration', label: 'Déclaration' },
-    { cle: 'regulation',  label: 'Régulation' },
   ],
   validation: [
-    { cle: 'validation_docs', label: 'Validation administrative des documents' },
   ],
   paiement: [
     { cle: 'paiement_droits', label: 'Paiement des droits et taxes' },
   ],
   bon_compagnie: [
-    { cle: 'facturation_compagnie', label: 'Facturation & paiement (compagnie maritime)' },
+    { cle: 'facturation_compagnie', label: 'Bon de la compagnie maritime' },
     { cle: 'bon_a_delivrer',        label: 'Soumission & obtention du Bon à Délivrer' },
-    // Partie terminal : à Kribi elle est traitée à l'étape « Opérations Kribi »
-    { cle: 'facturation_terminal',  label: 'Facturation & paiement (redevance portuaire)', sites: ['Douala'] },
-    { cle: 'bon_livraison',         label: 'Bon de livraison', sites: ['Douala'] },
-    { cle: 'gate_pass',             label: 'Gate Pass — Ticket de sortie', sites: ['Douala'] },
+  ],
+  // Partie terminal de Douala (mêmes tâches que Kribi, sans gate pass ; bon à délivrer au lieu du bon de livraison)
+  operations_douala: [
+    { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)', sites: ['Douala'] },
+    { cle: 'bad_terminal',         label: 'Bon à délivrer', sites: ['Douala'] },
   ],
   operations_kribi: [
     { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)', sites: ['Kribi'] },
@@ -102,15 +101,19 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
   },
   // Fournisseur & soumission : M. Soudi (et Mme Samira) ; RVC : M. Delba et M. Soudi
   soumission_sgs:   { owner: 'exploitation', sousEtapes: { ff_soumission: 'exploitation', pvc: 'exploitation' } },
-  codage:           { owner: 'validation', sousEtapes: { etat_codage: 'validation', declaration: 'validation', regulation: 'validation' } },
-  validation:       { owner: 'validation', sousEtapes: { validation_docs: 'validation' } },
+  codage:           { owner: 'validation', sousEtapes: { etat_codage: 'validation', declaration: 'validation' } },
+  // Plus de sous-étape : la responsable de la validation termine l'étape avec une preuve
+  validation:       { owner: 'validation', sousEtapes: {} },
   paiement:         { owner: 'logistique', sousEtapes: { paiement_droits: 'logistique' } },
   bon_compagnie: {
     owner: 'gestion_sorties',
     sousEtapes: {
       facturation_compagnie: 'gestion_sorties', bon_a_delivrer: 'gestion_sorties',
-      facturation_terminal: 'gestion_sorties', bon_livraison: 'gestion_sorties', gate_pass: 'gestion_sorties',
     },
+  },
+  operations_douala: {
+    owner: 'gestion_sorties',
+    sousEtapes: { facturation_terminal: 'gestion_sorties', bad_terminal: 'gestion_sorties' },
   },
   operations_kribi: {
     owner: 'terrain_kribi',
@@ -268,11 +271,10 @@ export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
   'reception.bl': 4, 'reception.facture_proforma': 8, 'reception.saisie_pr': 8, 'reception.paiement_client': 24,
   'reception.di': 24,
   'soumission_sgs.ff_soumission': 24, 'soumission_sgs.pvc': 48,
-  'codage.etat_codage': 8, 'codage.declaration': 8, 'codage.regulation': 8,
-  'validation.validation_docs': 8,
+  'codage.etat_codage': 8, 'codage.declaration': 8,
   'paiement.paiement_droits': 24,
-  'bon_compagnie.facturation_compagnie': 24, 'bon_compagnie.bon_a_delivrer': 24, 'bon_compagnie.facturation_terminal': 24,
-  'bon_compagnie.bon_livraison': 8, 'bon_compagnie.gate_pass': 8,
+  'bon_compagnie.facturation_compagnie': 24, 'bon_compagnie.bon_a_delivrer': 24,
+  'operations_douala.facturation_terminal': 24, 'operations_douala.bad_terminal': 24,
   'operations_kribi.facturation_terminal': 24, 'operations_kribi.bon_livraison': 8, 'operations_kribi.gate_pass': 8,
   'cloture.rapport_final': 8,
 }

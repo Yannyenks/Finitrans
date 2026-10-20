@@ -24,6 +24,8 @@ const createDossierSchema = z.object({
   client:            z.string().min(2),
   compagnie:         zCompagnie,
   conteneur:         z.string().min(3),
+  nombreConteneurs:  z.number().int().min(1).max(500).optional(),
+  tailleConteneur:   z.string().trim().max(30).optional(),
   marchandise:       z.string().min(2),
   site:              z.enum(['Douala', 'Kribi']),
   responsableId:     z.string().uuid().optional(),

@@ -18,7 +18,7 @@ const STATUS_LABELS: Record<string, string> = {
   validation:       "Validation",
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
-  operations_kribi: "Ops Kribi",
+  operations_douala: "Ops Douala", operations_kribi: "Ops Kribi",
   cloture:          "Clôturé",
 };
 
@@ -29,7 +29,7 @@ const STATUS_COLORS: Record<string, string> = {
   validation:       "bg-amber-100 text-amber-700",
   paiement:         "bg-orange-100 text-orange-700",
   bon_compagnie:    "bg-green-100 text-green-700",
-  operations_kribi: "bg-teal-100 text-teal-700",
+  operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
   cloture:          "bg-gray-100 text-gray-600",
 };
 

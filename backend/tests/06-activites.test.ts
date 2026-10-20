@@ -49,26 +49,31 @@ describe('Une tâche terminée crée l\'enregistrement correspondant', () => {
     assert.equal(fin2.body.data.length, 1)
   })
 
-  it('facture compagnie et redevance terminal (Mr Wandala) → paiements compagnie', async () => {
+  it('bon de la compagnie (numéro, date) puis redevance terminal de Douala (Mr Wandala) → paiement terminal', async () => {
     assert.equal(await titulaire('bon_compagnie', 'facturation_compagnie'), 'wandala')
     expectStatus(await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/bon_compagnie/facturation_compagnie`, {
-      statut: 'valide', metadata: { bc_montant: 380000, bc_facture_numero: unique('MSC-INV') },
+      statut: 'valide', metadata: { bc_bon_numero: unique('MSC-BON'), bc_bon_date: '2026-10-20' },
     }), 200)
-    expectStatus(await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/bon_compagnie/facturation_terminal`, {
+    assert.equal(await titulaire('operations_douala', 'facturation_terminal'), 'wandala')
+    expectStatus(await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/operations_douala/facturation_terminal`, {
       statut: 'valide', metadata: { term_montant: 120000 },
     }), 200)
     const pc = await api('wandala', 'GET', `/api/finance/paiements-compagnie?dossierId=${dossierId}`)
-    const types = pc.body.data.map((p: any) => p.type).sort()
-    assert.deepEqual(types, ['frais_portuaires', 'terminal'])
+    assert.deepEqual(pc.body.data.map((p: any) => p.type), ['terminal'], 'le bon de la compagnie ne porte pas de montant')
   })
 
-  it('gate pass validé avec chauffeur → ticket de sortie enregistré', async () => {
-    const r = await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/bon_compagnie/gate_pass`, {
+  it('gate pass (Kribi) validé avec chauffeur → ticket de sortie enregistré', async () => {
+    const k = await api('yasmine', 'POST', '/api/dossiers', {
+      client: 'CLIENT GATE PASS', compagnie: 'MSC', conteneur: 'MSCU6666666', marchandise: 'Divers', site: 'Kribi', dateArrivee: new Date().toISOString(),
+    })
+    const t = await api('delba', 'GET', `/api/dossiers/${k.body.id}/sous-etapes`)
+    const gp = t.body.find((x: any) => x.etape === 'operations_kribi' && x.cle === 'gate_pass')
+    const r = await api(nom(gp.responsableId), 'PUT', `/api/dossiers/${k.body.id}/sous-etapes/operations_kribi/gate_pass`, {
       statut: 'valide', metadata: { immatriculation: 'LT 999 ZZ', gp_chauffeur: 'MBARGA Paul', gp_telephone: '677112233', gp_destination: 'Yaoundé' },
     })
     expectStatus(r, 200)
-    assert.match(r.body.metadata.gate_pass_numero, /^GP-DLA-\d{4}$/)
-    const gps = await api('wandala', 'GET', `/api/dossiers/${dossierId}/gate-passes`)
+    assert.match(r.body.metadata.gate_pass_numero, /^GP-KRB-\d{4}$/)
+    const gps = await api('delba', 'GET', `/api/dossiers/${k.body.id}/gate-passes`)
     assert.equal(gps.body[0].chauffeur, 'MBARGA Paul')
   })
 

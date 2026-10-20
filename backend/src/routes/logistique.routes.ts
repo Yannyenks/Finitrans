@@ -43,6 +43,8 @@ const transportSchema = z.object({
   dateLivraison:  z.string().datetime().nullable().optional(),
   origine:        z.string().max(255).nullable().optional(),
   destination:    z.string().trim().min(2).max(255),
+  /** Trajet aller-retour (ex. Douala ⇄ Kribi) */
+  allerRetour:    z.boolean().optional(),
   statut:         z.enum(STATUTS).optional(),
   notes:          z.string().nullable().optional(),
 })
@@ -156,7 +158,7 @@ const logistiqueRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     })
     if (t.dossierId) {
       await logAudit(t.dossierId, request.user.id, 'TRANSPORT',
-        `TC ${t.conteneur} — ${t.camion?.immatriculation ?? 'véhicule ?'} / ${t.chauffeur?.nom ?? 'chauffeur ?'} → ${t.destination} le ${t.dateEnlevement.toLocaleDateString('fr-FR')}`)
+        `TC ${t.conteneur} — ${t.camion?.immatriculation ?? 'véhicule ?'} / ${t.chauffeur?.nom ?? 'chauffeur ?'} : ${t.origine ?? '?'} ${t.allerRetour ? '<->' : '->'} ${t.destination} le ${t.dateEnlevement.toLocaleDateString('fr-FR')}`)
     }
     return reply.code(201).send(t)
   })

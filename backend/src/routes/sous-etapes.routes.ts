@@ -7,6 +7,7 @@ import { authenticate } from '../middleware/authenticate'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { recevoirFichier } from '../services/televersement'
+import { verifierDebitDI } from '../services/di'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
@@ -137,6 +138,18 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       data.statut = 'en_cours'
       if (!existing?.startedAt) data.startedAt = maintenant
       if (!existing?.deadline && body.deadline === undefined) data.deadline = await echeanceSla(etape, cle, maintenant)
+    }
+
+    // Facture fournisseur (FF et soumission) : débitée sur la DI du dossier — contrôle avant validation
+    if (body.statut === 'valide' && cle === 'ff_soumission' && !(existing?.metadata as Record<string, unknown> | null)?.enregistrement_id) {
+      const meta = { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) }
+      const montant = Number(String(meta.ff_montant_facture ?? '').replace(/\s/g, '').replace(',', '.'))
+      if (montant > 0) {
+        if (!dossier.diId) {
+          return reply.code(422).send({ error: 'DI_REQUISE', message: 'Aucune DI n\'est liée à ce dossier : liez la déclaration d\'importation avant de saisir la facture fournisseur.' })
+        }
+        await verifierDebitDI(dossier.diId, montant, typeof meta.ff_reference_facture === 'string' ? meta.ff_reference_facture : null)
+      }
     }
 
     let row = await prisma.sousEtapeDossier.upsert({

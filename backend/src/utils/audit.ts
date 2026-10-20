@@ -28,7 +28,7 @@ export const LIBELLES_ACTION: Record<string, string> = {
   ETAT_CODAGE_VALIDE: 'Position tarifaire validée', ETAT_CODAGE_REJETE: 'Position tarifaire rejetée', CODAGE_VALIDE: 'Codage validé',
   PAIEMENT_DOUANE: 'Droits et taxes payés', PAIEMENT_COMPAGNIE: 'Paiement compagnie', REGLEMENT_CLIENT: 'Règlement client',
   GATE_PASS: 'Gate pass émis', BON_LIVRAISON: 'Bon de livraison', CREATION_FACTURE: 'Facture créée', VIREMENT: 'Virement',
-  PENALITE: 'Pénalité', TRANSPORT: 'Transport', TRANSPORT_STATUT: 'Transport mis à jour', COMPTE_RENDU_ARCHIVE: 'Compte rendu archivé',
+  PENALITE: 'Pénalité', DEBIT_DI: 'DI débitée', TRANSPORT: 'Transport', TRANSPORT_STATUT: 'Transport mis à jour', COMPTE_RENDU_ARCHIVE: 'Compte rendu archivé',
 }
 
 /** Journal d'activité global (actions hors dossier). Ne fait jamais échouer la requête. */

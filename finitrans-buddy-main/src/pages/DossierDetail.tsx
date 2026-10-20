@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EquipeParcours from "@/components/dossier/EquipeParcours";
+import { TAILLES_CONTENEUR } from "@/components/NouveauDossierDialog";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -35,7 +36,7 @@ const STATUS_LABELS: Record<string, string> = {
   validation:       "Validation",
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
-  operations_kribi: "Kribi",
+  operations_douala: "Douala", operations_kribi: "Kribi",
   cloture:          "Clôturé",
 };
 const STATUS_COLORS: Record<string, string> = {
@@ -45,12 +46,12 @@ const STATUS_COLORS: Record<string, string> = {
   validation:       "bg-amber-100 text-amber-700",
   paiement:         "bg-orange-100 text-orange-700",
   bon_compagnie:    "bg-green-100 text-green-700",
-  operations_kribi: "bg-teal-100 text-teal-700",
+  operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
   cloture:          "bg-gray-100 text-gray-600",
 };
 const STATUS_ORDER = [
   "reception", "soumission_sgs", "codage", "validation",
-  "paiement", "bon_compagnie", "operations_kribi", "cloture",
+  "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture",
 ];
 
 const STEP_CONFIG: Record<string, {
@@ -65,6 +66,7 @@ const STEP_CONFIG: Record<string, {
   validation:       { icon: ShieldCheck,   description: "Vérification des taxes, validation administrative et approbation du responsable",            iconBg: "bg-amber-100",  iconText: "text-amber-700",  iconRing: "ring-amber-300",  borderActive: "border-amber-200/60",  bgActive: "from-amber-50/60"  },
   paiement:         { icon: Landmark,      description: "Paiement des droits de douane et taxes réglementaires au Trésor Public",                     iconBg: "bg-orange-100", iconText: "text-orange-700", iconRing: "ring-orange-300", borderActive: "border-orange-200/60", bgActive: "from-orange-50/60" },
   bon_compagnie:    { icon: Ship,          description: "Obtention du bon de livraison auprès de la compagnie maritime concernée",                   iconBg: "bg-green-100",  iconText: "text-green-700",  iconRing: "ring-green-300",  borderActive: "border-green-200/60",  bgActive: "from-green-50/60"  },
+  operations_douala: { icon: Ship,        description: "Opérations au terminal de Douala : redevance portuaire et bon à délivrer",                     iconBg: "bg-cyan-100",   iconText: "text-cyan-700",   iconRing: "ring-cyan-300",   borderActive: "border-cyan-200/60",   bgActive: "from-cyan-50/60"   },
   operations_kribi: { icon: MapPin,        description: "Opérations de dédouanement et de livraison au port de Kribi",                               iconBg: "bg-teal-100",   iconText: "text-teal-700",   iconRing: "ring-teal-300",   borderActive: "border-teal-200/60",   bgActive: "from-teal-50/60"   },
   cloture:          { icon: CheckCircle2,  description: "Dossier clôturé — marchandise livrée au client, opérations terminées",                      iconBg: "bg-gray-100",   iconText: "text-gray-600",   iconRing: "ring-gray-300",   borderActive: "border-gray-200/60",   bgActive: "from-gray-50/60"   },
 };
@@ -77,7 +79,7 @@ const SLA_HOURS: Record<string, number> = {
   validation:       48,
   paiement:         72,
   bon_compagnie:    48,
-  operations_kribi: 72,
+  operations_douala: 48, operations_kribi: 72,
   cloture:          24,
 };
 
@@ -292,6 +294,7 @@ const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open:
   const qc = useQueryClient();
   const initial = () => ({
     client: dossier.client ?? "", marchandise: dossier.marchandise ?? "", conteneur: dossier.conteneur ?? "",
+    nombreConteneurs: String(dossier.nombreConteneurs ?? 1), tailleConteneur: dossier.tailleConteneur ?? "",
     fournisseur: dossier.fournisseur ?? "", numeroBL: dossier.numeroBL ?? "", numDeclaration: dossier.numDeclaration ?? "",
     regimeDouanier: dossier.regimeDouanier ?? "", priorite: dossier.priorite ?? "moyenne",
     dateLimiteSortie: dossier.dateLimiteSortie ? String(dossier.dateLimiteSortie).slice(0, 10) : "", notes: dossier.notes ?? "",
@@ -300,7 +303,10 @@ const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open:
   const champ = (k: keyof ReturnType<typeof initial>) => ({ value: v[k], onChange: (e: any) => setV(x => ({ ...x, [k]: e.target.value })) });
   const enregistrer = useMutation({
     mutationFn: () => {
-      const corps: Record<string, unknown> = { client: v.client.trim(), marchandise: v.marchandise.trim(), conteneur: v.conteneur.trim(), priorite: v.priorite };
+      const corps: Record<string, unknown> = {
+        client: v.client.trim(), marchandise: v.marchandise.trim(), conteneur: v.conteneur.trim(), priorite: v.priorite,
+        nombreConteneurs: Math.max(1, parseInt(v.nombreConteneurs, 10) || 1), ...(v.tailleConteneur ? { tailleConteneur: v.tailleConteneur } : {}),
+      };
       for (const k of ["fournisseur", "numeroBL", "numDeclaration", "regimeDouanier", "notes"] as const) if (v[k].trim() || dossier[k]) corps[k] = v[k].trim();
       if (v.dateLimiteSortie) corps.dateLimiteSortie = new Date(`${v.dateLimiteSortie}T23:59:00`).toISOString();
       return api.patch(`/api/dossiers/${dossier.id}`, corps);
@@ -320,7 +326,15 @@ const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open:
         <form className="grid grid-cols-2 gap-3" onSubmit={e => { e.preventDefault(); enregistrer.mutate(); }}>
           <div className="col-span-2"><Label htmlFor="md-client">Client *</Label><Input id="md-client" required minLength={2} {...champ("client")} /></div>
           <div><Label htmlFor="md-march">Marchandise *</Label><Input id="md-march" required minLength={2} {...champ("marchandise")} /></div>
-          <div><Label htmlFor="md-tc">Conteneur *</Label><Input id="md-tc" required minLength={3} {...champ("conteneur")} /></div>
+          <div><Label htmlFor="md-tc">N° de conteneur(s) *</Label><Input id="md-tc" required minLength={3} {...champ("conteneur")} /></div>
+          <div><Label htmlFor="md-nb">Nombre de conteneurs *</Label><Input id="md-nb" type="number" min={1} max={500} required {...champ("nombreConteneurs")} /></div>
+          <div>
+            <Label>Taille du conteneur</Label>
+            <Select value={v.tailleConteneur} onValueChange={x => setV(p => ({ ...p, tailleConteneur: x }))}>
+              <SelectTrigger aria-label="Taille du conteneur"><SelectValue placeholder="Choisir…" /></SelectTrigger>
+              <SelectContent>{TAILLES_CONTENEUR.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
           <div><Label htmlFor="md-fourn">Fournisseur</Label><Input id="md-fourn" {...champ("fournisseur")} /></div>
           <div><Label htmlFor="md-bl">N° BL</Label><Input id="md-bl" {...champ("numeroBL")} /></div>
           <div><Label htmlFor="md-decl">N° déclaration</Label><Input id="md-decl" {...champ("numDeclaration")} /></div>
@@ -1511,6 +1525,7 @@ const DossierDetail = () => {
               { icon: Package,       label: "Marchandise",   value: dossier.marchandise },
               { icon: Ship,          label: "Compagnie",     value: dossier.compagnie?.replace("_", "-") },
               { icon: FileText,      label: "Conteneur",     value: dossier.conteneur },
+              { icon: Package,       label: "Conteneurs",    value: `${dossier.nombreConteneurs ?? 1}${dossier.tailleConteneur ? ` × ${dossier.tailleConteneur}` : ""}` },
               { icon: FileText,      label: "N° de BL",      value: dossier.numeroBL },
               { icon: MapPin,        label: "Site",          value: dossier.site },
               { icon: User,          label: "Responsable",   value: dossier.responsable?.nom ?? "—" },
@@ -1598,7 +1613,8 @@ const DossierDetail = () => {
           <div className="stat-card">
             <h3 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
               <Container className="w-4 h-4 text-secondary" />
-              Conteneurs ({conteneurs.length})
+              Conteneurs ({dossier.nombreConteneurs ?? conteneurs.length})
+              {dossier.tailleConteneur && <span className="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">{dossier.nombreConteneurs ?? 1} × {dossier.tailleConteneur}</span>}
             </h3>
             {conteneurs.length === 0 ? (
               <p className="text-xs text-muted-foreground">Aucun conteneur renseigné</p>

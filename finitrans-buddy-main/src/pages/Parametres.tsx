@@ -23,7 +23,7 @@ const STEP_LABELS: Record<string, string> = {
   validation:       "Validation",
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
-  operations_kribi: "Kribi",
+  operations_douala: "Douala", operations_kribi: "Kribi",
   cloture:          "Clôture",
 };
 
@@ -35,7 +35,7 @@ const DEFAULT_SLA: Record<string, number> = {
   validation:       2,
   paiement:         3,
   bon_compagnie:    2,
-  operations_kribi: 3,
+  operations_douala: 2, operations_kribi: 3,
   cloture:          1,
 };
 

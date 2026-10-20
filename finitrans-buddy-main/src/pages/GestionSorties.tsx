@@ -20,7 +20,7 @@ import { toast } from "@/hooks/use-toast";
 const STATUS_COLORS: Record<string, string> = {
   paiement: "bg-orange-100 text-orange-700",
   bon_compagnie: "bg-green-100 text-green-700",
-  operations_kribi: "bg-teal-100 text-teal-700",
+  operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
   cloture: "bg-gray-100 text-gray-600",
 };
 const erreur = (err: any) => toast({ title: "Erreur", description: err?.message, variant: "destructive" });
@@ -274,7 +274,7 @@ const GestionSorties = () => {
 
   const { data: actifs, isLoading } = useQuery({
     queryKey: ["sorties", "actifs", scope],
-    queryFn: () => api.get<any>(`/api/dossiers?status=paiement,bon_compagnie,operations_kribi&limit=100${scope}`),
+    queryFn: () => api.get<any>(`/api/dossiers?status=paiement,bon_compagnie,operations_douala,operations_kribi&limit=100${scope}`),
     refetchInterval: 30_000,
   });
   const { data: clotures } = useQuery({

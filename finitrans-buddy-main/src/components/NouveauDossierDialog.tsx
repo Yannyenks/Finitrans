@@ -12,6 +12,9 @@ import { api, getStoredUser } from "@/lib/api";
 import { can } from "@/lib/permissions";
 import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
 
+/** Tailles de conteneurs proposées */
+export const TAILLES_CONTENEUR = ["20' Dry", "40' Dry", "40' HC", "45' HC", "20' Reefer", "40' Reefer", "20' Open Top", "40' Open Top", "20' Flat Rack", "40' Flat Rack", "Citerne (ISO tank)", "Vrac / hors conteneur"];
+
 // Taux de change vers XAF (approximatifs — à ajuster selon cours du jour)
 const TAUX_CHANGE: Record<string, number> = {
   XAF: 1,
@@ -34,7 +37,7 @@ const NouveauDossierDialog = () => {
   const [open, setOpen] = useState(false);
   const [diDevise, setDiDevise] = useState<"XAF" | "EUR" | "USD">("XAF");
   const [form, setForm] = useState({
-    client: "", compagnie: "", conteneur: "", marchandise: "",
+    client: "", compagnie: "", conteneur: "", nombreConteneurs: "1", tailleConteneur: "", marchandise: "",
     site: "Douala", dateArrivee: "", priorite: "moyenne",
     responsableId: "", notes: "",
     montantDI: "",
@@ -83,7 +86,7 @@ const NouveauDossierDialog = () => {
       toast({ title: "Dossier créé", description: `${res.numero} — ${res.client}${montantEnXAF ? ` · DI ${montantEnXAF.toLocaleString("fr-FR")} FCFA` : ""}` });
       setOpen(false);
       setDiDevise("XAF");
-      setForm({ client: "", compagnie: "", conteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "", fournisseur: "", numeroBL: "" });
+      setForm({ client: "", compagnie: "", conteneur: "", nombreConteneurs: "1", tailleConteneur: "", marchandise: "", site: "Douala", dateArrivee: "", priorite: "moyenne", responsableId: "", notes: "", montantDI: "", fournisseur: "", numeroBL: "" });
     },
     onError: (err: any) => {
       toast({ title: "Erreur", description: err.message ?? "Création échouée", variant: "destructive" });
@@ -103,6 +106,8 @@ const NouveauDossierDialog = () => {
       client:        form.client,
       compagnie:     form.compagnie,
       conteneur:     form.conteneur,
+      nombreConteneurs: Math.max(1, parseInt(form.nombreConteneurs, 10) || 1),
+      tailleConteneur:  form.tailleConteneur || undefined,
       marchandise:   form.marchandise,
       site:          form.site,
       responsableId: form.responsableId && form.responsableId !== "__auto__" ? form.responsableId : undefined,
@@ -150,15 +155,36 @@ const NouveauDossierDialog = () => {
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label className="text-xs font-medium flex items-center gap-1.5">
-                <FileText className="w-3.5 h-3.5 text-muted-foreground" /> N° Conteneur *
+                <FileText className="w-3.5 h-3.5 text-muted-foreground" /> N° de conteneur(s) *
               </Label>
-              <Input placeholder="Ex: MSCU7654321" value={form.conteneur} onChange={e => setForm({...form, conteneur: e.target.value})} className="bg-muted/50 font-mono" />
+              <Input placeholder="Ex: MSCU7654321, MSCU7654322" value={form.conteneur} onChange={e => setForm({...form, conteneur: e.target.value})} className="bg-muted/50 font-mono" />
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-medium flex items-center gap-1.5">
                 <Package className="w-3.5 h-3.5 text-muted-foreground" /> Type de marchandise *
               </Label>
               <Input placeholder="Ex: Matériaux de construction" value={form.marchandise} onChange={e => setForm({...form, marchandise: e.target.value})} className="bg-muted/50" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-medium flex items-center gap-1.5">
+                <Hash className="w-3.5 h-3.5 text-muted-foreground" /> Nombre de conteneurs *
+              </Label>
+              <Input type="number" min={1} max={500} value={form.nombreConteneurs} aria-label="Nombre de conteneurs"
+                onChange={e => setForm({...form, nombreConteneurs: e.target.value})} className="bg-muted/50 font-mono" />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-medium flex items-center gap-1.5">
+                <Package className="w-3.5 h-3.5 text-muted-foreground" /> Taille du conteneur
+              </Label>
+              <Select value={form.tailleConteneur} onValueChange={v => setForm({...form, tailleConteneur: v})}>
+                <SelectTrigger className="bg-muted/50" aria-label="Taille du conteneur"><SelectValue placeholder="Choisir…" /></SelectTrigger>
+                <SelectContent>
+                  {TAILLES_CONTENEUR.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
           </div>
 

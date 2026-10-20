@@ -8,6 +8,7 @@ import { prisma } from '../config/prisma'
 import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { clientParNom } from './crm'
+import { debiterDI } from './di'
 
 export const MODES_REGLEMENT = ['virement', 'cheque', 'especes', 'traite', 'mobile_money', 'autre'] as const
 export const LIBELLES_MODE: Record<ModeReglement, string> = {
@@ -41,6 +42,19 @@ export async function enregistrerDepuisSousEtape(
   if (meta.enregistrement_id) return null // déjà créé (révision puis revalidation)
   const dossier = await prisma.dossier.findUnique({ where: { id: dossierId } })
   if (!dossier) return null
+
+  // Facture fournisseur (FF et soumission) → débit de la DI du dossier
+  if (cle === 'ff_soumission') {
+    const montant = nombre(meta.ff_montant_facture)
+    if (!montant || !dossier.diId) return null
+    const ref = texte(meta.ff_reference_facture)
+    const debit = await debiterDI({
+      diId: dossier.diId, montant, referenceFacture: ref, dossierId, userId,
+      motif: `Facture fournisseur${ref ? ` ${ref}` : ''} — dossier ${dossier.numero}`,
+    })
+    await logAudit(dossierId, userId, 'DEBIT_DI', `Facture fournisseur ${ref ?? ''} : ${montant.toLocaleString('fr-FR')} FCFA débités sur la DI ${debit.numero} (solde ${Math.round(debit.nouveauSolde).toLocaleString('fr-FR')} FCFA)`.replace('  ', ' '))
+    return { enregistrement_id: debit.mouvement.id, enregistrement_type: 'debit_di' }
+  }
 
   // Paiement par le client → règlement client (mode, payeur, référence), rattaché à la fiche CRM
   if (cle === 'paiement_client') {
@@ -79,6 +93,7 @@ export async function enregistrerDepuisSousEtape(
   const compagnieCfg: Record<string, { montant: string; numero: string; date: string; type: 'frais_portuaires' | 'terminal' }> = {
     'bon_compagnie.facturation_compagnie': { montant: 'bc_montant', numero: 'bc_facture_numero', date: 'bc_date_paiement', type: 'frais_portuaires' },
     'bon_compagnie.facturation_terminal':  { montant: 'term_montant', numero: 'term_facture_numero', date: 'term_date_paiement', type: 'terminal' },
+    'operations_douala.facturation_terminal': { montant: 'term_montant', numero: 'term_facture_numero', date: 'term_date_paiement', type: 'terminal' },
     'operations_kribi.facturation_terminal': { montant: 'kct_montant', numero: 'kct_facture_numero', date: 'kct_date_paiement', type: 'terminal' },
   }
   const cfg = compagnieCfg[`${etape}.${cle}`]

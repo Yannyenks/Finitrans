@@ -296,7 +296,7 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // GET /api/employe/heatmap — grille étape x employé pour le dashboard DG
   fastify.get('/heatmap', { preHandler: [authenticate, authorize('permRapports', 'lecture')] }, async (_request, reply) => {
-    const etapes = ['reception', 'codage', 'validation', 'paiement', 'bon_compagnie', 'operations_kribi']
+    const etapes = ['reception', 'codage', 'validation', 'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi']
 
     const employes = await prisma.user.findMany({
       where: { actif: true },

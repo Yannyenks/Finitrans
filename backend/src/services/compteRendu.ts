@@ -99,7 +99,7 @@ const libelleAction = (a: string) => {
   if (LIBELLES_ACTION[a]) return LIBELLES_ACTION[a]
   const t = a.replace(/_/g, ' ').toLowerCase(); return t.charAt(0).toUpperCase() + t.slice(1)
 }
-const libellesEtapes = (t: string) => t.replace(/(reception|soumission_sgs|codage|validation|paiement|bon_compagnie|operations_kribi|cloture)/g, k => STATUS_LABELS[k as DossierStatus] ?? k)
+const libellesEtapes = (t: string) => t.replace(/(reception|soumission_sgs|codage|validation|paiement|bon_compagnie|operations_douala|operations_kribi|cloture)/g, k => STATUS_LABELS[k as DossierStatus] ?? k)
 const statut = (s: string) => STATUT[s] ?? s.replace(/_/g, ' ')
 
 /** Détails métier saisis sur une tâche (paiement, facture, règlement, immatriculation…) */
@@ -362,7 +362,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   doc.font('Helvetica').fontSize(7).fillColor('#9FB3CF').text('CLIENT', MARGE + 18, yc + 14, { characterSpacing: 1.2 })
   doc.font('Helvetica-Bold').fontSize(16).fillColor('#FFFFFF').text(txt(dossier.client), MARGE + 18, yc + 24, { width: LARGEUR - 180, lineBreak: false, ellipsis: true })
   doc.font('Helvetica').fontSize(8.5).fillColor('#C9D6E8')
-    .text(txt(`${dossier.marchandise}  ·  ${compagnie}  ·  ${dossier.site}  ·  Conteneur ${dossier.conteneur}`), MARGE + 18, yc + 46, { width: LARGEUR - 180 })
+    .text(txt(`${dossier.marchandise}  ·  ${compagnie}  ·  ${dossier.site}  ·  ${dossier.nombreConteneurs} x ${dossier.tailleConteneur ?? 'conteneur'}  ·  ${dossier.conteneur}`), MARGE + 18, yc + 46, { width: LARGEUR - 180 })
     .text(txt(`Ouvert le ${heure(dossier.dateCreation)}  ·  Responsable : ${dossier.responsable?.nom ?? '—'}`), MARGE + 18, yc + 62, { width: LARGEUR - 180 })
   const badge = cloture ? 'CLÔTURÉ' : txt(STATUS_LABELS[dossier.status]).toUpperCase()
   doc.font('Helvetica').fontSize(7).fillColor('#9FB3CF').text('ÉTAPE', MARGE + LARGEUR - 122, yc + 14, { characterSpacing: 1.2 })
@@ -410,7 +410,8 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   r.section('1', 'Identification du dossier')
   r.champs([
     ['Client', dossier.client], ['Marchandise', dossier.marchandise], ['Fournisseur', dossier.fournisseur],
-    ['Compagnie maritime', compagnie], ['Site', dossier.site], ['Conteneur', dossier.conteneur],
+    ['Compagnie maritime', compagnie], ['Site', dossier.site], ['Conteneur(s)', dossier.conteneur],
+    ['Nombre de conteneurs', String(dossier.nombreConteneurs)], ['Taille', dossier.tailleConteneur], ['Honoraires prévus', dossier.montantHonoraires ? fcfa(dossier.montantHonoraires) : null],
     ['N° BL', dossier.numeroBL], ['N° déclaration', dossier.numDeclaration], ['Régime douanier', dossier.regimeDouanier],
     ['DI', dossier.di?.numero ?? dossier.numeroDI], ['Arrivée', jour(dossier.dateArrivee)], ['Date limite de sortie', jour(dossier.dateLimiteSortie)],
     ['Ouverture', heure(dossier.dateCreation)], [cloture ? 'Responsable de clôture' : 'Responsable actuel', dossier.responsable?.nom], ['Priorité', dossier.priorite],
