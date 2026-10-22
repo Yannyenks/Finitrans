@@ -38,7 +38,7 @@ const CATEGORIES_DEPOT = Object.keys(CATEGORIES).filter(c => c !== "compte_rendu
 
 const ETAPES: Record<string, string> = {
   reception: "Réception", soumission_sgs: "Soumission SGS", codage: "Codage", validation: "Validation", paiement: "Paiement",
-  bon_compagnie: "Bon Compagnie", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôture",
+  bon_compagnie: "Bon Compagnie", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôture", facturation: "Facturation client",
 };
 
 type Format = "pdf" | "image" | "tableur" | "texte" | "archive" | "autre";

@@ -9,6 +9,7 @@ import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { clientParNom } from './crm'
 import { debiterDI } from './di'
+import { creerFactureClient } from './facturation'
 
 export const MODES_REGLEMENT = ['virement', 'cheque', 'especes', 'traite', 'mobile_money', 'autre'] as const
 export const LIBELLES_MODE: Record<ModeReglement, string> = {
@@ -42,6 +43,13 @@ export async function enregistrerDepuisSousEtape(
   if (meta.enregistrement_id) return null // déjà créé (révision puis revalidation)
   const dossier = await prisma.dossier.findUnique({ where: { id: dossierId } })
   if (!dossier) return null
+
+  // Facturation client (après la clôture) → facture validée + compte rendu archivé à jour
+  if (cle === 'facture_client') {
+    const { facture, totaux } = await creerFactureClient(dossierId, meta)
+    await logAudit(dossierId, userId, 'FACTURE_CLIENT', `Facture ${facture.numero} émise : ${Math.round(totaux.ttc).toLocaleString('fr-FR')} FCFA TTC (net à payer ${Math.round(totaux.net).toLocaleString('fr-FR')} FCFA)`)
+    return { enregistrement_id: facture.id, enregistrement_type: 'facture_client', facture_numero: facture.numero }
+  }
 
   // Facture fournisseur (FF et soumission) → débit de la DI du dossier
   if (cle === 'ff_soumission') {

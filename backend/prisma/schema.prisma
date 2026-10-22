@@ -232,6 +232,8 @@ model Facture {
   // Ventilation comptable (optionnelle) : montant = HT honoraires + TVA + débours refacturés
   montantTVA     Decimal?      @map("montant_tva") @db.Decimal(15, 2)
   montantDebours Decimal?      @map("montant_debours") @db.Decimal(15, 2)
+  /// Lignes de la facture client : [{ libelle, montant, nature: "honoraires" | "debours" }]
+  lignes         Json?
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
   dossier        Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
@@ -651,6 +653,7 @@ enum DossierStatus {
   operations_douala
   operations_kribi
   cloture
+  facturation
 
   @@map("dossier_status")
 }

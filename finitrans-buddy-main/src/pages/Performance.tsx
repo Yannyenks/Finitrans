@@ -17,7 +17,7 @@ const STEP_LABELS: Record<string, string> = {
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
   operations_douala: "Douala", operations_kribi: "Kribi",
-  cloture:          "Clôture",
+  cloture:          "Clôture", facturation: "Facturation client",
 };
 
 const SLA_HOURS: Record<string, number> = {
@@ -28,7 +28,7 @@ const SLA_HOURS: Record<string, number> = {
   paiement:         72,
   bon_compagnie:    48,
   operations_douala: 48, operations_kribi: 72,
-  cloture:          24,
+  cloture:          24, facturation: 48,
 };
 
 const PROFIL_LABELS: Record<string, string> = {

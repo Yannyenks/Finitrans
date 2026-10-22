@@ -169,7 +169,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(d.responsableId, ids.yasmine)
     await completeStage(dossierId, 'cloture')
     const ns = await api('yasmine', 'GET', `/api/dossiers/${dossierId}/next-step`)
-    assert.equal(ns.body.etapeSuivante, null)
+    assert.equal(ns.body.etapeSuivante, 'facturation', 'la facturation client suit la clôture')
     assert.equal(ns.body.completion.allDone, true)
   })
 

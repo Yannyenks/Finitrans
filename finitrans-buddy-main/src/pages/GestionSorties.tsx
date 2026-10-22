@@ -21,7 +21,7 @@ const STATUS_COLORS: Record<string, string> = {
   paiement: "bg-orange-100 text-orange-700",
   bon_compagnie: "bg-green-100 text-green-700",
   operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
-  cloture: "bg-gray-100 text-gray-600",
+  cloture: "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 const erreur = (err: any) => toast({ title: "Erreur", description: err?.message, variant: "destructive" });
 const today = () => new Date().toISOString().slice(0, 10);

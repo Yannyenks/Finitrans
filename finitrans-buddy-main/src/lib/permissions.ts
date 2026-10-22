@@ -71,7 +71,7 @@ export const STATUS_LABELS: Record<string, string> = {
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
   operations_douala: "Opérations Douala", operations_kribi: "Opérations Kribi",
-  cloture:          "Clôture",
+  cloture:          "Clôture", facturation: "Facturation client",
 };
 
 export const fcfa = (n: number | string | null | undefined) =>

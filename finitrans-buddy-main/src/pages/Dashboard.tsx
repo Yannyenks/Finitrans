@@ -69,14 +69,14 @@ const TiltCard = ({ children, delay = 0, className = "" }: { children: React.Rea
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", codage: "Codage", validation: "Validation",
   paiement: "Paiement", bon_compagnie: "Bon Compagnie",
-  operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé",
+  operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé", facturation: "Facturation",
 };
 
 const STATUS_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-700",   codage: "bg-purple-100 text-purple-700",
   validation: "bg-amber-100 text-amber-700", paiement: "bg-orange-100 text-orange-700",
   bon_compagnie: "bg-green-100 text-green-700", operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
-  cloture: "bg-gray-100 text-gray-600",
+  cloture: "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 
 /* ─── Component ─────────────────────────────────────────────── */

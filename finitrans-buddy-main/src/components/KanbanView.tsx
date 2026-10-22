@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-const columns = ["reception", "soumission_sgs", "codage", "validation", "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture"];
+const columns = ["reception", "soumission_sgs", "codage", "validation", "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture", "facturation"];
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -14,7 +14,7 @@ const STATUS_LABELS: Record<string, string> = {
   paiement:         "Paiement",
   bon_compagnie:    "Bon Cie",
   operations_douala: "Douala", operations_kribi: "Kribi",
-  cloture:          "Clôturé",
+  cloture:          "Clôturé", facturation: "Facturation",
 };
 
 const STATUS_COLORS: Record<string, string> = {
@@ -25,7 +25,7 @@ const STATUS_COLORS: Record<string, string> = {
   paiement:         "bg-orange-100 text-orange-700",
   bon_compagnie:    "bg-green-100 text-green-700",
   operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
-  cloture:          "bg-gray-100 text-gray-600",
+  cloture:          "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 
 const KanbanView = () => {

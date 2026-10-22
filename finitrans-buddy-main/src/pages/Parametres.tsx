@@ -24,7 +24,7 @@ const STEP_LABELS: Record<string, string> = {
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
   operations_douala: "Douala", operations_kribi: "Kribi",
-  cloture:          "Clôture",
+  cloture:          "Clôture", facturation: "Facturation client",
 };
 
 /** Délais cibles par étape, en jours (paramètre serveur « sla_jours » utilisé par le workflow). */
@@ -36,7 +36,7 @@ const DEFAULT_SLA: Record<string, number> = {
   paiement:         3,
   bon_compagnie:    2,
   operations_douala: 2, operations_kribi: 3,
-  cloture:          1,
+  cloture:          1, facturation: 2,
 };
 
 type SlaSousEtape = { cle: string; etape: string; etapeLabel: string; label: string; sites: string[] | null; heures: number; defaut: number };

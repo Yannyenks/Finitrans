@@ -20,6 +20,7 @@ import { isSupervisor } from "@/lib/permissions";
 import { useLiensExternes, urlValide } from "@/lib/liens";
 import { dateHeure, dureeEntre } from "@/lib/temps";
 import CompteARebours from "@/components/CompteARebours";
+import FactureClientDialog from "@/components/dossier/FactureClientDialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
@@ -47,6 +48,8 @@ export type SousEtapeConfig = {
   facture?:            { montant: string; numero: string; date: string; titre: string; sousTitre?: string; libelleNumero?: string };
   outputLabel?:        string;
   fields?:             FieldDef[];
+  /** Facture client à établir en terminant la tâche (lignes, TVA, PDF) */
+  factureClient?:      boolean;
   /** Bon de la compagnie : numéro et date à saisir en terminant la tâche (pas de montant) */
   bonCompagnie?:       boolean;
   /** Règlement du client à saisir en terminant la tâche (mode, client, référence…) */
@@ -226,6 +229,22 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       fields: [
         { key: "rapport_observations", label: "Observations finales", type: "textarea", placeholder: "Résumé des opérations, incidents, points d'attention…" },
         { key: "rapport_date",         label: "Date de clôture",      type: "date" },
+      ],
+    },
+  ],
+  facturation: [
+    {
+      cle: "facture_client", label: "Établissement de la facture client",
+      description: "Facture du dossier au client : honoraires, débours (droits et taxes, frais compagnie, redevances), TVA — PDF aux couleurs FINITRANS",
+      factureClient: true, outputLabel: "Facture client (PDF)",
+    },
+    {
+      cle: "remise_facture", label: "Remise de la facture au client",
+      description: "Transmission de la facture au client et accusé de réception",
+      fields: [
+        { key: "remise_mode",         label: "Mode de remise", type: "text", placeholder: "E-mail, en main propre, courrier…" },
+        { key: "remise_date",         label: "Date de remise", type: "date" },
+        { key: "remise_destinataire", label: "Remise à",       type: "text", placeholder: "Nom et fonction" },
       ],
     },
   ],
@@ -535,11 +554,12 @@ const LIBELLES_META: Record<string, string> = {
   reglement_observations: "Observations",
   pc_montant: "Montant reçu", pc_date: "Date de paiement", pc_reference: "Référence", pc_mode: "Mode de règlement",
   enregistrement_type: "Enregistrement créé",
+  facture_numero: "N° de facture", facture_total_ttc: "Total TTC", facture_tva_taux: "Taux de TVA (%)",
 };
-const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id"]);
+const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id", "facture_lignes"]);
 const ENREGISTREMENTS: Record<string, string> = {
   paiement_douane: "Paiement douane (Finance)", paiement_compagnie: "Paiement compagnie (Finance)",
-  gate_pass: "Gate pass", reglement_client: "Règlement client (CRM)", debit_di: "Débit de la DI",
+  gate_pass: "Gate pass", reglement_client: "Règlement client (CRM)", debit_di: "Débit de la DI", facture_client: "Facture client",
 };
 
 function valeurLisible(cle: string, v: unknown): string {
@@ -549,7 +569,7 @@ function valeurLisible(cle: string, v: unknown): string {
   if (cle === "mode_paiement") return s === "cash" ? "Cash / espèces" : s === "autres" ? "Autres" : s === "virement" ? "Virement" : s;
   if (cle === "pvc_resultat") return s === "succes" ? "Succès" : "Rejet";
   if (cle === "enregistrement_type") return ENREGISTREMENTS[s] ?? s;
-  if (/montant/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
+  if (/montant|total_ttc/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).toLocaleDateString("fr-FR");
   return s;
 }
@@ -1008,6 +1028,7 @@ const SousEtapeCard = ({
   const [showFacture,  setShowFacture]  = useState(false);
   const [showReglement, setShowReglement] = useState(false);
   const [showBon,      setShowBon]      = useState(false);
+  const [showFactureClient, setShowFactureClient] = useState(false);
   const [notes,        setNotes]        = useState(data?.notes ?? "");
 
   const statut    = data?.statut ?? "todo";
@@ -1023,6 +1044,7 @@ const SousEtapeCard = ({
     if (config.facture)             { setShowFacture(true);  return; }
     if (config.reglementClient)     { setShowReglement(true); return; }
     if (config.bonCompagnie)        { setShowBon(true);       return; }
+    if (config.factureClient)       { setShowFactureClient(true); return; }
     update.mutate(
       { etape, cle: config.cle, data: { statut: "valide" } },
       { onSuccess: () => notif.sousEtapeValidee(config.label), ...onErr }
@@ -1071,6 +1093,19 @@ const SousEtapeCard = ({
             update.mutate(
               { etape, cle: config.cle, data: { statut: "valide", metadata, notes: n || undefined } },
               { onSuccess: () => { setShowGatePass(false); notif.sousEtapeValidee(config.label); }, ...onErr }
+            );
+          }}
+        />
+      )}
+      {showFactureClient && (
+        <FactureClientDialog
+          dossierId={dossierId}
+          loading={isPending}
+          onCancel={() => setShowFactureClient(false)}
+          onConfirm={metadata => {
+            update.mutate(
+              { etape, cle: config.cle, data: { statut: "valide", metadata } },
+              { onSuccess: () => { setShowFactureClient(false); notif.sousEtapeValidee(config.label); }, ...onErr }
             );
           }}
         />
@@ -1184,8 +1219,15 @@ const SousEtapeCard = ({
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
                   : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
                   : meta.enregistrement_type === "debit_di" ? "Facture débitée sur la DI"
+                  : meta.enregistrement_type === "facture_client" ? `Facture ${meta.facture_numero ?? ""} émise`
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
+            )}
+            {meta.enregistrement_type === "facture_client" && meta.enregistrement_id && (
+              <button type="button" onClick={e => { e.stopPropagation(); openDocument(`/api/facturation/factures/${meta.enregistrement_id}/pdf`).catch((err: Error) => notif.erreur(err.message)); }}
+                className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-secondary hover:underline">
+                <FileText className="w-3 h-3" /> Ouvrir la facture PDF
+              </button>
             )}
             {meta.immatriculation && (
               <p className="text-[10px] mt-0.5 text-muted-foreground font-mono">

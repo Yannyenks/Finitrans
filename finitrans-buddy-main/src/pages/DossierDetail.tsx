@@ -37,7 +37,7 @@ const STATUS_LABELS: Record<string, string> = {
   paiement:         "Paiement",
   bon_compagnie:    "Bon Compagnie",
   operations_douala: "Douala", operations_kribi: "Kribi",
-  cloture:          "Clôturé",
+  cloture:          "Clôturé", facturation: "Facturation",
 };
 const STATUS_COLORS: Record<string, string> = {
   reception:        "bg-blue-100 text-blue-700",
@@ -47,11 +47,11 @@ const STATUS_COLORS: Record<string, string> = {
   paiement:         "bg-orange-100 text-orange-700",
   bon_compagnie:    "bg-green-100 text-green-700",
   operations_douala: "bg-cyan-100 text-cyan-700", operations_kribi: "bg-teal-100 text-teal-700",
-  cloture:          "bg-gray-100 text-gray-600",
+  cloture:          "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 const STATUS_ORDER = [
   "reception", "soumission_sgs", "codage", "validation",
-  "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture",
+  "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture", "facturation",
 ];
 
 const STEP_CONFIG: Record<string, {
@@ -69,6 +69,7 @@ const STEP_CONFIG: Record<string, {
   operations_douala: { icon: Ship,        description: "Opérations au terminal de Douala : redevance portuaire et bon à délivrer",                     iconBg: "bg-cyan-100",   iconText: "text-cyan-700",   iconRing: "ring-cyan-300",   borderActive: "border-cyan-200/60",   bgActive: "from-cyan-50/60"   },
   operations_kribi: { icon: MapPin,        description: "Opérations de dédouanement et de livraison au port de Kribi",                               iconBg: "bg-teal-100",   iconText: "text-teal-700",   iconRing: "ring-teal-300",   borderActive: "border-teal-200/60",   bgActive: "from-teal-50/60"   },
   cloture:          { icon: CheckCircle2,  description: "Dossier clôturé — marchandise livrée au client, opérations terminées",                      iconBg: "bg-gray-100",   iconText: "text-gray-600",   iconRing: "ring-gray-300",   borderActive: "border-gray-200/60",   bgActive: "from-gray-50/60"   },
+  facturation:      { icon: Receipt,       description: "Facturation du dossier au client — facture aux couleurs FINITRANS et remise au client",              iconBg: "bg-violet-100", iconText: "text-violet-700", iconRing: "ring-violet-300", borderActive: "border-violet-200/60", bgActive: "from-violet-50/60" },
 };
 
 // ── SLA par étape (en heures) ─────────────────────────────────────────────────
@@ -80,7 +81,7 @@ const SLA_HOURS: Record<string, number> = {
   paiement:         72,
   bon_compagnie:    48,
   operations_douala: 48, operations_kribi: 72,
-  cloture:          24,
+  cloture:          24, facturation: 48,
 };
 
 const RETARD_MOTIFS = [
@@ -452,6 +453,14 @@ const DossierDetail = () => {
   const usersList = (Array.isArray(usersData) ? usersData : (usersData?.data ?? []))
     .filter((u: any) => u.actif !== false)
     .map((u: any) => ({ id: u.id, nom: u.nom, profil: u.profil, role: u.role }));
+
+  // Facture client émise à l'étape « Facturation client »
+  const { data: facturesDossier } = useQuery({
+    queryKey: ["dossier-factures", id],
+    queryFn:  () => api.get<any[]>(`/api/dossiers/${id}/factures`),
+    enabled:  !!id && canReadFinance,
+  });
+  const factureClient = (Array.isArray(facturesDossier) ? facturesDossier : []).filter((x: any) => x.type !== "proforma").slice(-1)[0];
 
   // DI data for FactureDialog (lazy — only when diId is known after dossier loads)
   const { data: diInfo } = useQuery({
@@ -861,15 +870,22 @@ const DossierDetail = () => {
           animate={{ opacity: 1, y: 0 }}
           className="lg:col-span-2 space-y-6"
         >
-          {dossier.status === "cloture" && (
+          {(dossier.status === "cloture" || dossier.status === "facturation") && (
             <div className="relative overflow-hidden rounded-2xl border border-success/25 bg-gradient-to-r from-success/10 via-success/5 to-transparent p-5" data-testid="bandeau-cloture">
               <div className="flex flex-wrap items-center gap-4">
                 <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-success text-white shadow-sm"><Lock className="w-5 h-5" /></div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-display font-semibold text-foreground">Dossier clôturé</p>
+                  <p className="font-display font-semibold text-foreground">
+                    {factureClient ? `Dossier facturé — ${factureClient.numero}` : dossier.status === "facturation" ? "Dossier clôturé — facturation client en cours" : "Dossier clôturé"}
+                  </p>
                   <p className="text-xs text-muted-foreground">Le compte rendu complet du parcours a été archivé dans la bibliothèque documentaire.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {factureClient && (
+                    <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground" onClick={() => openDocument(`/api/facturation/factures/${factureClient.id}/pdf`).catch((e: Error) => notif.erreur(e.message))}>
+                      <FileDown className="w-3.5 h-3.5" /> Facture PDF
+                    </Button>
+                  )}
                   <Button size="sm" className="gap-1.5 bg-success text-white hover:bg-success/90" disabled={crEnCours} onClick={() => ouvrirCompteRendu()}>
                     <FileDown className="w-3.5 h-3.5" /> Ouvrir le compte rendu
                   </Button>

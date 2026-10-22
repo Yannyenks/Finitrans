@@ -8,6 +8,7 @@ import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { recevoirFichier } from '../services/televersement'
 import { verifierDebitDI } from '../services/di'
+import { archiverCompteRendu } from '../services/compteRendu'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
@@ -152,6 +153,15 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       }
     }
 
+    // Facture client : contrôle des lignes avant de terminer la tâche
+    if (body.statut === 'valide' && cle === 'facture_client' && !(existing?.metadata as Record<string, unknown> | null)?.enregistrement_id) {
+      const meta = { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) }
+      const lignes = Array.isArray(meta.facture_lignes) ? meta.facture_lignes as { montant?: unknown }[] : []
+      if (!lignes.some(l => Number(l?.montant) > 0)) {
+        return reply.code(422).send({ error: 'FACTURE_VIDE', message: 'Saisissez au moins une ligne de facture avec un montant.' })
+      }
+    }
+
     let row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
       create: { dossierId: id, etape, cle, ...data },
@@ -166,6 +176,10 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       if (ajout) {
         await memoriserEnregistrement(row.id, meta, ajout)
         row = { ...row, metadata: { ...meta, ...ajout } as typeof row.metadata }
+        // Facture émise : le compte rendu du parcours archivé est régénéré avec la facturation
+        if (ajout.enregistrement_type === 'facture_client') {
+          await archiverCompteRendu(id, actor.id, { nom: actor.nom }).catch(err => request.log.error({ err }, 'Compte rendu non régénéré'))
+        }
       }
     }
 

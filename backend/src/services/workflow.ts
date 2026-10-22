@@ -8,13 +8,13 @@ import { marquerNotifies } from './evenements'
 
 export const STATUS_ORDER: DossierStatus[] = [
   'reception', 'soumission_sgs', 'codage', 'validation',
-  'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi', 'cloture',
+  'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi', 'cloture', 'facturation',
 ]
 
 export const STATUS_LABELS: Record<DossierStatus, string> = {
   reception: 'Réception', soumission_sgs: 'Soumission SGS', codage: 'Codage',
   validation: 'Validation', paiement: 'Paiement', bon_compagnie: 'Bon Compagnie',
-  operations_douala: 'Opérations Douala', operations_kribi: 'Opérations Kribi', cloture: 'Clôture',
+  operations_douala: 'Opérations Douala', operations_kribi: 'Opérations Kribi', cloture: 'Clôture', facturation: 'Facturation client',
 }
 
 /** Parcours d'un dossier selon son site : « Opérations Douala » pour Douala, « Opérations Kribi » pour Kribi. */
@@ -75,6 +75,10 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
   cloture: [
     { cle: 'rapport_final', label: 'Rapport de clôture du dossier' },
   ],
+  facturation: [
+    { cle: 'facture_client', label: 'Établissement de la facture client' },
+    { cle: 'remise_facture', label: 'Remise de la facture au client' },
+  ],
 }
 
 export function applicableSousEtapes(etape: DossierStatus, site: Site): SousEtapeDef[] {
@@ -120,6 +124,8 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
     sousEtapes: { facturation_terminal: 'terrain_kribi', bon_livraison: 'terrain_kribi', gate_pass: 'terrain_kribi' },
   },
   cloture: { owner: 'administration', sousEtapes: { rapport_final: 'administration' } },
+  // Après la clôture : facturation du dossier au client (comptabilité)
+  facturation: { owner: 'comptabilite', sousEtapes: { facture_client: 'comptabilite', remise_facture: 'comptabilite' } },
 }
 
 let attrCache: { at: number; value: AttributionConfig } | null = null
@@ -277,6 +283,7 @@ export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
   'operations_douala.facturation_terminal': 24, 'operations_douala.bad_terminal': 24,
   'operations_kribi.facturation_terminal': 24, 'operations_kribi.bon_livraison': 8, 'operations_kribi.gate_pass': 8,
   'cloture.rapport_final': 8,
+  'facturation.facture_client': 24, 'facturation.remise_facture': 24,
 }
 
 export async function loadSlaSousEtapes(): Promise<Record<string, number>> {

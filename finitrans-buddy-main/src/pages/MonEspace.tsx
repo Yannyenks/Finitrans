@@ -19,7 +19,7 @@ import { toast } from "@/hooks/use-toast";
 import CompteARebours from "@/components/CompteARebours";
 
 /** Tâches qui demandent une saisie spécifique (résultat RVC, quittance, gate pass, règlement client) : à terminer depuis le dossier. */
-const SAISIE_DEDIEE = new Set(["pvc", "ff_soumission", "paiement_client", "paiement_droits", "gate_pass", "facturation_compagnie", "facturation_terminal"]);
+const SAISIE_DEDIEE = new Set(["pvc", "ff_soumission", "facture_client", "paiement_client", "paiement_droits", "gate_pass", "facturation_compagnie", "facturation_terminal"]);
 
 const CONGE_TYPES: Record<string, string> = {
   annuel: "Congé annuel", maladie: "Maladie", maternite: "Maternité", paternite: "Paternité",
