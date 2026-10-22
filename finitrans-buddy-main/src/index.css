@@ -96,7 +96,17 @@
 
   body {
     @apply bg-background text-foreground font-body antialiased;
+    overflow-x: clip;
+    -webkit-tap-highlight-color: transparent;
   }
+
+  /* Téléphone : champs en 16 px (pas de zoom automatique iOS) */
+  @media (max-width: 639px) {
+    input:not([type="checkbox"]):not([type="radio"]), select, textarea { font-size: 16px !important; }
+  }
+
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
 
   h1, h2, h3, h4, h5, h6 {
     @apply font-display;
@@ -109,7 +119,7 @@
   }
 
   .stat-card {
-    @apply bg-card rounded-xl border border-border/50 p-5 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;
+    @apply bg-card rounded-xl border border-border/50 p-4 sm:p-5 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5;
   }
 
   .sidebar-item {
@@ -127,4 +137,13 @@
   .status-badge {
     @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
   }
+}
+
+/* Téléphone / tablette : les notifications s'affichent au-dessus de la barre d'onglets du bas */
+@media (max-width: 1023px) {
+  [data-sonner-toaster][data-y-position="bottom"] { bottom: calc(76px + env(safe-area-inset-bottom)) !important; }
+}
+/* Téléphone : les tableaux défilent horizontalement au lieu de couper les cellules sur plusieurs lignes */
+@media (max-width: 639px) {
+  main td, main th { white-space: nowrap; }
 }

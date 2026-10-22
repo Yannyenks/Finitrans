@@ -27,7 +27,7 @@ import DIBlock from "@/components/di/DIBlock";
 import FactureDialog from "@/components/di/FactureDialog";
 import SousEtapesPanel, { SOUS_ETAPES_CONFIG, applicableConfigs } from "@/components/dossier/SousEtapesPanel";
 import { useSousEtapes } from "@/hooks/useSousEtapes";
-import { dateHeure, dureeEntre } from "@/lib/temps";
+import { dateHeure, delaiJHM, dureeEntre } from "@/lib/temps";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -106,7 +106,7 @@ const getSLAStatus = (
     const slaH = Math.max(1, Number(timing.dureePrevueJours ?? 1) * 24);
     const elapsedH = (Date.now() - new Date(timing.dateDebut).getTime()) / 3_600_000;
     const pct = Math.min(100, Math.round((elapsedH / slaH) * 100));
-    return { elapsedH: Math.round(elapsedH), slaH, pct, status: pct >= 100 ? "critical" : pct >= 80 ? "warning" : "ok" };
+    return { elapsedH, slaH, pct, status: pct >= 100 ? "critical" : pct >= 80 ? "warning" : "ok" };
   }
   if (!(stepKey in SLA_HOURS)) return null;
   const slaH = SLA_HOURS[stepKey];
@@ -899,8 +899,8 @@ const DossierDetail = () => {
           {/* ══ Progression du dossier — Ultra Premium ═══════════════════ */}
           <div className="stat-card overflow-hidden">
             {/* En-tête */}
-            <div className="flex items-start justify-between mb-3">
-              <div>
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-2.5 mb-3">
+              <div className="min-w-0">
                 <h3 className="font-display font-semibold text-foreground">Progression du dossier</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {dossier.status === "cloture"
@@ -908,13 +908,13 @@ const DossierDetail = () => {
                     : `Étape ${currentStepIdx + 1} / ${parcours.length} — ${Math.round((currentStepIdx / (parcours.length - 1)) * 100)}% accompli`}
                 </p>
               </div>
-              <div className="flex items-center gap-2 flex-shrink-0">
+              <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
                 <span className={`status-badge ${STATUS_COLORS[dossier.status] ?? "bg-gray-100 text-gray-600"}`}>
                   {STATUS_LABELS[dossier.status] ?? dossier.status}
                 </span>
                 {superviseur && (
                   <Select value="" onValueChange={v => v && openHandoffDialog(v)}>
-                    <SelectTrigger className="h-7 text-xs w-[150px]" title="Contrôle total : déplacer le dossier vers n'importe quelle étape">
+                    <SelectTrigger className="h-8 sm:h-7 text-xs w-[150px]" title="Direction : revenir à une étape antérieure ou passer à la suivante (étape validée)">
                       <SelectValue placeholder="Changer d'étape…" />
                     </SelectTrigger>
                     <SelectContent>
@@ -935,7 +935,7 @@ const DossierDetail = () => {
                       size="sm"
                       onClick={handleAdvanceClick}
                       disabled={advanceStatus.isPending}
-                      className="gap-1.5 bg-secondary text-secondary-foreground hover:opacity-90 text-xs h-7 px-3"
+                      className="gap-1.5 bg-secondary text-secondary-foreground hover:opacity-90 text-xs h-8 sm:h-7 px-3"
                     >
                       {advanceStatus.isPending
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -985,7 +985,7 @@ const DossierDetail = () => {
                     }`}>
                       {/* Header ligne étape */}
                       <div
-                        className={`flex items-center gap-3 px-4 py-3 ${(isCompleted || isCurrent) ? "cursor-pointer select-none" : ""}`}
+                        className={`flex items-center gap-2.5 sm:gap-3 px-3 sm:px-4 py-3 ${(isCompleted || isCurrent) ? "cursor-pointer select-none" : ""}`}
                         onClick={() => (isCompleted || isCurrent) && toggleStep(stepKey)}
                       >
                         {/* Cercle statut */}
@@ -1043,6 +1043,15 @@ const DossierDetail = () => {
                                 : <> · En cours depuis {dureeEntre(timingByStep[stepKey].dateDebut)}</>}
                             </p>
                           )}
+                          {isCurrent && (() => {
+                            const sla = getSLAStatus(stepKey, timeline, dossier.dateCreation, dossier.timings);
+                            if (!sla) return null;
+                            return (
+                              <p className={`sm:hidden text-[11px] font-semibold mt-1 flex items-center gap-1 ${sla.status === "critical" ? "text-red-600" : sla.status === "warning" ? "text-amber-600" : "text-success"}`}>
+                                <Clock className="w-3 h-3" /> {delaiJHM(sla.elapsedH * 60)} / {delaiJHM(sla.slaH * 60)}{sla.status === "critical" && " · Retard"}
+                              </p>
+                            );
+                          })()}
                           {isCurrent && dossier.responsable?.nom && (
                             <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1">
                               <User className="w-2.5 h-2.5" />
@@ -1056,7 +1065,7 @@ const DossierDetail = () => {
                           const sla = getSLAStatus(stepKey, timeline, dossier.dateCreation, dossier.timings);
                           if (!sla) return null;
                           return (
-                            <div className="flex items-center gap-1.5 flex-shrink-0 mx-2">
+                            <div className="hidden sm:flex items-center gap-1.5 flex-shrink-0 mx-2">
                               <Clock className={`w-3 h-3 flex-shrink-0 ${
                                 sla.status === "critical" ? "text-red-500" :
                                 sla.status === "warning"  ? "text-amber-500" :
@@ -1067,7 +1076,7 @@ const DossierDetail = () => {
                                 sla.status === "warning"  ? "text-amber-600" :
                                 "text-muted-foreground"
                               }`}>
-                                {sla.elapsedH}h / {sla.slaH}h
+                                {delaiJHM(sla.elapsedH * 60)} / {delaiJHM(sla.slaH * 60)}
                               </span>
                               <div className="w-10 h-1 rounded-full bg-muted overflow-hidden hidden sm:block">
                                 <div

@@ -155,7 +155,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
           </button>
         </div>
       </div>
-    ), { duration: n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000, position: "top-right" });
+    ), { duration: n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000, position: window.matchMedia?.("(max-width: 1023px)").matches ? "bottom-center" : "top-right" });
 
     // Onglet en arrière-plan : notification du système
     if (document.hidden && "Notification" in window && Notification.permission === "granted") {

@@ -132,7 +132,43 @@ const Dossiers = () => {
               <Loader2 className="w-8 h-8 animate-spin text-secondary" />
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+            {/* Téléphone : une carte par dossier */}
+            <ul className="md:hidden divide-y divide-border/60" aria-label="Dossiers">
+              {dossiers.map((d: any) => {
+                const enRetard = d.dateLimiteSortie && new Date(d.dateLimiteSortie) < new Date() && d.status !== "cloture";
+                return (
+                  <li key={d.id}>
+                    <button type="button" onClick={() => navigate(`/dossiers/${d.id}`)}
+                      className={`w-full text-left px-4 py-3.5 active:bg-muted/50 transition-colors ${enRetard ? "bg-destructive/5" : ""}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`flex items-center gap-1.5 text-sm font-bold ${enRetard ? "text-destructive" : "text-foreground"}`}>
+                          {enRetard && <AlertTriangle className="w-3.5 h-3.5" />}{d.numero}
+                          {d.diId && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-secondary/10 text-secondary"><Banknote className="w-2.5 h-2.5" /> DI</span>}
+                        </span>
+                        <span className={`status-badge shrink-0 ${enRetard ? "bg-red-100 text-red-700" : STATUS_COLORS[d.status] ?? "bg-gray-100 text-gray-600"}`}>
+                          {enRetard ? "EN RETARD" : STATUS_LABELS[d.status] ?? d.status}
+                        </span>
+                      </div>
+                      <p className="text-sm text-foreground mt-1 truncate">{d.client}</p>
+                      <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
+                        <span className="font-medium text-foreground/80">{d.compagnie.replace("_", "-")}</span>
+                        <span>·</span>
+                        <span className="font-mono truncate">{d.conteneur}</span>
+                        <span>·</span>
+                        <span className="flex items-center gap-0.5 shrink-0">{d.site === "Kribi" ? <MapPin className="w-3 h-3" /> : <Ship className="w-3 h-3" />}{d.site}</span>
+                        <ChevronRight className="w-4 h-4 ml-auto shrink-0" />
+                      </div>
+                      <div className="flex items-center gap-2 mt-1.5 text-[11px] text-muted-foreground">
+                        <span className="truncate">{d.responsable?.nom ?? "—"}</span>
+                        <span className={`status-badge !text-[10px] ${d.priorite === "haute" ? "bg-red-100 text-red-700" : d.priorite === "moyenne" ? "bg-amber-100 text-amber-700" : "bg-green-100 text-green-700"}`}>{d.priorite}</span>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
@@ -202,6 +238,10 @@ const Dossiers = () => {
                 </div>
               )}
             </div>
+            {dossiers.length === 0 && (
+              <p className="md:hidden text-center py-12 text-sm text-muted-foreground">Aucun dossier trouvé</p>
+            )}
+            </>
           )}
 
           {/* Pagination */}

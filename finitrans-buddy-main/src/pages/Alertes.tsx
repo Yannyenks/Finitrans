@@ -60,7 +60,7 @@ const Alertes = () => {
   return (
     <AppLayout title="Alertes & Anticipation" subtitle="Gestion proactive des risques">
       {/* KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 mb-6">
         {[
           { label: "Total alertes",   value: alertes.length, color: "text-secondary" },
           { label: "Critiques",       value: critiques,      color: "text-destructive" },

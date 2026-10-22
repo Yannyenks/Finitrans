@@ -125,21 +125,21 @@ const Dashboard = () => {
       ) : (
         <>
           {/* ── KPI Cards ─────────────────────────────────────── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
             {statCards.map((stat, i) => (
               <TiltCard key={stat.label} delay={i * 0.09}>
                 <div className={`absolute inset-0 rounded-xl bg-gradient-to-br ${stat.gradient} pointer-events-none`} />
                 <div className="relative">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className={`w-11 h-11 rounded-xl ${stat.bg} flex items-center justify-center`}>
+                  <div className="flex items-start justify-between mb-2 sm:mb-4">
+                    <div className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl ${stat.bg} flex items-center justify-center`}>
                       <stat.icon className={`w-5 h-5 ${stat.color}`} />
                     </div>
                     <Zap className="w-3.5 h-3.5 text-muted-foreground/30" />
                   </div>
-                  <div className={`text-3xl font-display font-black mb-1 ${stat.color}`}>
+                  <div className={`text-2xl sm:text-3xl font-display font-black mb-1 ${stat.color}`}>
                     <AnimatedCounter value={stat.value} />
                   </div>
-                  <div className="text-sm text-muted-foreground font-medium">{stat.label}</div>
+                  <div className="text-xs sm:text-sm text-muted-foreground font-medium leading-snug">{stat.label}</div>
                 </div>
               </TiltCard>
             ))}
