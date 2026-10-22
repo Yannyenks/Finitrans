@@ -115,6 +115,27 @@ export async function creerFactureClient(dossierId: string, meta: Record<string,
   return { facture, totaux: t }
 }
 
+/**
+ * Facture client établie physiquement (papier), hors plateforme : on n'en conserve que les références
+ * (n°, date, montant TTC) pour le suivi Finance, le compte rendu et l'encaissement. Aucun PDF n'est généré.
+ */
+export async function enregistrerFacturePhysique(dossierId: string, meta: Record<string, unknown>) {
+  const dossier = await prisma.dossier.findUnique({ where: { id: dossierId } })
+  if (!dossier) throw new AppError(404, 'NOT_FOUND', 'Dossier introuvable')
+  const numero = String(meta.fc_numero ?? '').trim().toUpperCase()
+  const montant = Math.round(Number(String(meta.fc_montant ?? '').replace(/\s/g, '').replace(',', '.')))
+  if (!numero || !(montant > 0)) throw new AppError(422, 'FACTURE_INCOMPLETE', 'Indiquez le n° et le montant TTC de la facture établie.')
+  const doublon = await prisma.facture.findUnique({ where: { numero }, select: { dossier: { select: { numero: true } } } })
+  if (doublon) throw new AppError(409, 'FACTURE_DUPLIQUEE', `La facture n° ${numero} est déjà enregistrée (dossier ${doublon.dossier.numero}).`)
+  const date = typeof meta.fc_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(meta.fc_date) ? new Date(`${meta.fc_date}T12:00:00`) : new Date()
+  return prisma.facture.create({
+    data: {
+      dossierId, numero, type: 'validee', montant, compagnie: dossier.compagnie, dateFacture: date,
+      description: `Facture client établie physiquement — dossier ${dossier.numero} (${dossier.client})`,
+    },
+  })
+}
+
 // ── Facture PDF ───────────────────────────────────────────────────────────────
 export async function genererFacturePdf(factureId: string): Promise<{ buffer: Buffer; nomFichier: string } | null> {
   const f = await prisma.facture.findUnique({

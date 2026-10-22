@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, upload, userIds, type UserKey } from './helpers'
+import { api, closeApp, expectStatus, placerEtape, upload, userIds, type UserKey } from './helpers'
 
 type Task = { etape: string; cle: string; responsableId: string | null; statut: string }
 
@@ -206,16 +206,20 @@ describe('Workflow Kribi (MAERSK) et supervision', () => {
     assert.ok(kr.every(t => t.responsableId === ids.raphael), 'MAERSK Kribi → Raphael')
   })
 
-  it('le Responsable Exploitation peut forcer une étape (contrôle total)', async () => {
-    const d = await advance('soudi', dossierId, 'bon_compagnie')
-    assert.equal(d.status, 'bon_compagnie')
-    assert.equal(d.responsableId, ids.rasoul)
+  it('même le Responsable Exploitation ne peut pas sauter une étape non validée', async () => {
+    await advance('soudi', dossierId, 'bon_compagnie', 422)
+    await placerEtape(dossierId, 'bon_compagnie')
   })
 
-  it('Mr Rasoul termine le bon compagnie → Opérations Kribi (Mr Raphael) → Clôture', async () => {
+  it('Mr Rasoul termine le bon compagnie → Opérations Douala → Opérations Kribi (Mr Raphael) → Clôture', async () => {
     await completeStage(dossierId, 'bon_compagnie')
     await preuve('rasoul', dossierId, 'bon_compagnie')
-    const d = await advance('rasoul', dossierId, 'operations_kribi')
+    await advance('rasoul', dossierId, 'operations_kribi', 422)
+    const od = await advance('rasoul', dossierId, 'operations_douala')
+    const quiDouala = Object.entries(ids).find(([, v]) => v === od.responsableId)![0] as UserKey
+    await completeStage(dossierId, 'operations_douala')
+    await preuve(quiDouala, dossierId, 'operations_douala')
+    const d = await advance(quiDouala, dossierId, 'operations_kribi')
     assert.equal(d.responsableId, ids.raphael)
     await completeStage(dossierId, 'operations_kribi')
     await preuve('raphael', dossierId, 'operations_kribi')

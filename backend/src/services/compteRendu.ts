@@ -15,6 +15,13 @@ import { nomCompagnie } from './compagnies'
 import { LIBELLES_ACTION } from '../utils/audit'
 import type { DossierStatus } from '@prisma/client'
 
+/** Délai exprimé en jours (décimaux) → « 1 j 4 h 30 min ». */
+function delaiJHM(joursDecimaux: number): string {
+  const t = Math.max(0, Math.round(joursDecimaux * 1440))
+  const j = Math.floor(t / 1440), h = Math.floor((t % 1440) / 60), m = t % 60
+  return [j && `${j} j`, h && `${h} h`, m && `${m} min`].filter(Boolean).join(' ') || '0 min'
+}
+
 // ── Charte FINITRANS (couleurs du logo) ───────────────────────────────────────
 export const C = {
   marine: '#0E2240', marine2: '#173560', orange: '#F07B37', bleu: '#1A9AD6', encre: '#1F2937', gris: '#6B7280',
@@ -313,7 +320,9 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   // Clôture opérationnelle (la facturation client vient après)
   const cloture = dossier.status === 'cloture' || dossier.status === 'facturation'
   const factureClient = [...dossier.factures].reverse().find(f => f.type !== 'proforma')
-  const parcours = stagesForSite(dossier.site)
+  // Une étape ajoutée au parcours après coup et jamais traversée (déjà dépassée) n'apparaît pas
+  const parcoursSite = stagesForSite(dossier.site)
+  const parcours = parcoursSite.filter((e, i) => e !== 'operations_douala' || i >= parcoursSite.indexOf(dossier.status) || dossier.timings.some(t => t.etape === e))
   const timingCloture = dossier.timings.find(t => t.etape === 'cloture')
   const fin = cloture ? (timingCloture?.dateDebut ?? maintenant) : maintenant
   const debut = dossier.dateCreation
@@ -429,10 +438,10 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
     const dureeJ = finEtape ? jours(t.dateDebut, finEtape) : jours(t.dateDebut, maintenant)
     const etat: Cellule = etape === 'facturation' && factureClient ? { t: 'Facturé', couleur: C.vert, gras: true } : etape === 'cloture' ? { t: 'Clôturé', couleur: C.vert, gras: true }
       : !t.dateFin ? { t: 'En cours', couleur: C.orange, gras: true }
-      : dureeJ <= t.dureePrevueJours ? { t: 'Dans les délais', couleur: C.vert } : { t: `Retard +${Math.round((dureeJ - t.dureePrevueJours) * 10) / 10} j`, couleur: C.rouge, gras: true }
+      : dureeJ <= t.dureePrevueJours ? { t: 'Dans les délais', couleur: C.vert } : { t: `Retard +${delaiJHM(dureeJ - t.dureePrevueJours)}`, couleur: C.rouge, gras: true }
     return [
       { t: txt(STATUS_LABELS[etape]), gras: true }, t.responsable?.nom ?? '—', heure(t.dateDebut), t.dateFin ? heure(t.dateFin) : '—',
-      etape === 'cloture' ? '—' : `${duree((finEtape ?? maintenant).getTime() - t.dateDebut.getTime())}\ncible ${t.dureePrevueJours} j`, etat,
+      etape === 'cloture' ? '—' : `${duree((finEtape ?? maintenant).getTime() - t.dateDebut.getTime())}\ncible ${delaiJHM(t.dureePrevueJours)}`, etat,
     ] as Cellule[]
   })
   r.table([{ titre: 'Étape', largeur: 17 }, { titre: 'Responsable', largeur: 18 }, { titre: 'Début', largeur: 16 }, { titre: 'Fin', largeur: 16 },
@@ -531,12 +540,20 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
     dossier.commentaires.map(c => [heure(c.createdAt), c.auteur?.nom ?? '—', c.message.length > 600 ? `${c.message.slice(0, 600)}…` : c.message]))
 
   // ── 9. Facturation client ───────────────────────────────────────────────────
-  r.section('9', 'Facturation client', 'Facture émise au client après la clôture du dossier')
+  r.section('9', 'Facturation client', 'Facture établie physiquement et remise au client après la clôture du dossier')
   const facturesClient = dossier.factures.filter(f => f.type !== 'proforma')
   if (facturesClient.length === 0) r.vide(cloture ? 'Facture client à établir.' : 'La facturation intervient après la clôture du dossier.')
   for (const f of facturesClient) {
     const lignesF = Array.isArray(f.lignes) ? (f.lignes as { libelle: string; montant: number; nature: string }[]) : []
     const ht = lignesF.filter(l => l.nature === 'honoraires').reduce((sum, l) => sum + Number(l.montant), 0)
+    if (lignesF.length === 0) {
+      r.tuiles([
+        { label: `Facture n° ${f.numero}`, valeur: nombre(f.montant), detail: 'FCFA TTC', couleur: C.marine },
+        { label: 'Date de la facture', valeur: jour(f.dateFacture), detail: 'établie physiquement' },
+        { label: 'Statut', valeur: statut(f.type), couleur: f.type === 'reglee' ? C.vert : C.orange, detail: f.datePaiement ? `réglée le ${jour(f.datePaiement)}` : 'en attente de règlement' },
+      ])
+      continue
+    }
     r.tuiles([
       { label: `Facture ${f.numero}`, valeur: nombre(f.montant), detail: `FCFA TTC — ${jour(f.dateFacture)}`, couleur: C.marine },
       { label: 'Prestations HT', valeur: nombre(ht), detail: 'FCFA' },

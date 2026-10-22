@@ -303,7 +303,7 @@ model DossierTiming {
   etape            DossierStatus
   dateDebut        DateTime      @default(now()) @map("date_debut")
   dateFin          DateTime?     @map("date_fin")
-  dureePrevueJours Int           @default(2) @map("duree_prevue_jours")
+  dureePrevueJours Float         @default(2) @map("duree_prevue_jours")
   responsableId    String?       @map("responsable_id") @db.Uuid
   createdAt        DateTime      @default(now()) @map("created_at")
   dossier          Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)

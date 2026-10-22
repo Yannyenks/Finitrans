@@ -111,3 +111,18 @@ export async function userIds(): Promise<Record<UserKey, string>> {
 
 let uniq = Date.now() % 100000
 export const unique = (prefix: string) => `${prefix}-${++uniq}`
+
+/** Place directement un dossier à une étape (base de test uniquement) — évite de dérouler tout le parcours. */
+export async function placerEtape(dossierId: string, status: string) {
+  const { prisma } = await import('../src/config/prisma')
+  await prisma.dossier.update({ where: { id: dossierId }, data: { status: status as never } })
+}
+
+/** Rend l'étape franchissable (base de test) : tâches validées + une preuve déposée par la Direction. */
+export async function preparerPassage(dossierId: string, etape: string) {
+  const { prisma } = await import('../src/config/prisma')
+  await prisma.sousEtapeDossier.updateMany({ where: { dossierId, etape }, data: { statut: 'valide' } })
+  const r = await upload('delba', `/api/dossiers/${dossierId}/upload`,
+    { name: `preuve-${etape}-${Date.now()}.pdf`, type: 'application/pdf', content: `%PDF preuve ${etape} ${Math.random()}` }, { etape })
+  expectStatus(r, 201, `preuve ${etape}`)
+}

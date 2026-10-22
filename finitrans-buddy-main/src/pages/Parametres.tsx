@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { DureeJHM } from "@/components/DureeJHM";
+import { delaiJHM } from "@/lib/temps";
 import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship } from "lucide-react";
 import CompagniesMaritimes from "@/components/CompagniesMaritimes";
 import { useNavigate } from "react-router-dom";
@@ -75,8 +77,7 @@ const Parametres = () => {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
   const groupesSla = (slaSE ?? []).reduce<Record<string, SlaSousEtape[]>>((acc, l) => { (acc[l.etape] ??= []).push(l); return acc; }, {});
-  const majSla = (cle: string, heures: number, minutes: number) =>
-    setSlaTaches(p => ({ ...p, [cle]: Math.max(0, Math.round((heures * 60 + minutes)) / 60) }));
+  const majSla = (cle: string, minutes: number) => setSlaTaches(p => ({ ...p, [cle]: Math.max(0, Math.round(minutes)) / 60 }));
 
   // Liens externes (portails ouverts depuis une sous-étape)
   const { data: attribution } = useQuery({ queryKey: ["roles-attribution"], queryFn: () => api.get<any>("/api/roles/attribution") });
@@ -163,28 +164,19 @@ const Parametres = () => {
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card">
             <h3 className="font-display font-semibold text-foreground mb-1">Délais SLA par étape</h3>
             <p className="text-sm text-muted-foreground mb-6">
-              Définissez la durée cible (en jours) de chaque étape du workflow dossier.
+              Définissez la durée cible de chaque étape du workflow dossier, en jours, heures et minutes.
               Elle s'applique aux étapes démarrées après l'enregistrement et alimente la Supervision.
             </p>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
               {Object.entries(slaConfig).map(([step, h]) => (
-                <div key={step} className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/40 border border-border/50">
-                  <div className="flex-1">
+                <div key={step} className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl bg-muted/40 border border-border/50" data-testid={`sla-etape-${step}`}>
+                  <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{STEP_LABELS[step] ?? step}</p>
-                    <p className="text-xs text-muted-foreground">Délai cible : <span className="font-mono font-semibold">{h} j</span></p>
+                    <p className="text-xs text-muted-foreground">Délai cible : <span className="font-mono font-semibold">{delaiJHM(h * 1440)}</span></p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      type="number"
-                      min={1}
-                      max={60}
-                      value={h}
-                      onChange={e => setSlaConfig(prev => ({ ...prev, [step]: Math.max(1, Math.round(Number(e.target.value) || 1)) }))}
-                      className="w-16 text-center bg-card font-mono text-sm h-9"
-                    />
-                    <span className="text-xs text-muted-foreground w-3">j</span>
-                  </div>
+                  <DureeJHM minutes={h * 1440} minimum={1} disabled={!superviseur} libelle={STEP_LABELS[step] ?? step}
+                    onChange={min => setSlaConfig(prev => ({ ...prev, [step]: min / 1440 }))} />
                 </div>
               ))}
             </div>
@@ -215,17 +207,12 @@ const Parametres = () => {
                       {lignes.map(l => {
                         const total = Math.round((slaTaches[l.cle] ?? l.heures) * 60);
                         return (
-                          <div key={l.cle} className="flex items-center gap-3 px-4 py-2.5" data-testid={`sla-${l.cle}`}>
-                            <div className="flex-1 min-w-0">
+                          <div key={l.cle} className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2.5" data-testid={`sla-${l.cle}`}>
+                            <div className="flex-1 min-w-[10rem]">
                               <p className="text-sm text-foreground truncate">{l.label}{l.sites && <span className="text-[10px] text-muted-foreground ml-1.5">({l.sites.join(", ")})</span>}</p>
-                              <p className="text-[10px] text-muted-foreground">Par défaut : {l.defaut} h</p>
+                              <p className="text-[10px] text-muted-foreground">Actuel : {delaiJHM(total)} · par défaut : {delaiJHM(l.defaut * 60)}</p>
                             </div>
-                            <Input type="number" min={0} max={720} value={Math.floor(total / 60)} disabled={!superviseur} aria-label={`Heures — ${l.label}`}
-                              onChange={e => majSla(l.cle, Math.max(0, Number(e.target.value) || 0), total % 60)} className="w-16 h-8 text-center font-mono text-sm bg-card" />
-                            <span className="text-xs text-muted-foreground">h</span>
-                            <Input type="number" min={0} max={59} value={total % 60} disabled={!superviseur} aria-label={`Minutes — ${l.label}`}
-                              onChange={e => majSla(l.cle, Math.floor(total / 60), Math.min(59, Math.max(0, Number(e.target.value) || 0)))} className="w-16 h-8 text-center font-mono text-sm bg-card" />
-                            <span className="text-xs text-muted-foreground">min</span>
+                            <DureeJHM minutes={total} disabled={!superviseur} libelle={l.label} onChange={min => majSla(l.cle, min)} />
                           </div>
                         );
                       })}

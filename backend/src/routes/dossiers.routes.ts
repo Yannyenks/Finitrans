@@ -198,7 +198,10 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       },
     })
     if (!dossier) throw new NotFoundError('Dossier', id)
-    return reply.send({ ...dossier, parcoursEtapes: stagesForSite(dossier.site) })
+    // Une étape ajoutée au parcours après coup et déjà dépassée sans y passer n'est pas affichée
+    const parcoursSite = stagesForSite(dossier.site)
+    const parcoursEtapes = parcoursSite.filter((e, i) => e !== 'operations_douala' || i >= parcoursSite.indexOf(dossier.status) || dossier.timings.some(t => t.etape === e))
+    return reply.send({ ...dossier, parcoursEtapes })
   })
 
   // GET /api/dossiers/:id/next-step — prochaine étape, responsable pressenti, droits de l'utilisateur
@@ -437,10 +440,14 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }
 
     // Les comptes non superviseurs terminent eux-mêmes leur étape, dans l'ordre du parcours
-    if (!user.superviseur) {
-      if (!(await isInvolved(user, dossier, dossier.status))) {
-        return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seul le responsable de l\'étape en cours (ou la Direction) peut la terminer.' })
-      }
+    if (!user.superviseur && !(await isInvolved(user, dossier, dossier.status))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seul le responsable de l\'étape en cours (ou la Direction) peut la terminer.' })
+    }
+    // Validation obligatoire de l'étape en cours avant de passer à la suivante — pour tous, Direction comprise.
+    // Seul un retour à une étape antérieure (correction) reste possible pour la Direction.
+    const parcoursEtapes = stagesForSite(dossier.site)
+    const avance = parcoursEtapes.indexOf(body.status) > parcoursEtapes.indexOf(dossier.status)
+    if (!user.superviseur || avance) {
       const suivante = nextStage(dossier.status, dossier.site)
       if (body.status !== suivante) {
         return reply.code(422).send({

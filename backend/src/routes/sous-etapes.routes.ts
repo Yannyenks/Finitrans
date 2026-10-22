@@ -149,12 +149,12 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       await verifierFactureFournisseur(dossier.diId, { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) })
     }
 
-    // Facture client : contrôle des lignes avant de terminer la tâche
+    // Facture client établie physiquement : n° et montant requis avant de terminer la tâche
     if (body.statut === 'valide' && cle === 'facture_client' && !(existing?.metadata as Record<string, unknown> | null)?.enregistrement_id) {
       const meta = { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) }
-      const lignes = Array.isArray(meta.facture_lignes) ? meta.facture_lignes as { montant?: unknown }[] : []
-      if (!lignes.some(l => Number(l?.montant) > 0)) {
-        return reply.code(422).send({ error: 'FACTURE_VIDE', message: 'Saisissez au moins une ligne de facture avec un montant.' })
+      const montant = Number(String(meta.fc_montant ?? '').replace(/\s/g, '').replace(',', '.'))
+      if (!String(meta.fc_numero ?? '').trim() || !(montant > 0)) {
+        return reply.code(422).send({ error: 'FACTURE_INCOMPLETE', message: 'Indiquez le n° et le montant TTC de la facture établie physiquement.' })
       }
     }
 

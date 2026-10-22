@@ -28,3 +28,11 @@ export function dureeEntre(debut: string | Date | null | undefined, fin?: string
   if (!debut) return "—";
   return duree((fin ? new Date(fin).getTime() : Date.now()) - new Date(debut).getTime());
 }
+
+/** Délai SLA lisible à partir d'un nombre de minutes : « 1 j 4 h 30 min », « 2 h », « 45 min ». */
+export function delaiJHM(minutes: number): string {
+  const t = Math.max(0, Math.round(minutes));
+  const j = Math.floor(t / 1440), h = Math.floor((t % 1440) / 60), m = t % 60;
+  const parts = [j && `${j} j`, h && `${h} h`, m && `${m} min`].filter(Boolean);
+  return parts.length ? parts.join(" ") : "0 min";
+}

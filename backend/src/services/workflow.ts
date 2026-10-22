@@ -19,7 +19,8 @@ export const STATUS_LABELS: Record<DossierStatus, string> = {
 
 /** Parcours d'un dossier selon son site : « Opérations Douala » pour Douala, « Opérations Kribi » pour Kribi. */
 export function stagesForSite(site: Site): DossierStatus[] {
-  return STATUS_ORDER.filter(s => site === 'Kribi' ? s !== 'operations_douala' : s !== 'operations_kribi')
+  // Opérations Douala pour tous les dossiers (avant Kribi pour un dossier de Kribi) ; Opérations Kribi pour Kribi seulement
+  return STATUS_ORDER.filter(s => site === 'Kribi' || s !== 'operations_kribi')
 }
 
 export function nextStage(current: DossierStatus, site: Site): DossierStatus | null {
@@ -62,10 +63,10 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'facturation_compagnie', label: 'Bon de la compagnie maritime' },
     { cle: 'bon_a_delivrer',        label: 'Soumission & obtention du Bon à Délivrer' },
   ],
-  // Partie terminal de Douala (mêmes tâches que Kribi, sans gate pass ; bon à délivrer au lieu du bon de livraison)
+  // Partie terminal de Douala, avant Kribi (mêmes tâches que Kribi, sans gate pass ; bon à délivrer au lieu du bon de livraison)
   operations_douala: [
-    { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)', sites: ['Douala'] },
-    { cle: 'bad_terminal',         label: 'Bon à délivrer', sites: ['Douala'] },
+    { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)' },
+    { cle: 'bad_terminal',         label: 'Bon à délivrer' },
   ],
   operations_kribi: [
     { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)', sites: ['Kribi'] },
@@ -76,7 +77,7 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'rapport_final', label: 'Rapport de clôture du dossier' },
   ],
   facturation: [
-    { cle: 'facture_client', label: 'Établissement de la facture client' },
+    { cle: 'facture_client', label: 'Facture client établie (papier)' },
     { cle: 'remise_facture', label: 'Remise de la facture au client' },
   ],
 }
@@ -186,15 +187,18 @@ export async function resolveAssignee(
 
 /** Crée les sous-étapes applicables d'un dossier et les attribue automatiquement. */
 export async function initSousEtapes(dossierId: string, tx: Prisma.TransactionClient = prisma) {
-  const dossier = await tx.dossier.findUnique({ where: { id: dossierId }, select: { id: true, compagnie: true, site: true } })
+  const dossier = await tx.dossier.findUnique({ where: { id: dossierId }, select: { id: true, compagnie: true, site: true, status: true } })
   if (!dossier) return
+  const parcours = stagesForSite(dossier.site)
+  // Une étape déjà franchie ne reçoit pas de nouvelles tâches (ex. étape ajoutée au parcours après coup)
+  const etapeCourante = Math.max(0, parcours.indexOf(dossier.status))
   const attribution = await loadAttribution()
   const existing = await tx.sousEtapeDossier.findMany({ where: { dossierId }, select: { etape: true, cle: true } })
   const has = new Set(existing.map(e => `${e.etape}:${e.cle}`))
   const assigneeCache = new Map<Profil, string | null>()
 
   const rows: Prisma.SousEtapeDossierCreateManyInput[] = []
-  for (const etape of stagesForSite(dossier.site)) {
+  for (const etape of parcours.slice(etapeCourante)) {
     for (const se of applicableSousEtapes(etape, dossier.site)) {
       if (has.has(`${etape}:${se.cle}`)) continue
       const profil = attribution[etape].sousEtapes[se.cle] ?? attribution[etape].owner

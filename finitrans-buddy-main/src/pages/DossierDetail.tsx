@@ -881,7 +881,7 @@ const DossierDetail = () => {
                   <p className="text-xs text-muted-foreground">Le compte rendu complet du parcours a été archivé dans la bibliothèque documentaire.</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {factureClient && (
+                  {factureClient && Array.isArray(factureClient.lignes) && factureClient.lignes.length > 0 && (
                     <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground" onClick={() => openDocument(`/api/facturation/factures/${factureClient.id}/pdf`).catch((e: Error) => notif.erreur(e.message))}>
                       <FileDown className="w-3.5 h-3.5" /> Facture PDF
                     </Button>

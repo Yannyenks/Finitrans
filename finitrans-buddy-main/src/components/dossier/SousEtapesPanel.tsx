@@ -234,9 +234,15 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   ],
   facturation: [
     {
-      cle: "facture_client", label: "Établissement de la facture client",
-      description: "Facture du dossier au client : honoraires, débours (droits et taxes, frais compagnie, redevances), TVA — PDF aux couleurs FINITRANS",
-      factureClient: true, outputLabel: "Facture client (PDF)",
+      cle: "facture_client", label: "Facture client établie (papier)",
+      description: "La facture est établie physiquement, hors plateforme : enregistrez son n°, sa date et son montant TTC, et joignez le scan",
+      facture: { montant: "fc_montant", numero: "fc_numero", date: "fc_date", titre: "Facture client (papier)", sousTitre: "Établie physiquement — seules ses références sont enregistrées", libelleNumero: "N° de la facture" },
+      outputLabel: "Scan de la facture",
+      fields: [
+        { key: "fc_numero",  label: "N° de la facture",   type: "text",   placeholder: "Ex : 2026/0142" },
+        { key: "fc_montant", label: "Montant TTC (XAF)",  type: "number", placeholder: "0" },
+        { key: "fc_date",    label: "Date de la facture", type: "date" },
+      ],
     },
     {
       cle: "remise_facture", label: "Remise de la facture au client",
@@ -555,7 +561,7 @@ const LIBELLES_META: Record<string, string> = {
   pc_montant: "Montant reçu", pc_date: "Date de paiement", pc_reference: "Référence", pc_mode: "Mode de règlement",
   enregistrement_type: "Enregistrement créé",
   ff_montant_debite: "Montant débité sur la DI", ff_solde_di_apres: "Solde de la DI après débit",
-  facture_numero: "N° de facture", facture_total_ttc: "Total TTC", facture_tva_taux: "Taux de TVA (%)",
+  facture_numero: "N° de facture", fc_numero: "N° de la facture", fc_montant: "Montant TTC", fc_date: "Date de la facture", facture_total_ttc: "Total TTC", facture_tva_taux: "Taux de TVA (%)",
 };
 const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id", "facture_lignes"]);
 const ENREGISTREMENTS: Record<string, string> = {
@@ -1220,11 +1226,11 @@ const SousEtapeCard = ({
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
                   : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
                   : meta.enregistrement_type === "debit_di" ? `${Number(meta.ff_montant_debite ?? 0).toLocaleString("fr-FR")} FCFA débités sur la DI${meta.ff_solde_di_apres !== undefined ? ` · solde ${Number(meta.ff_solde_di_apres).toLocaleString("fr-FR")} FCFA` : ""}`
-                  : meta.enregistrement_type === "facture_client" ? `Facture ${meta.facture_numero ?? ""} émise`
+                  : meta.enregistrement_type === "facture_client" ? `Facture n° ${meta.facture_numero ?? ""} enregistrée`
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
             )}
-            {meta.enregistrement_type === "facture_client" && meta.enregistrement_id && (
+            {meta.enregistrement_type === "facture_client" && meta.enregistrement_id && !meta.fc_numero && (
               <button type="button" onClick={e => { e.stopPropagation(); openDocument(`/api/facturation/factures/${meta.enregistrement_id}/pdf`).catch((err: Error) => notif.erreur(err.message)); }}
                 className="mt-1 inline-flex items-center gap-1 text-[11px] font-semibold text-secondary hover:underline">
                 <FileText className="w-3 h-3" /> Ouvrir la facture PDF

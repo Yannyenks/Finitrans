@@ -3,7 +3,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
+import { api, closeApp, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossier: { id: string; numero: string; responsableId: string }
@@ -47,7 +47,7 @@ describe('Les responsables assignent les étapes suivantes du parcours', () => {
 
   it('un compte qui n\'intervient pas sur le dossier ne peut pas assigner ; une étape passée est verrouillée', async () => {
     expectStatus(await api('raphael', 'PUT', `/api/dossiers/${dossier.id}/affectations/paiement`, { responsableId: ids.raphael }), 403)
-    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${dossier.id}/status`, { status: 'paiement' }), 200)
+    await placerEtape(dossier.id, 'paiement')
     expectStatus(await api('delba', 'PUT', `/api/dossiers/${dossier.id}/affectations/codage`, { responsableId: ids.odette }), 422)
     expectStatus(await api('delba', 'PUT', `/api/dossiers/${dossier.id}/affectations/operations_kribi`, { responsableId: ids.aliou }), 422)
   })
@@ -56,6 +56,7 @@ describe('Les responsables assignent les étapes suivantes du parcours', () => {
     const next = await api('delba', 'GET', `/api/dossiers/${dossier.id}/next-step`)
     assert.equal(next.body.etapeSuivante, 'bon_compagnie')
     assert.equal(next.body.responsableSuggere.id, ids.rasoul)
+    await preparerPassage(dossier.id, 'paiement')
     const r = await api('delba', 'PATCH', `/api/dossiers/${dossier.id}/status`, { status: 'bon_compagnie' })
     expectStatus(r, 200)
     assert.equal(r.body.responsableId, ids.rasoul)
@@ -79,6 +80,8 @@ describe('Compte rendu d\'évolution du dossier (PDF)', () => {
   })
 
   it('à la clôture, il est archivé automatiquement dans la bibliothèque', async () => {
+    await placerEtape(dossier.id, 'operations_douala')
+    await preparerPassage(dossier.id, 'operations_douala')
     expectStatus(await api('delba', 'PATCH', `/api/dossiers/${dossier.id}/status`, { status: 'cloture' }), 200)
     const lib = await api('delba', 'GET', `/api/bibliotheque?dossierId=${dossier.id}&categorie=compte_rendu`)
     expectStatus(lib, 200)

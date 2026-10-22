@@ -102,7 +102,7 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
   const valide = form.conteneur.trim().length >= 3 && destination.length >= 2 && !!form.dateEnlevement;
   return (
     <Dialog open onOpenChange={onClose}>
-      <DialogContent className="bg-card sm:max-w-[520px]">
+      <DialogContent className="bg-card sm:max-w-[520px] max-h-[92dvh] overflow-y-auto">
         <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Truck className="w-4 h-4 text-secondary" /> {initial ? "Modifier le transport" : "Nouveau transport"}</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
@@ -118,9 +118,16 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
               </SelectContent>
             </Select>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3">
             <div className="space-y-1.5">
-              <Label className="text-xs">1 · Véhicule</Label>
+              <Label className="text-xs">1 · N° TC (conteneur) *</Label>
+              <Input list="tc-dossier" value={form.conteneur} onChange={e => setForm({ ...form, conteneur: e.target.value.toUpperCase() })} placeholder="MSCU1234567" className="bg-muted/50 font-mono" aria-label="N° TC" />
+              <datalist id="tc-dossier">{tcDuDossier.map(tc => <option key={tc} value={tc} />)}</datalist>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">2 · Véhicule</Label>
               <Select value={form.camionId || "__aucun__"} onValueChange={v => setForm({ ...form, camionId: v === "__aucun__" ? "" : v })}>
                 <SelectTrigger className="bg-muted/50"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -130,7 +137,7 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">2 · Chauffeur</Label>
+              <Label className="text-xs">3 · Chauffeur</Label>
               <Select value={form.chauffeurId || "__aucun__"} onValueChange={v => setForm({ ...form, chauffeurId: v === "__aucun__" ? "" : v })}>
                 <SelectTrigger className="bg-muted/50"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -140,20 +147,9 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
               </Select>
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">3 · N° TC (conteneur) *</Label>
-              <Input list="tc-dossier" value={form.conteneur} onChange={e => setForm({ ...form, conteneur: e.target.value.toUpperCase() })} placeholder="MSCU1234567" className="bg-muted/50 font-mono" aria-label="N° TC" />
-              <datalist id="tc-dossier">{tcDuDossier.map(tc => <option key={tc} value={tc} />)}</datalist>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Date *</Label>
-              <Input type="date" value={form.dateEnlevement} onChange={e => setForm({ ...form, dateEnlevement: e.target.value })} className="bg-muted/50" />
-            </div>
-          </div>
           <div className="rounded-xl border border-border/60 p-3 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-foreground">4 · Trajet</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-foreground">4 · Destination</p>
               <div className="flex rounded-lg bg-muted p-0.5 text-[11px] font-semibold" role="radiogroup" aria-label="Type de trajet">
                 {[{ v: false, l: "Aller simple →" }, { v: true, l: "Aller-retour ⇄" }].map(o => (
                   <button key={String(o.v)} type="button" role="radio" aria-checked={form.allerRetour === o.v}
@@ -179,7 +175,13 @@ const TransportDialog = ({ dossiers, camions, chauffeurs, initial, onClose }: { 
               <p className="text-[11px] text-muted-foreground">Trajet : <span className="font-semibold text-foreground">{trajet({ origine, destination, allerRetour: form.allerRetour })}</span></p>
             )}
           </div>
-          <div className="space-y-1.5"><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-muted/50" /></div>
+          <div className="grid grid-cols-1 sm:grid-cols-[10rem_1fr] gap-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Date *</Label>
+              <Input type="date" value={form.dateEnlevement} onChange={e => setForm({ ...form, dateEnlevement: e.target.value })} className="bg-muted/50" />
+            </div>
+            <div className="space-y-1.5"><Label className="text-xs">Notes</Label><Input value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="bg-muted/50" /></div>
+          </div>
           <div className="flex justify-end gap-2 pt-1">
             <Button variant="outline" onClick={onClose}>Annuler</Button>
             <Button onClick={() => save.mutate()} disabled={!valide || save.isPending} className="gap-2 bg-secondary text-secondary-foreground">
@@ -326,7 +328,7 @@ const Logistique = () => {
   });
 
   return (
-    <AppLayout title="Logistique" subtitle="Véhicules · chauffeurs · TC (conteneurs) · dates de transport">
+    <AppLayout title="Logistique" subtitle="N° TC · véhicule · chauffeur · destination">
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {[
           { label: "Transports aujourd'hui", value: resume?.aujourdhui ?? 0, color: "text-secondary", icon: CalendarDays },
@@ -342,21 +344,21 @@ const Logistique = () => {
         ))}
       </div>
 
-      <Tabs defaultValue="vehicules">
+      <Tabs defaultValue="transports">
         <TabsList className="mb-4 flex-wrap h-auto">
+          <TabsTrigger value="transports" className="gap-1.5"><Container className="w-3.5 h-3.5" /> Transports TC</TabsTrigger>
           <TabsTrigger value="vehicules" className="gap-1.5"><Truck className="w-3.5 h-3.5" /> Véhicules ({camions.length})</TabsTrigger>
           <TabsTrigger value="chauffeurs" className="gap-1.5"><UserRound className="w-3.5 h-3.5" /> Chauffeurs ({chauffeurs.length})</TabsTrigger>
-          <TabsTrigger value="transports" className="gap-1.5"><Container className="w-3.5 h-3.5" /> Transports TC</TabsTrigger>
         </TabsList>
 
         <TabsContent value="transports">
           <div className="flex flex-wrap items-end gap-2 mb-4">
-            <div className="relative w-72">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input placeholder="TC, dossier, client, destination…" value={f.q} onChange={e => setF({ ...f, q: e.target.value })} className="pl-9 bg-card" />
             </div>
             <Select value={f.statut} onValueChange={v => setF({ ...f, statut: v })}>
-              <SelectTrigger className="w-44 bg-card"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full sm:w-44 bg-card"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="actifs">Planifiés et en route</SelectItem>
                 <SelectItem value="tous">Tous</SelectItem>
@@ -365,25 +367,25 @@ const Logistique = () => {
             </Select>
             <div className="space-y-1"><Label className="text-[10px]">Date</Label><Input type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} className="h-10 w-40 bg-card" /></div>
             {f.date !== aujourdhui() && <Button variant="ghost" size="sm" onClick={() => setF({ ...f, date: aujourdhui(), statut: "tous" })}>Aujourd'hui</Button>}
-            <Button className="ml-auto gap-2 bg-secondary text-secondary-foreground" onClick={() => setDlg({ type: "transport" })}><Plus className="w-4 h-4" /> Nouveau transport</Button>
+            <Button className="w-full sm:w-auto sm:ml-auto gap-2 bg-secondary text-secondary-foreground" onClick={() => setDlg({ type: "transport" })}><Plus className="w-4 h-4" /> Nouveau transport</Button>
           </div>
           <div className="stat-card p-0 overflow-x-auto">
             {isLoading ? <div className="py-12 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-secondary" /></div> : (
               <table className="w-full text-sm">
                 <thead><tr className="text-left text-xs text-muted-foreground border-b border-border bg-muted/40">
-                  <th className="py-2 px-3">Date</th><th className="py-2 px-3">TC</th><th className="py-2 px-3">Véhicule</th><th className="py-2 px-3">Chauffeur</th>
-                  <th className="py-2 px-3">Trajet</th><th className="py-2 px-3">Dossier</th><th className="py-2 px-3">Statut</th><th className="py-2 px-3"></th>
+                  <th className="py-2 px-3">N° TC</th><th className="py-2 px-3">Véhicule</th><th className="py-2 px-3">Chauffeur</th>
+                  <th className="py-2 px-3">Destination</th><th className="py-2 px-3">Date</th><th className="py-2 px-3">Dossier</th><th className="py-2 px-3">Statut</th><th className="py-2 px-3"></th>
                 </tr></thead>
                 <tbody>
                   {transports.map(t => {
                     const st = STATUTS[t.statut] ?? STATUTS.planifie;
                     return (
                       <tr key={t.id} className="border-b border-border/40 hover:bg-muted/20">
-                        <td className="py-2 px-3 text-xs whitespace-nowrap">{new Date(t.dateEnlevement).toLocaleDateString("fr-FR")}{t.dateLivraison && <div className="text-muted-foreground">livré {new Date(t.dateLivraison).toLocaleDateString("fr-FR")}</div>}</td>
                         <td className="py-2 px-3 font-mono font-semibold">{t.conteneur}</td>
                         <td className="py-2 px-3 font-mono text-xs">{t.camion?.immatriculation ?? <span className="text-destructive">à attribuer</span>}</td>
                         <td className="py-2 px-3 text-xs">{t.chauffeur ? <>{t.chauffeur.nom}<div className="text-muted-foreground flex items-center gap-1"><Phone className="w-3 h-3" />{t.chauffeur.telephone}</div></> : <span className="text-destructive">à attribuer</span>}</td>
                         <td className="py-2 px-3 text-xs"><span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{trajet(t)}</span></td>
+                        <td className="py-2 px-3 text-xs whitespace-nowrap">{new Date(t.dateEnlevement).toLocaleDateString("fr-FR")}{t.dateLivraison && <div className="text-muted-foreground">livré {new Date(t.dateLivraison).toLocaleDateString("fr-FR")}</div>}</td>
                         <td className="py-2 px-3 text-xs">{t.dossier ? <button className="text-secondary hover:underline" onClick={() => navigate(`/dossiers/${t.dossier.id}`)}>{t.dossier.numero}</button> : "—"}</td>
                         <td className="py-2 px-3"><span className={`status-badge ${st.cls}`}>{st.label}</span></td>
                         <td className="py-2 px-3">

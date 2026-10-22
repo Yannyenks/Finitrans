@@ -8,7 +8,7 @@ import { prisma } from '../config/prisma'
 import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { clientParNom } from './crm'
-import { creerFactureClient } from './facturation'
+import { enregistrerFacturePhysique } from './facturation'
 
 export const MODES_REGLEMENT = ['virement', 'cheque', 'especes', 'traite', 'mobile_money', 'autre'] as const
 export const LIBELLES_MODE: Record<ModeReglement, string> = {
@@ -43,10 +43,10 @@ export async function enregistrerDepuisSousEtape(
   const dossier = await prisma.dossier.findUnique({ where: { id: dossierId } })
   if (!dossier) return null
 
-  // Facturation client (après la clôture) → facture validée + compte rendu archivé à jour
+  // Facturation client (après la clôture) : facture établie physiquement, seules ses références sont enregistrées
   if (cle === 'facture_client') {
-    const { facture, totaux } = await creerFactureClient(dossierId, meta)
-    await logAudit(dossierId, userId, 'FACTURE_CLIENT', `Facture ${facture.numero} émise : ${Math.round(totaux.ttc).toLocaleString('fr-FR')} FCFA TTC (net à payer ${Math.round(totaux.net).toLocaleString('fr-FR')} FCFA)`)
+    const facture = await enregistrerFacturePhysique(dossierId, meta)
+    await logAudit(dossierId, userId, 'FACTURE_CLIENT', `Facture n° ${facture.numero} établie physiquement : ${Number(facture.montant).toLocaleString('fr-FR')} FCFA TTC`)
     return { enregistrement_id: facture.id, enregistrement_type: 'facture_client', facture_numero: facture.numero }
   }
 

@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
+import { api, closeApp, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossierId = ''
@@ -345,53 +345,76 @@ describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
   })
 })
 
-describe('Facturation client après la clôture', () => {
-  it('proposition pré-remplie, facture créée (lignes, TVA, débours), PDF premium et compte rendu régénéré', async () => {
+describe('Facturation client après la clôture (facture établie physiquement)', () => {
+  it('la comptabilité saisit n°, date et montant de la facture papier ; aucun PDF généré ; compte rendu régénéré', async () => {
     const d = await api('yasmine', 'POST', '/api/dossiers', {
       client: unique('CLIENT FACTURE'), compagnie: 'MSC', conteneur: 'MSCU8888888', marchandise: 'Divers', site: 'Douala',
       dateArrivee: new Date().toISOString(), montantHonoraires: 500000,
     })
     const id = d.body.id
-    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
-    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'cloture' }), 200)
+    await placerEtape(id, 'cloture')
+    await preparerPassage(id, 'cloture')
     const ns = await api('delba', 'GET', `/api/dossiers/${id}/next-step`)
     assert.equal(ns.body.etapeSuivante, 'facturation', 'la facturation suit la clôture')
     expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'facturation' }), 200)
-
-    const p = await api('honore', 'GET', `/api/facturation/dossiers/${id}/proposition`)
-    expectStatus(p, 200)
-    assert.equal(p.body.lignes[0].montant, 500000)
-    assert.equal(p.body.lignes[0].nature, 'honoraires')
 
     const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.filter((x: any) => x.etape === 'facturation')
     assert.deepEqual(t.map((x: any) => x.cle).sort(), ['facture_client', 'remise_facture'])
     assert.ok(t.every((x: any) => nom(x.responsableId) === 'honore'), 'facturation → comptabilité')
 
-    expectStatus(await api('honore', 'PUT', `/api/dossiers/${id}/sous-etapes/facturation/facture_client`, { statut: 'valide', metadata: { facture_lignes: [] } }), 422)
-    const ok = await api('honore', 'PUT', `/api/dossiers/${id}/sous-etapes/facturation/facture_client`, {
-      statut: 'valide',
-      metadata: {
-        facture_tva_taux: 19.25,
-        facture_lignes: [
-          { libelle: 'Honoraires de transit', montant: 500000, nature: 'honoraires' },
-          { libelle: 'Droits et taxes (débours)', montant: 1200000, nature: 'debours' },
-        ],
-      },
-    })
+    const url = `/api/dossiers/${id}/sous-etapes/facturation/facture_client`
+    const incomplete = await api('honore', 'PUT', url, { statut: 'valide', metadata: { fc_numero: 'F-1' } })
+    expectStatus(incomplete, 422)
+    assert.equal(incomplete.body.error, 'FACTURE_INCOMPLETE')
+
+    const numero = unique('FP')
+    const ok = await api('honore', 'PUT', url, { statut: 'valide', metadata: { fc_numero: numero, fc_montant: '1 796 250', fc_date: '2026-10-21' } })
     expectStatus(ok, 200)
     assert.equal(ok.body.metadata.enregistrement_type, 'facture_client')
-    assert.match(ok.body.metadata.facture_numero, /^FAC-\d{4}-\d{4}$/)
+    assert.equal(ok.body.metadata.facture_numero, numero.toUpperCase())
 
     const f = await api('honore', 'GET', `/api/dossiers/${id}/factures`)
-    const fac = f.body.find((x: any) => x.numero === ok.body.metadata.facture_numero)
-    assert.equal(Number(fac.montantTVA), 96250)
-    assert.equal(Number(fac.montant), 500000 + 96250 + 1200000)
-
-    const pdf = await api('honore', 'GET', `/api/facturation/factures/${fac.id}/pdf`)
-    expectStatus(pdf, 200)
-    assert.match(String(pdf.headers['content-type']), /application\/pdf/)
+    const fac = f.body.find((x: any) => x.numero === numero.toUpperCase())
+    assert.equal(Number(fac.montant), 1_796_250)
+    assert.equal(new Date(fac.dateFacture).toISOString().slice(0, 10), '2026-10-21')
+    assert.equal(fac.lignes, null, 'facture papier : pas de lignes générées par la plateforme')
 
     const docs = await api('delba', 'GET', `/api/bibliotheque?dossier=${id}`)
     assert.ok(JSON.stringify(docs.body).includes('Compte-rendu-'), 'compte rendu archivé avec la facturation')
+  })
+})
+
+describe('Validation obligatoire d\'une étape avant la suivante', () => {
+  it('même la Direction ne peut pas avancer tant que les tâches de l\'étape ne sont pas validées ; le retour arrière reste possible', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT ETAPE'), compagnie: 'MSC', conteneur: 'MSCU7777777', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const id = d.body.id
+    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
+    for (const who of ['delba', 'soudi'] as const) {
+      const r = await api(who, 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs' })
+      expectStatus(r, 422)
+      assert.equal(r.body.error, 'SOUS_ETAPES_INCOMPLETES')
+    }
+    const saut = await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'paiement' })
+    expectStatus(saut, 422)
+    assert.equal(saut.body.error, 'ETAPE_INVALIDE')
+
+    await placerEtape(id, 'codage')
+    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs' }), 200)
+  })
+})
+
+describe('Opérations Douala avant Kribi', () => {
+  it('un dossier de Kribi passe par Opérations Douala puis Opérations Kribi', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT KRIBI'), compagnie: 'MSC', conteneur: 'MSCU6666666', marchandise: 'Divers', site: 'Kribi', dateArrivee: new Date().toISOString(),
+    })
+    const detail = await api('delba', 'GET', `/api/dossiers/${d.body.id}`)
+    const p: string[] = detail.body.parcoursEtapes
+    assert.ok(p.includes('operations_douala') && p.includes('operations_kribi'))
+    assert.ok(p.indexOf('operations_douala') < p.indexOf('operations_kribi'), 'Douala avant Kribi')
+    const t = (await api('delba', 'GET', `/api/dossiers/${d.body.id}/sous-etapes`)).body
+    assert.deepEqual(t.filter((x: any) => x.etape === 'operations_douala').map((x: any) => x.cle).sort(), ['bad_terminal', 'facturation_terminal'])
   })
 })
