@@ -12,6 +12,7 @@ import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { AuthUser } from '../types'
 import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
+import { finaliserDossier } from '../services/finalisation'
 import {
   STATUS_ORDER, STATUS_LABELS, applicableSousEtapes, assignStage, demarrerEtape, initSousEtapes, loadAttribution,
   nextStage, notifierDirection, notifierTitulaires, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
@@ -130,7 +131,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       ] })
     }
     if (q.retardOnly) {
-      and.push({ dateLimiteSortie: { lt: new Date() }, status: { not: 'cloture' } })
+      and.push({ dateLimiteSortie: { lt: new Date() }, status: { not: 'cloture' }, finaliseLe: null })
     }
 
     // Les autres comptes ne voient que les dossiers où ils interviennent
@@ -207,6 +208,18 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     await logAudit(dossier.id, user.id, 'CREATION_DOSSIER', `Dossier ${dossier.numero} créé`)
 
     return reply.code(201).send(dossier)
+  })
+
+  // POST /api/dossiers/:id/finaliser — facturation terminée : le dossier est clos
+  fastify.post('/:id/finaliser', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const user = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true, responsableId: true } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    if (!user.superviseur && user.profil !== 'comptabilite' && !(await isInvolved(user, dossier, 'facturation'))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seuls la comptabilité, les intervenants de la facturation et la Direction peuvent finaliser le dossier.' })
+    }
+    return reply.send(await finaliserDossier(id, user))
   })
 
   // GET /api/dossiers/:id

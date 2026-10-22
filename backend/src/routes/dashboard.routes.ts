@@ -25,11 +25,11 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       diEnAlerte,
     ] = await Promise.all([
       prisma.dossier.count(),
-      prisma.dossier.count({ where: { status: { not: 'cloture' } } }),
+      prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null } }),
       prisma.dossier.count({ where: { status: 'cloture', updatedAt: { gte: debut30 } } }),
-      prisma.dossier.count({ where: { status: { not: 'cloture' }, dateLimiteSortie: { lt: now } } }),
+      prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null, dateLimiteSortie: { lt: now } } }),
       prisma.alerte.count({ where: { lu: false } }),
-      prisma.dossier.count({ where: { status: { not: 'cloture' }, priorite: 'haute' } }),
+      prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null, priorite: 'haute' } }),
       prisma.dossier.aggregate({ _sum: { montantTaxes: true } }),
       prisma.virement.count({ where: { statut: 'en_attente' } }),
       prisma.detention.count({ where: { statut: 'en_cours' } }),
@@ -80,9 +80,9 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       // KPIs dossiers
       Promise.all([
         prisma.dossier.count(),
-        prisma.dossier.count({ where: { status: { not: 'cloture' } } }),
+        prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null } }),
         prisma.dossier.count({ where: { status: 'cloture', updatedAt: { gte: debut30 } } }),
-        prisma.dossier.count({ where: { status: { not: 'cloture' }, dateLimiteSortie: { lt: now } } }),
+        prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null, dateLimiteSortie: { lt: now } } }),
       ]),
       // Répartition site
       prisma.dossier.groupBy({
@@ -177,7 +177,7 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       // Pipeline par étape
       prisma.dossier.groupBy({
         by: ['status'],
-        where: { status: { not: 'cloture' } },
+        where: { status: { not: 'cloture' }, finaliseLe: null },
         _count: true,
       }),
       // Alertes actives
@@ -189,7 +189,7 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       }),
       // Dossiers en retard avec détail
       prisma.dossier.findMany({
-        where: { status: { not: 'cloture' }, dateLimiteSortie: { lt: now } },
+        where: { status: { not: 'cloture' }, finaliseLe: null, dateLimiteSortie: { lt: now } },
         orderBy: { dateLimiteSortie: 'asc' },
         take: 20,
         include: {
@@ -210,11 +210,11 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
 
     // Dossiers actifs par responsable
     const parResponsable = await prisma.user.findMany({
-      where: { actif: true, dossiersResponsable: { some: { status: { not: 'cloture' } } } },
+      where: { actif: true, dossiersResponsable: { some: { status: { not: 'cloture' }, finaliseLe: null } } },
       select: {
         nom: true, role: true,
         dossiersResponsable: {
-          where: { status: { not: 'cloture' } },
+          where: { status: { not: 'cloture' }, finaliseLe: null },
           select: { status: true, priorite: true, dateLimiteSortie: true },
         },
       },
@@ -301,7 +301,7 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       select: {
         id: true, nom: true, site: true,
         dossiersResponsable: {
-          where: { status: { not: 'cloture' } },
+          where: { status: { not: 'cloture' }, finaliseLe: null },
           select: { status: true, priorite: true },
         },
       },
@@ -360,7 +360,7 @@ const dashboardRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => 
       : {}
     const [dossiersKribi, bonsJour, gatePassJour, interchangesRetard, compteRenduHier] = await Promise.all([
       prisma.dossier.findMany({
-        where: { site: 'Kribi', status: { not: 'cloture' }, ...scope },
+        where: { site: 'Kribi', status: { not: 'cloture' }, finaliseLe: null, ...scope },
         orderBy: [{ priorite: 'asc' }, { dateLimiteSortie: 'asc' }],
         include: { responsable: { select: { nom: true } } },
       }),

@@ -137,7 +137,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       prisma.ficheRH.findMany({ where: { user: { actif: true } }, select: { salaireBase: true, primes: true } }),
       prisma.conge.count({ where: { statut: 'approuve', dateDebut: { lte: now }, dateFin: { gte: now } } }),
       prisma.conge.count({ where: { statut: 'demande' } }),
-      prisma.dossier.count({ where: { status: { not: 'cloture' } } }),
+      prisma.dossier.count({ where: { status: { not: 'cloture' }, finaliseLe: null } }),
       prisma.dossier.count({ where: { status: 'cloture', updatedAt: { gte: subDays(now, 30) } } }),
       prisma.facture.aggregate({ where: { dateFacture: { gte: debutMois }, type: { in: ['validee', 'reglee'] } }, _sum: { montant: true }, _count: true }),
       prisma.facture.aggregate({ where: { datePaiement: { gte: debutMois }, type: 'reglee' }, _sum: { montant: true } }),

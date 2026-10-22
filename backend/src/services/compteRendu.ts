@@ -386,7 +386,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   doc.font('Helvetica').fontSize(8.5).fillColor('#C9D6E8')
     .text(txt(`${dossier.marchandise}  ·  ${compagnie}  ·  ${dossier.site}  ·  ${resumeTC(dossier)}  ·  ${dossier.conteneur}`), MARGE + 18, yc + 46, { width: LARGEUR - 180 })
     .text(txt(`Ouvert le ${heure(dossier.dateCreation)}  ·  Responsable : ${dossier.responsable?.nom ?? '—'}`), MARGE + 18, yc + 62, { width: LARGEUR - 180 })
-  const badge = factureClient ? 'FACTURÉ' : dossier.status === 'cloture' ? 'CLÔTURÉ' : txt(STATUS_LABELS[dossier.status]).toUpperCase()
+  const badge = dossier.finaliseLe ? 'TERMINÉ' : factureClient ? 'FACTURÉ' : dossier.status === 'cloture' ? 'CLÔTURÉ' : txt(STATUS_LABELS[dossier.status]).toUpperCase()
   doc.font('Helvetica').fontSize(7).fillColor('#9FB3CF').text('ÉTAPE', MARGE + LARGEUR - 122, yc + 14, { characterSpacing: 1.2 })
   doc.save().roundedRect(MARGE + LARGEUR - 122, yc + 28, 104, 22, 11).fill(cloture ? C.vert : C.orange).restore()
   doc.font('Helvetica-Bold').fontSize(8).fillColor('#FFFFFF').text(badge, MARGE + LARGEUR - 122, yc + 35, { width: 104, align: 'center', characterSpacing: 0.8, lineBreak: false, ellipsis: true })

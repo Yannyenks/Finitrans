@@ -83,14 +83,14 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     const [mesTaches, mesDossiers] = await Promise.all([
       prisma.sousEtapeDossier.findMany({
-        where: { responsableId: user.id, statut: { not: 'valide' }, dossier: { status: { not: 'cloture' } } },
+        where: { responsableId: user.id, statut: { not: 'valide' }, dossier: { status: { not: 'cloture' }, finaliseLe: null } },
         include: {
           dossier: { select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true, dateLimiteSortie: true } },
         },
         orderBy: { createdAt: 'asc' },
       }),
       prisma.dossier.findMany({
-        where: { responsableId: user.id, status: { not: 'cloture' } },
+        where: { responsableId: user.id, status: { not: 'cloture' }, finaliseLe: null },
         select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true },
       }),
     ])
@@ -304,7 +304,7 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       select: {
         id: true, nom: true,
         dossiersResponsable: {
-          where: { status: { not: 'cloture' } },
+          where: { status: { not: 'cloture' }, finaliseLe: null },
           select: { status: true, priorite: true },
         },
       },

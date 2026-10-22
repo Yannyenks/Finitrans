@@ -13,7 +13,7 @@ const CHOIX = ["info", "navire", "port", "douane", "document", "paiement", "cami
 export default function SuiviClientCarte({ dossierId, numero, client }: { dossierId: string; numero: string; client: string }) {
   const qc = useQueryClient();
   const cle = ["suivi-client", dossierId];
-  const { data, isLoading } = useQuery({ queryKey: cle, queryFn: () => api.get<any>(`/api/dossiers/${dossierId}/suivi-client`), retry: false });
+  const { data, isLoading, error } = useQuery({ queryKey: cle, queryFn: () => api.get<any>(`/api/dossiers/${dossierId}/suivi-client`), retry: false });
   const [message, setMessage] = useState("");
   const [illustration, setIllustration] = useState("info");
   const erreur = (e: any) => toast({ title: "Erreur", description: e?.message, variant: "destructive" });
@@ -39,10 +39,18 @@ export default function SuiviClientCarte({ dossierId, numero, client }: { dossie
     copier();
   };
 
-  if (isLoading || !data) return null;
+  if (isLoading) return <div id="suivi-client" className="stat-card h-28 animate-pulse" />;
+  if (error || !data) {
+    return (
+      <div id="suivi-client" className="stat-card" data-testid="suivi-client">
+        <h3 className="font-display font-semibold text-foreground mb-1 flex items-center gap-2"><Share2 className="w-4 h-4 text-secondary" /> Suivi client</h3>
+        <p className="text-xs text-muted-foreground">{(error as Error)?.message ?? "Indisponible"} — le lien est géré par les intervenants du dossier et la Direction.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="stat-card" data-testid="suivi-client">
+    <div id="suivi-client" className="stat-card scroll-mt-24 border-secondary/30 bg-gradient-to-br from-secondary/[0.06] to-transparent" data-testid="suivi-client">
       <h3 className="font-display font-semibold text-foreground mb-1 flex items-center gap-2">
         <Share2 className="w-4 h-4 text-secondary" /> Suivi client
       </h3>

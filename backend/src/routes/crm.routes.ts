@@ -92,7 +92,7 @@ const crmRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const filtre = clientIds ? { in: clientIds } : { not: null }
     const [dossiers, enCours, factures, reglements, relances, derniers] = await Promise.all([
       prisma.dossier.groupBy({ by: ['clientId'], where: { clientId: filtre }, _count: true, _max: { dateCreation: true } }),
-      prisma.dossier.groupBy({ by: ['clientId'], where: { clientId: filtre, status: { not: 'cloture' } }, _count: true }),
+      prisma.dossier.groupBy({ by: ['clientId'], where: { clientId: filtre, status: { not: 'cloture' }, finaliseLe: null }, _count: true }),
       prisma.facture.findMany({
         where: { type: { in: ['validee', 'reglee'] }, dossier: { clientId: filtre } },
         select: { montant: true, dossier: { select: { clientId: true } } },

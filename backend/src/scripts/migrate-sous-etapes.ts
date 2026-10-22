@@ -9,6 +9,7 @@
  */
 import 'dotenv/config'
 import { prisma } from '../config/prisma'
+import { finaliserDossier } from '../services/finalisation'
 import { STATUS_ORDER, SOUS_ETAPES_CONFIG, assignStage, demarrerEtape, initSousEtapes, nextStage } from '../services/workflow'
 
 async function main() {
@@ -35,7 +36,7 @@ async function main() {
   })
   console.log(`✅ Sous-étapes retirées : ${count} tâche(s) ouverte(s) supprimée(s)`)
 
-  const ouverts = await prisma.dossier.findMany({ where: { status: { not: 'cloture' } }, select: { id: true, status: true } })
+  const ouverts = await prisma.dossier.findMany({ where: { status: { not: 'cloture' }, finaliseLe: null }, select: { id: true, status: true } })
   const avant = await prisma.sousEtapeDossier.count({ where: { statut: 'en_cours' } })
   for (const d of ouverts) {
     await initSousEtapes(d.id)
@@ -44,6 +45,13 @@ async function main() {
     await demarrerEtape(d.id, d.status, timing?.dateDebut ?? new Date(), { recalculer: true })
   }
   const apres = await prisma.sousEtapeDossier.count({ where: { statut: 'en_cours' } })
+
+  // Facturation client déjà entièrement remplie : le dossier est finalisé
+  const aFinaliser = await prisma.dossier.findMany({ where: { status: 'facturation', finaliseLe: null }, select: { id: true, numero: true, responsableId: true } })
+  for (const d of aFinaliser) {
+    const resp = await prisma.user.findUnique({ where: { id: d.responsableId }, select: { id: true, nom: true } })
+    if (resp && await finaliserDossier(d.id, resp, { silencieux: true })) console.log(`✅ ${d.numero} : facturation terminée, dossier finalisé`)
+  }
   console.log(`✅ Démarrage automatique : ${apres - avant} tâche(s) démarrée(s) sur ${ouverts.length} dossier(s) ouvert(s)`)
 }
 

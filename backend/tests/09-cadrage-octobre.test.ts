@@ -397,6 +397,18 @@ describe('Facturation client après la clôture (facture établie physiquement)'
 
     const docs = await api('delba', 'GET', `/api/bibliotheque?dossier=${id}`)
     assert.ok(JSON.stringify(docs.body).includes('Compte-rendu-'), 'compte rendu archivé avec la facturation')
+
+    // Remise de la facture : dernière tâche → le dossier est finalisé automatiquement
+    const pasFini = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.equal(pasFini.body.finaliseLe, null)
+    expectStatus(await api('honore', 'POST', `/api/dossiers/${id}/finaliser`, {}), 422)
+    expectStatus(await api('honore', 'PUT', `/api/dossiers/${id}/sous-etapes/facturation/remise_facture`, { statut: 'valide' }), 200)
+    const fini = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.ok(fini.body.finaliseLe, 'dossier finalisé une fois la facturation remplie')
+    const actifs = await api('honore', 'GET', '/api/employe/mes-taches')
+    assert.ok(!actifs.body.taches.some((t: any) => t.dossier.id === id), 'plus de tâche ouverte sur un dossier terminé')
+    const n = await api('delba', 'GET', '/api/notifications?limit=30')
+    assert.ok(n.body.data.some((x: any) => x.dossierId === id && x.titre === 'Dossier finalisé'))
   })
 })
 

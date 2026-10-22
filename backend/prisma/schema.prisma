@@ -84,6 +84,8 @@ model Dossier {
   tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(255)
   /// Détail des conteneurs : [{ numero, taille }] — chaque conteneur a sa propre taille
   conteneurs         Json?
+  /// Dossier finalisé : facturation client terminée, dossier clos
+  finaliseLe         DateTime?               @map("finalise_le")
   /// Lien de suivi partagé avec le client (jeton secret ; null = pas de lien actif)
   suiviToken         String?                 @unique @map("suivi_token") @db.VarChar(64)
   actualitesClient   ActualiteClient[]

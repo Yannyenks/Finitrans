@@ -9,7 +9,7 @@ import {
   MessageSquare, CheckCircle2, History, Send, ClipboardList,
   DollarSign, AlertTriangle, Loader2, ChevronRight, ChevronDown, Upload,
   Image as ImageIcon, Banknote, Plus, Code2, ShieldCheck, Landmark,
-  Clock, AlertCircle, X, Container, Receipt, Pencil, Download, FileDown, Library, Lock,
+  Clock, AlertCircle, X, Container, Receipt, Pencil, Download, FileDown, Library, Lock, Share2, Trophy, Flag,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EquipeParcours from "@/components/dossier/EquipeParcours";
@@ -553,7 +553,11 @@ const DossierDetail = () => {
 
   // Parcours propre au site : l'étape Kribi n'existe que pour les dossiers Kribi
   const parcours: string[] = dossier.parcoursEtapes ?? nextStep?.parcours ?? STATUS_ORDER;
-  const currentStepIdx  = Math.max(0, parcours.indexOf(dossier.status));
+  const finalise        = !!dossier.finaliseLe;
+  const currentStepIdx  = finalise ? parcours.length : Math.max(0, parcours.indexOf(dossier.status));
+  const pctParcours     = finalise || dossier.status === "cloture" && !parcours.includes("facturation") ? 100 : Math.min(100, Math.round((currentStepIdx / Math.max(1, parcours.length - 1)) * 100));
+  // Facturation remplie mais dossier pas encore finalisé
+  const pretAFinaliser  = !finalise && dossier.status === "facturation" && !!nextStep?.completion?.allDone;
   const nextStatus: string | null = nextStep ? nextStep.etapeSuivante : (parcours[currentStepIdx + 1] ?? null);
 
   // Implication de l'utilisateur : responsable du dossier ou titulaire d'une tâche
@@ -589,6 +593,16 @@ const DossierDetail = () => {
   // Preuves obligatoires — docs de l'étape courante
   const currentStepDocs = docs.filter((d: any) => d.etape === dossier.status);
   const hasProofForCurrentStep = currentStepDocs.length > 0;
+
+  const finaliser = useMutation({
+    mutationFn: () => api.post<any>(`/api/dossiers/${dossier.id}/finaliser`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dossier", dossier.id] });
+      qc.invalidateQueries({ queryKey: ["dossier-next", dossier.id] });
+      toast({ title: "Dossier finalisé", description: "Facturation terminée : le dossier est clos." });
+    },
+    onError: (e: any) => toast({ title: "Finalisation impossible", description: e.message, variant: "destructive" }),
+  });
 
   const openHandoffDialog = (targetStatus: string) => {
     setHandoffStatus(targetStatus);
@@ -850,7 +864,7 @@ const DossierDetail = () => {
           className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Retour aux dossiers
         </button>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           <div className="flex">
             <Button variant="outline" size="sm" className="gap-1.5 rounded-r-none" disabled={crEnCours} onClick={() => ouvrirCompteRendu()}
               title="Compte rendu complet de l'évolution du dossier, prêt à imprimer">
@@ -859,6 +873,9 @@ const DossierDetail = () => {
             <Button variant="outline" size="sm" className="rounded-l-none border-l-0 px-2" disabled={crEnCours} onClick={() => ouvrirCompteRendu(true)}
               title="Télécharger le compte rendu" aria-label="Télécharger le compte rendu"><Download className="w-3.5 h-3.5" /></Button>
           </div>
+          <Button size="sm" className="gap-1.5 bg-secondary text-secondary-foreground" onClick={() => document.getElementById("suivi-client")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+            <Share2 className="w-3.5 h-3.5" /> Suivi client
+          </Button>
           {canModifier && <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setShowModifier(true)}><Pencil className="w-3.5 h-3.5" /> Modifier</Button>}
         </div>
       </div>
@@ -875,14 +892,24 @@ const DossierDetail = () => {
           {(dossier.status === "cloture" || dossier.status === "facturation") && (
             <div className="relative overflow-hidden rounded-2xl border border-success/25 bg-gradient-to-r from-success/10 via-success/5 to-transparent p-5" data-testid="bandeau-cloture">
               <div className="flex flex-wrap items-center gap-4">
-                <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-success text-white shadow-sm"><Lock className="w-5 h-5" /></div>
+                <div className="flex h-11 w-11 flex-none items-center justify-center rounded-xl bg-success text-white shadow-sm">{finalise ? <Trophy className="w-5 h-5" /> : <Lock className="w-5 h-5" />}</div>
                 <div className="min-w-0 flex-1">
                   <p className="font-display font-semibold text-foreground">
-                    {factureClient ? `Dossier facturé — ${factureClient.numero}` : dossier.status === "facturation" ? "Dossier clôturé — facturation client en cours" : "Dossier clôturé"}
+                    {finalise
+                      ? `Dossier terminé — facturé et clos le ${new Date(dossier.finaliseLe).toLocaleDateString("fr-FR")}${factureClient ? ` (facture ${factureClient.numero})` : ""}`
+                      : pretAFinaliser ? "Facturation remplie — le dossier peut être finalisé"
+                      : dossier.status === "facturation" ? "Dossier clôturé — facturation client en cours" : "Dossier clôturé"}
                   </p>
-                  <p className="text-xs text-muted-foreground">Le compte rendu complet du parcours a été archivé dans la bibliothèque documentaire.</p>
+                  <p className="text-xs text-muted-foreground">{pretAFinaliser
+                    ? "Toutes les tâches de facturation sont remplies : finalisez pour clore définitivement le dossier."
+                    : "Le compte rendu complet du parcours a été archivé dans la bibliothèque documentaire."}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {pretAFinaliser && (
+                    <Button size="sm" className="gap-1.5 bg-secondary text-secondary-foreground" disabled={finaliser.isPending} onClick={() => finaliser.mutate()} data-testid="finaliser-dossier">
+                      {finaliser.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Flag className="w-3.5 h-3.5" />} Finaliser le dossier
+                    </Button>
+                  )}
                   {factureClient && Array.isArray(factureClient.lignes) && factureClient.lignes.length > 0 && (
                     <Button size="sm" className="gap-1.5 bg-primary text-primary-foreground" onClick={() => openDocument(`/api/facturation/factures/${factureClient.id}/pdf`).catch((e: Error) => notif.erreur(e.message))}>
                       <FileDown className="w-3.5 h-3.5" /> Facture PDF
@@ -905,9 +932,9 @@ const DossierDetail = () => {
               <div className="min-w-0">
                 <h3 className="font-display font-semibold text-foreground">Progression du dossier</h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  {dossier.status === "cloture"
-                    ? "Dossier clôturé avec succès"
-                    : `Étape ${currentStepIdx + 1} / ${parcours.length} — ${Math.round((currentStepIdx / (parcours.length - 1)) * 100)}% accompli`}
+                  {finalise
+                    ? `Dossier terminé le ${new Date(dossier.finaliseLe).toLocaleDateString("fr-FR")} — 100 % accompli`
+                    : `Étape ${currentStepIdx + 1} / ${parcours.length} — ${pctParcours}% accompli`}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
@@ -954,7 +981,7 @@ const DossierDetail = () => {
               <motion.div
                 className="h-full rounded-full bg-gradient-to-r from-secondary via-accent to-success"
                 initial={{ width: 0 }}
-                animate={{ width: `${dossier.status === "cloture" ? 100 : Math.round((currentStepIdx / (parcours.length - 1)) * 100)}%` }}
+                animate={{ width: `${pctParcours}%` }}
                 transition={{ duration: 1.4, ease: "easeOut", delay: 0.2 }}
               />
             </div>
@@ -1543,6 +1570,9 @@ const DossierDetail = () => {
           transition={{ delay: 0.15 }}
           className="space-y-6"
         >
+          {/* Suivi client : lien partagé + messages (en tête de colonne) */}
+          <SuiviClientCarte dossierId={dossier.id} numero={dossier.numero} client={dossier.client} />
+
           <EquipeParcours dossierId={dossier.id} employes={usersList} />
 
           {/* Informations */}
@@ -1634,9 +1664,6 @@ const DossierDetail = () => {
                 : "—"}
             </span>
           </div>
-
-          {/* Suivi client : lien partagé + messages */}
-          <SuiviClientCarte dossierId={dossier.id} numero={dossier.numero} client={dossier.client} />
 
           {/* Conteneurs */}
           <div className="stat-card">

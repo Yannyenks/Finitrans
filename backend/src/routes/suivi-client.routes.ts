@@ -113,10 +113,10 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
     const parcoursSite = stagesForSite(d.site)
     const parcours = parcoursSite.filter((e, i) => e !== 'operations_douala' || i >= parcoursSite.indexOf(d.status) || d.timings.some(t => t.etape === e))
     const iCourant = parcours.indexOf(d.status)
-    const termine = d.status === 'facturation' || d.status === 'cloture'
+    const termine = !!d.finaliseLe || d.status === 'facturation' || d.status === 'cloture'
     const etapes = parcours.map((e, i) => {
       const t = [...d.timings].reverse().find(x => x.etape === e)
-      const etat = i < iCourant || (termine && i <= iCourant && e === 'cloture') ? 'fait' : i === iCourant ? 'courant' : 'avenir'
+      const etat = i < iCourant || (termine && i <= iCourant && e === 'cloture') || (d.finaliseLe && i <= iCourant) ? 'fait' : i === iCourant ? 'courant' : 'avenir'
       return { etape: e, ...ETAPES_CLIENT[e] ?? { titre: STATUS_LABELS[e], texte: '', illustration: 'info' }, etat, debut: t?.dateDebut ?? null, fin: t?.dateFin ?? null }
     })
     const progression = termine ? 100 : Math.round((Math.max(0, iCourant) / Math.max(1, parcours.length - 1)) * 100)

@@ -22,7 +22,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   fastify.get('/pipeline', { preHandler: pre }, async (_request, reply) => {
     const now = new Date()
     const dossiers = await prisma.dossier.findMany({
-      where: { status: { not: 'cloture' } },
+      where: { status: { not: 'cloture' }, finaliseLe: null },
       orderBy: [{ priorite: 'asc' }, { dateCreation: 'asc' }],
       include: {
         responsable: { select: { id: true, nom: true, profil: true } },
@@ -90,7 +90,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
       select: {
         id: true, nom: true, role: true, profil: true, site: true, compagniesAssignees: true,
         sousEtapesResponsable: {
-          where: { dossier: { status: { not: 'cloture' } } },
+          where: { dossier: { status: { not: 'cloture' }, finaliseLe: null } },
           select: { statut: true, deadline: true, etape: true, dossier: { select: { status: true } } },
         },
         sousEtapesValidees: { where: { completedAt: { gte: depuis } }, select: { id: true } },
@@ -117,7 +117,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
     const taches = await prisma.sousEtapeDossier.findMany({
       where: {
         statut: { not: 'valide' },
-        dossier: { status: { not: 'cloture' } },
+        dossier: { status: { not: 'cloture' }, finaliseLe: null },
         OR: [{ responsableId: null }, { deadline: { lt: now } }, { statut: 'rejete' }],
       },
       include: {
@@ -156,7 +156,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
     const where = {
       responsableId: body.deUserId,
       statut: { in: ['todo', 'en_cours', 'rejete'] as ('todo' | 'en_cours' | 'rejete')[] },
-      dossier: { status: { not: 'cloture' as const } },
+      dossier: { status: { not: 'cloture' as const }, finaliseLe: null },
       ...(body.dossierId ? { dossierId: body.dossierId } : {}),
     }
     const concernees = await prisma.sousEtapeDossier.findMany({ where, select: { dossierId: true, etape: true, deadline: true, dossier: { select: { status: true } } } })
@@ -172,7 +172,7 @@ const supervisionRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
     let dossiers = 0
     if (body.inclureResponsabiliteDossiers) {
       const r = await prisma.dossier.updateMany({
-        where: { responsableId: body.deUserId, status: { not: 'cloture' }, ...(body.dossierId ? { id: body.dossierId } : {}) },
+        where: { responsableId: body.deUserId, status: { not: 'cloture' }, finaliseLe: null, ...(body.dossierId ? { id: body.dossierId } : {}) },
         data: { responsableId: body.versUserId },
       })
       dossiers = r.count

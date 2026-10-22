@@ -136,7 +136,7 @@ const Dossiers = () => {
             {/* Téléphone : une carte par dossier */}
             <ul className="md:hidden divide-y divide-border/60" aria-label="Dossiers">
               {dossiers.map((d: any) => {
-                const enRetard = d.dateLimiteSortie && new Date(d.dateLimiteSortie) < new Date() && d.status !== "cloture";
+                const enRetard = d.dateLimiteSortie && new Date(d.dateLimiteSortie) < new Date() && d.status !== "cloture" && !d.finaliseLe;
                 return (
                   <li key={d.id}>
                     <button type="button" onClick={() => navigate(`/dossiers/${d.id}`)}
@@ -147,7 +147,7 @@ const Dossiers = () => {
                           {d.diId && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-secondary/10 text-secondary"><Banknote className="w-2.5 h-2.5" /> DI</span>}
                         </span>
                         <span className={`status-badge shrink-0 ${enRetard ? "bg-red-100 text-red-700" : STATUS_COLORS[d.status] ?? "bg-gray-100 text-gray-600"}`}>
-                          {enRetard ? "EN RETARD" : STATUS_LABELS[d.status] ?? d.status}
+                          {d.finaliseLe ? "Terminé" : enRetard ? "EN RETARD" : STATUS_LABELS[d.status] ?? d.status}
                         </span>
                       </div>
                       <p className="text-sm text-foreground mt-1 truncate">{d.client}</p>
@@ -185,7 +185,7 @@ const Dossiers = () => {
                 </thead>
                 <tbody>
                   {dossiers.map((d: any, i: number) => {
-                    const enRetard = d.dateLimiteSortie && new Date(d.dateLimiteSortie) < new Date() && d.status !== "cloture";
+                    const enRetard = d.dateLimiteSortie && new Date(d.dateLimiteSortie) < new Date() && d.status !== "cloture" && !d.finaliseLe;
                     return (
                       <motion.tr key={d.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
                         className={`border-b border-border/50 hover:bg-muted/30 cursor-pointer transition-colors ${enRetard ? "bg-destructive/5" : ""}`}
@@ -213,7 +213,7 @@ const Dossiers = () => {
                           {enRetard ? (
                             <span className="status-badge bg-red-100 text-red-700">EN RETARD</span>
                           ) : (
-                            <span className={`status-badge ${STATUS_COLORS[d.status] ?? "bg-gray-100 text-gray-600"}`}>{STATUS_LABELS[d.status] ?? d.status}</span>
+                            <span className={`status-badge ${d.finaliseLe ? "bg-emerald-100 text-emerald-700" : STATUS_COLORS[d.status] ?? "bg-gray-100 text-gray-600"}`}>{d.finaliseLe ? "Terminé" : STATUS_LABELS[d.status] ?? d.status}</span>
                           )}
                         </td>
                         <td className="px-5 py-3.5 text-sm text-foreground">{d.responsable?.nom ?? "—"}</td>

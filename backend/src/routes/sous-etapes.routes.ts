@@ -9,6 +9,7 @@ import { NotFoundError } from '../utils/errors'
 import { recevoirFichier } from '../services/televersement'
 import { appliquerFactureFournisseur, verifierFactureFournisseur } from '../services/di'
 import { archiverCompteRendu } from '../services/compteRendu'
+import { finaliserDossier } from '../services/finalisation'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
@@ -232,8 +233,13 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       })
     }
 
+    // Facturation client entièrement remplie → le dossier est finalisé automatiquement
+    if (body.statut === 'valide' && etape === 'facturation' && dossier.status === 'facturation') {
+      await finaliserDossier(id, actor, { silencieux: true })
+    }
+
     // Étape courante entièrement validée → prévenir le responsable du dossier
-    if (body.statut === 'valide' && dossier.status === etape) {
+    if (body.statut === 'valide' && dossier.status === etape && etape !== 'facturation') {
       const completion = await stageCompletion(id, etape, dossier.site)
       if (completion.allDone && dossier.responsableId !== actor.id) {
         await notify([dossier.responsableId], {
