@@ -530,6 +530,17 @@ const DossierDetail = () => {
     onError: (err: any) => notif.erreur(err.message ?? "Échec avancement"),
   });
 
+  // Finalisation du dossier — hook déclaré avant tout retour anticipé (ordre des hooks constant)
+  const finaliser = useMutation({
+    mutationFn: () => api.post<any>(`/api/dossiers/${id}/finaliser`, {}),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dossier", id] });
+      qc.invalidateQueries({ queryKey: ["dossier-next", id] });
+      toast({ title: "Dossier finalisé", description: "Facturation terminée : le dossier est clos." });
+    },
+    onError: (e: any) => toast({ title: "Finalisation impossible", description: e.message, variant: "destructive" }),
+  });
+
   if (isLoading) {
     return (
       <AppLayout title="Chargement...">
@@ -593,16 +604,6 @@ const DossierDetail = () => {
   // Preuves obligatoires — docs de l'étape courante
   const currentStepDocs = docs.filter((d: any) => d.etape === dossier.status);
   const hasProofForCurrentStep = currentStepDocs.length > 0;
-
-  const finaliser = useMutation({
-    mutationFn: () => api.post<any>(`/api/dossiers/${dossier.id}/finaliser`, {}),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["dossier", dossier.id] });
-      qc.invalidateQueries({ queryKey: ["dossier-next", dossier.id] });
-      toast({ title: "Dossier finalisé", description: "Facturation terminée : le dossier est clos." });
-    },
-    onError: (e: any) => toast({ title: "Finalisation impossible", description: e.message, variant: "destructive" }),
-  });
 
   const openHandoffDialog = (targetStatus: string) => {
     setHandoffStatus(targetStatus);
