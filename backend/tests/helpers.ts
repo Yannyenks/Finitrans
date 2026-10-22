@@ -115,7 +115,7 @@ export const unique = (prefix: string) => `${prefix}-${++uniq}`
 /** Place directement un dossier à une étape (base de test uniquement) — évite de dérouler tout le parcours. */
 export async function placerEtape(dossierId: string, status: string) {
   const { prisma } = await import('../src/config/prisma')
-  await prisma.dossier.update({ where: { id: dossierId }, data: { status: status as never } })
+  await prisma.dossier.update({ where: { id: dossierId }, data: { status: status as never, etapeDemarree: true } })
 }
 
 /** Ordre des tâches d'une étape (configuration du parcours). */
@@ -147,4 +147,11 @@ export async function preparerPassage(dossierId: string, etape: string) {
   const r = await upload('delba', `/api/dossiers/${dossierId}/upload`,
     { name: `preuve-${etape}-${Date.now()}.pdf`, type: 'application/pdf', content: `%PDF preuve ${etape} ${Math.random()}` }, { etape })
   expectStatus(r, 201, `preuve ${etape}`)
+}
+
+/** Démarre l'étape en cours du dossier (bouton « Démarrer l'étape »). */
+export async function demarrer(dossierId: string, who: UserKey = 'delba') {
+  const r = await api(who, 'POST', `/api/dossiers/${dossierId}/demarrer`, {})
+  expectStatus(r, 200, `démarrage de l'étape par ${who}`)
+  return r.body
 }

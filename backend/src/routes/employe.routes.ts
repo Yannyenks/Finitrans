@@ -130,8 +130,23 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       if (c.allDone) pretesAAvancer.push({ ...d, etapeSuivante: nextStage(d.status, d.site) })
     }
 
+    // Étapes passées à moi (ou à mes tâches) qui attendent leur démarrage
+    const aDemarrer = await prisma.dossier.findMany({
+      where: {
+        etapeDemarree: false, finaliseLe: null, status: { not: 'cloture' },
+        OR: [{ responsableId: user.id }, { sousEtapes: { some: { responsableId: user.id, statut: { not: 'valide' } } } }],
+      },
+      select: { id: true, numero: true, client: true, status: true, site: true, compagnie: true, priorite: true, etapeEnAttenteDepuis: true },
+      orderBy: { etapeEnAttenteDepuis: 'asc' },
+    })
+    const aDemarrerFiltres = []
+    for (const d of aDemarrer) {
+      if (d.status && (await prisma.sousEtapeDossier.count({ where: { dossierId: d.id, etape: d.status, responsableId: user.id } }) > 0 || mesDossiers.some(x => x.id === d.id))) aDemarrerFiltres.push(d)
+    }
+
     const taches = mesTaches.map(toTask)
     return reply.send({
+      aDemarrer: aDemarrerFiltres,
       taches,
       aPrendre: aPrendre.filter(t => t.dossier.status === t.etape).map(toTask),
       pretesAAvancer,

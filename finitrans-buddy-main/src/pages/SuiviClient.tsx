@@ -5,11 +5,13 @@ import { CalendarDays, Check, Clock, Container, Loader2, Mail, MapPin, MessageCi
 import FinitransLogo from "@/components/FinitransLogo";
 import { Illustration } from "@/components/suivi/Illustration";
 
-type Etape = { etape: string; titre: string; texte: string; illustration: string; etat: "fait" | "courant" | "avenir"; debut: string | null; fin: string | null };
+type Etape = { etape: string; phase: string; titre: string; texte: string; illustration: string; etat: "fait" | "courant" | "preparation" | "avenir"; debut: string | null; fin: string | null };
+type PhaseClient = { cle: string; libelle: string; description: string; etat: "a_venir" | "en_attente" | "en_cours" | "terminee"; debut: string | null; fin: string | null };
 type Suivi = {
   numero: string; client: string; marchandise: string; site: string; compagnie: string; numeroBL: string | null; dateArrivee: string;
   conteneurs: { numero: string; taille: string }[]; resumeConteneurs: string | null;
   statut: string; etapeCourante: string; termine: boolean; progression: number; etapes: Etape[];
+  enPreparation: boolean; phases: PhaseClient[];
   actualites: { id: string; message: string; illustration: string; auteur: string; date: string }[];
   entreprise: { nom: string; telephone: string | null; email: string | null; adresse: string | null; siteWeb: string | null };
   misAJour: string;
@@ -101,7 +103,7 @@ export default function SuiviClient() {
     );
   }
 
-  const courante = data.etapes.find(e => e.etat === "courant");
+  const courante = data.etapes.find(e => e.etat === "courant" || e.etat === "preparation");
   const tel = data.entreprise.telephone?.replace(/[^\d+]/g, "");
   const whatsapp = tel ? `https://wa.me/${tel.replace(/^\+/, "")}?text=${encodeURIComponent(`Bonjour, je souhaite des nouvelles de mon dossier ${data.numero}.`)}` : null;
 
@@ -126,7 +128,7 @@ export default function SuiviClient() {
               <div className="mt-4 inline-flex items-center gap-2.5 rounded-2xl bg-white/10 backdrop-blur border border-white/15 pl-1.5 pr-4 py-1.5">
                 <Illustration type={data.termine ? "valide" : courante?.illustration ?? "info"} taille={34} />
                 <div className="leading-tight">
-                  <p className="text-[10px] uppercase tracking-wider text-white/55">{data.termine ? "Statut" : "Étape en cours"}</p>
+                  <p className="text-[10px] uppercase tracking-wider text-white/55">{data.termine ? "Statut" : data.enPreparation ? "Étape en préparation" : "Étape en cours"}</p>
                   <p className="font-semibold">{data.termine ? "Opérations terminées" : data.etapeCourante}</p>
                 </div>
               </div>
@@ -138,6 +140,37 @@ export default function SuiviClient() {
       </header>
 
       <main className="max-w-2xl mx-auto px-4 -mt-2 pb-16 space-y-5">
+        {/* ── Les deux phases ── */}
+        {Array.isArray(data.phases) && data.phases.length > 0 && (
+          <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+            className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {data.phases.map((p, i) => {
+              const style = {
+                terminee:   { pastille: "bg-emerald-100 text-emerald-700", texte: "Terminée", barre: "from-emerald-400 to-emerald-500", w: "100%" },
+                en_cours:   { pastille: "bg-orange-100 text-[#C2410C]",   texte: "En cours", barre: "from-[#FDBA74] to-[#F07B37]", w: "55%" },
+                en_attente: { pastille: "bg-amber-100 text-amber-700",     texte: "En préparation", barre: "from-amber-200 to-amber-300", w: "12%" },
+                a_venir:    { pastille: "bg-slate-100 text-slate-500",     texte: "À venir", barre: "from-slate-200 to-slate-200", w: "0%" },
+              }[p.etat];
+              return (
+                <div key={p.cle} className="rounded-3xl bg-white shadow-[0_10px_40px_-18px_rgba(15,36,64,0.35)] p-4">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] uppercase tracking-[0.18em] text-slate-400 font-bold">Phase {i + 1}</p>
+                    <span className={`text-[10px] font-bold rounded-full px-2 py-0.5 ${style.pastille}`}>{style.texte}</span>
+                  </div>
+                  <p className="mt-1 font-display font-black text-[#0F2440] text-lg uppercase tracking-wide">{p.libelle}</p>
+                  <p className="text-xs text-slate-500">{p.description}</p>
+                  <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+                    <motion.div className={`h-full rounded-full bg-gradient-to-r ${style.barre}`} initial={{ width: 0 }} animate={{ width: style.w }} transition={{ duration: 1.2, ease: "easeOut" }} />
+                  </div>
+                  <p className="mt-2 text-[11px] text-slate-400">
+                    {p.etat === "terminee" && p.fin ? `Terminée le ${jour(p.fin)}` : p.debut ? `Démarrée le ${jour(p.debut)}` : p.etat === "en_attente" ? "Démarrage imminent" : "Démarrera à la fin de la phase précédente"}
+                  </p>
+                </div>
+              );
+            })}
+          </motion.section>
+        )}
+
         {/* ── Votre expédition ── */}
         <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="rounded-3xl bg-white shadow-[0_10px_40px_-18px_rgba(15,36,64,0.35)] p-5">
@@ -178,12 +211,17 @@ export default function SuiviClient() {
               const dernier = i === data.etapes.length - 1;
               return (
                 <motion.li key={e.etape} initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.25 + i * 0.05 }}
-                  className="relative flex gap-4 pb-6 last:pb-0">
+                  className="relative flex flex-wrap gap-x-4 pb-6 last:pb-0">
+                  {(i === 0 || data.etapes[i - 1].phase !== e.phase) && (
+                    <p className="basis-full -mt-1 mb-3 text-[10px] font-bold uppercase tracking-[0.2em] text-[#F07B37]">
+                      {e.phase === "pre_dedouanement" ? "Phase 1 · Pré-dédouanement" : "Phase 2 · Dédouanement"}
+                    </p>
+                  )}
                   {!dernier && (
                     <span className={`absolute left-[21px] top-12 bottom-1 w-0.5 rounded-full ${e.etat === "fait" ? "bg-gradient-to-b from-emerald-400 to-emerald-300" : "bg-slate-200"}`} />
                   )}
                   <div className="relative">
-                    {e.etat === "courant" && <span className="absolute -inset-1 rounded-[18px] ring-2 ring-[#F07B37]/60 animate-pulse" />}
+                    {(e.etat === "courant" || e.etat === "preparation") && <span className="absolute -inset-1 rounded-[18px] ring-2 ring-[#F07B37]/60 animate-pulse" />}
                     <Illustration type={e.etat === "fait" ? "valide" : e.illustration} taille={44} eteinte={e.etat === "avenir"} />
                   </div>
                   <div className={`flex-1 min-w-0 pt-0.5 ${e.etat === "avenir" ? "opacity-55" : ""}`}>
@@ -191,6 +229,7 @@ export default function SuiviClient() {
                       <p className="font-semibold text-slate-800">{e.titre}</p>
                       {e.etat === "fait" && <span className="inline-flex items-center gap-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5"><Check className="w-3 h-3" /> Terminé</span>}
                       {e.etat === "courant" && <span className="text-[10px] font-bold text-[#C2410C] bg-orange-50 rounded-full px-2 py-0.5">En cours</span>}
+                      {e.etat === "preparation" && <span className="text-[10px] font-bold text-amber-700 bg-amber-50 rounded-full px-2 py-0.5">En préparation</span>}
                     </div>
                     <p className="text-sm text-slate-500 mt-0.5 leading-snug">{e.texte}</p>
                     {(e.debut || e.fin) && (

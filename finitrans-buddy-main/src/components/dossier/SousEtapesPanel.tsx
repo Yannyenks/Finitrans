@@ -1607,7 +1607,8 @@ export default function SousEtapesPanel({
     const rowData = rows.find(r => r.cle === cfg.cle);
     // Les tâches s'enchaînent dans l'ordre : une tâche attend que la précédente soit validée
     const precedente = configs.slice(0, configs.findIndex(c => c.cle === cfg.cle)).find(c => rows.find(r => r.cle === c.cle)?.statut !== "valide");
-    const attente = dossierInfo?.status === etape && precedente ? precedente.label : undefined;
+    const attente = dossierInfo?.status === etape && dossierInfo?.etapeDemarree === false ? "démarrage de l'étape"
+      : dossierInfo?.status === etape && precedente ? precedente.label : undefined;
     return (
       <SousEtapeCard
         key={cfg.cle}

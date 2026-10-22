@@ -9,7 +9,7 @@ import {
   MessageSquare, CheckCircle2, History, Send, ClipboardList,
   DollarSign, AlertTriangle, Loader2, ChevronRight, ChevronDown, Upload,
   Image as ImageIcon, Banknote, Plus, Code2, ShieldCheck, Landmark,
-  Clock, AlertCircle, X, Container, Receipt, Pencil, Download, FileDown, Library, Lock, Share2, Trophy, Flag,
+  Clock, AlertCircle, X, Container, Receipt, Pencil, Download, FileDown, Library, Lock, Share2, Trophy, Flag, Play, Hourglass, ShieldAlert,
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EquipeParcours from "@/components/dossier/EquipeParcours";
@@ -30,6 +30,7 @@ import { useSousEtapes } from "@/hooks/useSousEtapes";
 import { dateHeure, delaiJHM, dureeEntre } from "@/lib/temps";
 import { montant as montantDevise, tauxActuels } from "@/lib/devise";
 import SuiviClientCarte from "@/components/dossier/SuiviClientCarte";
+import { DemarrerEtapeDialog, ImprevuDialog, PhasesBandeau } from "@/components/dossier/PhasesDossier";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -387,6 +388,7 @@ const DossierDetail = () => {
 
   const [showFactureDialog, setShowFactureDialog] = useState(false);
   const [showModifier, setShowModifier] = useState(false);
+  const [dlgPhase, setDlgPhase] = useState<null | "demarrer" | "imprevu">(null);
   const [crEnCours, setCrEnCours] = useState(false);
   const { query: sousEtapesQuery } = useSousEtapes(id ?? "");
 
@@ -881,6 +883,8 @@ const DossierDetail = () => {
         </div>
       </div>
       {canModifier && showModifier && <ModifierDossierDialog dossier={dossier} open onClose={() => setShowModifier(false)} />}
+      {dlgPhase === "demarrer" && <DemarrerEtapeDialog dossierId={dossier.id} etapeLabel={STATUS_LABELS[dossier.status] ?? dossier.status} enAttenteDepuis={dossier.etapeEnAttenteDepuis} motifs={dossier.motifsImprevu ?? {}} onClose={() => setDlgPhase(null)} />}
+      {dlgPhase === "imprevu" && <ImprevuDialog dossierId={dossier.id} motifs={dossier.motifsImprevu ?? {}} onClose={() => setDlgPhase(null)} />}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -942,6 +946,11 @@ const DossierDetail = () => {
                 <span className={`status-badge ${STATUS_COLORS[dossier.status] ?? "bg-gray-100 text-gray-600"}`}>
                   {STATUS_LABELS[dossier.status] ?? dossier.status}
                 </span>
+                {!finalise && dossier.motifsImprevu && (
+                  <Button size="sm" variant="outline" className="h-8 sm:h-7 text-xs gap-1 text-amber-700 border-amber-300 hover:bg-amber-50" onClick={() => setDlgPhase("imprevu")}>
+                    <ShieldAlert className="w-3.5 h-3.5" /> Imprévu
+                  </Button>
+                )}
                 {superviseur && (
                   <Select value="" onValueChange={v => v && openHandoffDialog(v)}>
                     <SelectTrigger className="h-8 sm:h-7 text-xs w-[150px]" title="Direction : revenir à une étape antérieure ou passer à la suivante (étape validée)">
@@ -954,7 +963,7 @@ const DossierDetail = () => {
                     </SelectContent>
                   </Select>
                 )}
-                {canAdvance && nextStatus && (
+                {canAdvance && nextStatus && dossier.etapeDemarree !== false && (
                   <div className="flex items-center gap-1.5">
                     {!hasProofForCurrentStep && (
                       <span className="inline-flex items-center gap-1 text-[10px] text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-medium">
@@ -987,6 +996,43 @@ const DossierDetail = () => {
               />
             </div>
 
+            {/* Deux grandes phases chronométrées séparément */}
+            {Array.isArray(dossier.phases) && <PhasesBandeau phases={dossier.phases} />}
+
+            {/* Étape atteinte mais pas encore démarrée */}
+            {dossier.etapeDemarree === false && !finalise && (
+              <div className="mb-4 rounded-xl border-2 border-dashed border-amber-300 bg-amber-50/70 p-3.5 flex flex-wrap items-center gap-3" data-testid="etape-a-demarrer">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 flex items-center justify-center shrink-0"><Hourglass className="w-5 h-5 text-amber-600" /></div>
+                <div className="flex-1 min-w-[12rem]">
+                  <p className="font-semibold text-sm text-foreground">« {STATUS_LABELS[dossier.status] ?? dossier.status} » en attente de démarrage</p>
+                  <p className="text-xs text-muted-foreground">
+                    {dossier.etapeEnAttenteDepuis ? `Depuis le ${dateHeure(dossier.etapeEnAttenteDepuis)} — ` : ""}le chronomètre de l'étape part au démarrage. En cas d'imprévu, indiquez le motif.
+                  </p>
+                </div>
+                {nextStep?.peutDemarrer ? (
+                  <Button className="gap-1.5 bg-secondary text-secondary-foreground" onClick={() => setDlgPhase("demarrer")} data-testid="bouton-demarrer">
+                    <Play className="w-4 h-4" /> Démarrer l'étape
+                  </Button>
+                ) : (
+                  <span className="text-[11px] text-muted-foreground">Démarrage par le responsable de l'étape</span>
+                )}
+              </div>
+            )}
+
+            {/* Imprévus récents */}
+            {Array.isArray(dossier.imprevus) && dossier.imprevus.length > 0 && (
+              <div className="mb-4 rounded-xl border border-amber-200/70 bg-amber-50/40 p-3 space-y-1.5">
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-800 flex items-center gap-1.5"><ShieldAlert className="w-3.5 h-3.5" /> Imprévus ({dossier.imprevus.length})</p>
+                {dossier.imprevus.slice(0, 4).map((im: any) => (
+                  <p key={im.id} className="text-xs text-foreground">
+                    <span className="font-semibold">{dossier.motifsImprevu?.[im.motif]?.libelle ?? im.motif}</span>
+                    {im.commentaire ? ` — ${im.commentaire}` : ""}
+                    <span className="text-muted-foreground"> · {STATUS_LABELS[im.etape] ?? im.etape} · {im.auteurNom} · {dateHeure(im.createdAt)}{im.informeClient ? " · client informé" : ""}</span>
+                  </p>
+                ))}
+              </div>
+            )}
+
             {/* Étapes */}
             <div className="space-y-2">
               {parcours.map((stepKey, i) => {
@@ -999,9 +1045,15 @@ const DossierDetail = () => {
                 const isExpanded     = isCurrent || expandedSteps.has(stepKey);
                 const showUploadZone = inlineUploadStep === stepKey;
 
+                const debutDePhase = stepKey === "reception" || stepKey === "codage";
                 return (
+                  <div key={stepKey}>
+                  {debutDePhase && (
+                    <p className={`text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground ${stepKey === "codage" ? "pt-3" : ""} pb-1 flex items-center gap-2`}>
+                      <span className="h-px w-4 bg-border" /> {stepKey === "reception" ? "Phase 1 — Pré-dédouanement" : "Phase 2 — Dédouanement"} <span className="h-px flex-1 bg-border" />
+                    </p>
+                  )}
                   <motion.div
-                    key={stepKey}
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: isPending ? 0.45 : 1, y: 0 }}
                     transition={{ delay: i * 0.05 }}
@@ -1260,6 +1312,7 @@ const DossierDetail = () => {
                       )}
                     </div>
                   </motion.div>
+                  </div>
                 );
               })}
             </div>

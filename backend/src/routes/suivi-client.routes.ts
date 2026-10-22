@@ -14,6 +14,7 @@ import { AuthUser } from '../types'
 import { STATUS_LABELS, stagesForSite } from '../services/workflow'
 import { getEntreprise } from './admin.routes'
 import { nomCompagnie } from '../services/compagnies'
+import { phaseDe, phasesDossier } from '../services/phases'
 
 export const ILLUSTRATIONS = ['info', 'navire', 'port', 'douane', 'document', 'paiement', 'camion', 'valide', 'attention'] as const
 
@@ -117,7 +118,9 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
     const etapes = parcours.map((e, i) => {
       const t = [...d.timings].reverse().find(x => x.etape === e)
       const etat = i < iCourant || (termine && i <= iCourant && e === 'cloture') || (d.finaliseLe && i <= iCourant) ? 'fait' : i === iCourant ? 'courant' : 'avenir'
-      return { etape: e, ...ETAPES_CLIENT[e] ?? { titre: STATUS_LABELS[e], texte: '', illustration: 'info' }, etat, debut: t?.dateDebut ?? null, fin: t?.dateFin ?? null }
+      // Étape atteinte mais pas encore démarrée : « en préparation » pour le client
+      const etatClient = etat === 'courant' && !d.etapeDemarree && !d.finaliseLe ? 'preparation' : etat
+      return { etape: e, phase: phaseDe(e).cle, ...ETAPES_CLIENT[e] ?? { titre: STATUS_LABELS[e], texte: '', illustration: 'info' }, etat: etatClient, debut: etatClient === 'preparation' ? null : t?.dateDebut ?? null, fin: t?.dateFin ?? null }
     })
     const progression = termine ? 100 : Math.round((Math.max(0, iCourant) / Math.max(1, parcours.length - 1)) * 100)
     const entreprise = await getEntreprise() as Record<string, unknown>
@@ -131,6 +134,8 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
       compagnie: await nomCompagnie(d.compagnie), numeroBL: d.numeroBL, dateArrivee: d.dateArrivee,
       conteneurs, resumeConteneurs: d.tailleConteneur,
       statut: d.status, etapeCourante: ETAPES_CLIENT[d.status]?.titre ?? STATUS_LABELS[d.status], termine, progression,
+      enPreparation: !d.etapeDemarree && !d.finaliseLe,
+      phases: phasesDossier(d).map(p => ({ cle: p.cle, libelle: p.libelle, description: p.description, etat: p.etat, debut: p.debut, fin: p.fin })),
       etapes,
       actualites: d.actualitesClient.map(a => ({ id: a.id, message: a.message, illustration: a.illustration, auteur: a.auteurNom, date: a.createdAt })),
       entreprise: {

@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, aSonTour, closeApp, dansLOrdre, expectStatus, placerEtape, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, demarrer, expectStatus, placerEtape, upload, userIds, type UserKey } from './helpers'
 
 type Task = { etape: string; cle: string; responsableId: string | null; statut: string }
 
@@ -43,6 +43,8 @@ async function preuve(who: UserKey, dossierId: string, etape: string) {
 async function advance(who: UserKey, dossierId: string, status: string, expected = 200) {
   const r = await api(who, 'PATCH', `/api/dossiers/${dossierId}/status`, { status })
   expectStatus(r, expected, `${who} → ${status}`)
+  // La nouvelle étape attend le bouton « Démarrer »
+  if (expected === 200) await demarrer(dossierId)
   return r.body
 }
 

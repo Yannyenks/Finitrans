@@ -84,6 +84,11 @@ model Dossier {
   tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(255)
   /// Détail des conteneurs : [{ numero, taille }] — chaque conteneur a sa propre taille
   conteneurs         Json?
+  /// Étape en cours démarrée (bouton « Démarrer ») ; false = en attente de démarrage
+  etapeDemarree        Boolean               @default(true) @map("etape_demarree")
+  /// Depuis quand l'étape en cours attend son démarrage
+  etapeEnAttenteDepuis DateTime?             @map("etape_en_attente_depuis")
+  imprevus             Imprevu[]
   /// Dossier finalisé : facturation client terminée, dossier clos
   finaliseLe         DateTime?               @map("finalise_le")
   /// Lien de suivi partagé avec le client (jeton secret ; null = pas de lien actif)
@@ -283,6 +288,22 @@ model BonLivraison {
   responsable  User         @relation(fields: [effectuePar], references: [id])
 
   @@map("bons_livraison")
+}
+
+/// Imprévu ou démarrage inhabituel d'une étape (motif, commentaire) — communiqué au client si souhaité
+model Imprevu {
+  id            String   @id @default(uuid()) @db.Uuid
+  dossierId     String   @map("dossier_id") @db.Uuid
+  etape         String   @db.VarChar(50)
+  motif         String   @db.VarChar(40)
+  commentaire   String?
+  informeClient Boolean  @default(true) @map("informe_client")
+  auteurNom     String   @map("auteur_nom") @db.VarChar(255)
+  createdAt     DateTime @default(now()) @map("created_at")
+  dossier       Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@index([dossierId, createdAt])
+  @@map("imprevus")
 }
 
 /// Actualité publiée pour le client sur sa page de suivi (message + illustration)

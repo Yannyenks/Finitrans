@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ListTodo, CalendarDays, UserCircle, Loader2, ArrowRight, CheckCircle2, Hand, AlertTriangle,
-  Clock, ChevronRight, KeyRound, Plane, XCircle,
+  Clock, ChevronRight, KeyRound, Plane, XCircle, Play,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
@@ -98,6 +98,7 @@ const OngletTaches = () => {
   const aVenir = taches.filter(t => !t.actionnable);
   const aPrendre: Tache[] = data?.aPrendre ?? [];
   const pretes: any[] = data?.pretesAAvancer ?? [];
+  const aDemarrer: any[] = data?.aDemarrer ?? [];
 
   return (
     <div className="space-y-6">
@@ -114,6 +115,29 @@ const OngletTaches = () => {
           </div>
         ))}
       </div>
+
+      {aDemarrer.length > 0 && (
+        <div className="stat-card border border-amber-300/70" data-testid="etapes-a-demarrer">
+          <h3 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
+            <Play className="w-4 h-4 text-amber-600" /> Étapes à démarrer ({aDemarrer.length})
+          </h3>
+          <div className="space-y-2">
+            {aDemarrer.map(d => (
+              <div key={d.id} className="flex flex-wrap items-center gap-3 p-3 rounded-xl bg-amber-50/60 border border-amber-200">
+                <div className="flex-1 min-w-[12rem]">
+                  <p className="text-sm font-semibold text-foreground">{d.numero} — {d.client}</p>
+                  <p className="text-xs text-muted-foreground">
+                    « {STATUS_LABELS[d.status]} » en attente{d.etapeEnAttenteDepuis ? ` depuis le ${new Date(d.etapeEnAttenteDepuis).toLocaleString("fr-FR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}
+                  </p>
+                </div>
+                <Button size="sm" className="h-8 text-xs gap-1 bg-secondary text-secondary-foreground" onClick={() => navigate(`/dossiers/${d.id}`)}>
+                  <Play className="w-3 h-3" /> Démarrer
+                </Button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {pretes.length > 0 && (
         <div className="stat-card border border-success/30">

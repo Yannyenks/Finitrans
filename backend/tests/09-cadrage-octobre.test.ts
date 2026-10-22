@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, aSonTour, closeApp, dansLOrdre, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, demarrer, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossierId = ''
@@ -124,6 +124,10 @@ describe('Passage de relais au niveau des tâches', () => {
       status: 'soumission_sgs', responsableId: ids.soudi, taches: { pvc: ids.delba },
     })
     expectStatus(avance, 200)
+    // Pas de chronomètre avant le démarrage de l'étape
+    assert.ok((await taches('soumission_sgs')).every(x => !x.deadline), 'étape en attente de démarrage')
+    expectStatus(await api('soudi', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'valide' }), 422)
+    await demarrer(dossierId, 'soudi')
     const sgs = await taches('soumission_sgs')
     assert.equal(nom(sgs.find(x => x.cle === 'pvc').responsableId), 'delba')
     assert.equal(nom(sgs.find(x => x.cle === 'ff_soumission').responsableId), 'soudi')
@@ -373,6 +377,7 @@ describe('Facturation client après la clôture (facture établie physiquement)'
     const ns = await api('delba', 'GET', `/api/dossiers/${id}/next-step`)
     assert.equal(ns.body.etapeSuivante, 'facturation', 'la facturation suit la clôture')
     expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'facturation' }), 200)
+    await demarrer(id)
 
     const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.filter((x: any) => x.etape === 'facturation')
     assert.deepEqual(t.map((x: any) => x.cle).sort(), ['facture_client', 'remise_facture'])
@@ -579,5 +584,47 @@ describe('Gate pass : heure de sortie', () => {
     assert.ok(t)
     const gps = await api('delba', 'GET', `/api/dossiers/${k.body.id}/gate-passes`)
     assert.equal(new Date(gps.body[0].dateSortie).toISOString(), '2026-10-22T13:30:00.000Z', '14 h 30 heure du Cameroun')
+  })
+})
+
+describe('Deux phases : pré-dédouanement et dédouanement', () => {
+  it('chaque étape démarre par un bouton, avec un motif en cas d\'imprévu communiqué au client', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT PHASES'), compagnie: 'MSC', conteneur: 'MSCU5050505', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const id = d.body.id
+    let f = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.deepEqual(f.body.phases.map((p: any) => [p.cle, p.etat]), [['pre_dedouanement', 'en_cours'], ['dedouanement', 'a_venir']])
+
+    // Fin du pré-dédouanement : passage au codage → la phase Dédouanement attend son démarrage
+    await placerEtape(id, 'soumission_sgs')
+    await preparerPassage(id, 'soumission_sgs')
+    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'codage' }), 200)
+    f = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.deepEqual(f.body.phases.map((p: any) => p.etat), ['terminee', 'en_attente'])
+    const ns = await api('delba', 'GET', `/api/dossiers/${id}/next-step`)
+    assert.equal(ns.body.peutDemarrer, true)
+    expectStatus(await api('delba', 'POST', `/api/dossiers/${id}/demarrer`, { motif: 'autre' }), 422, 'commentaire requis pour « autre »')
+    expectStatus(await api('raphael', 'POST', `/api/dossiers/${id}/demarrer`, {}), 403)
+
+    const dem = await api('delba', 'POST', `/api/dossiers/${id}/demarrer`, { motif: 'administration', commentaire: 'Serveur ASYCUDA lent ce matin' })
+    expectStatus(dem, 200)
+    f = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.deepEqual(f.body.phases.map((p: any) => p.etat), ['terminee', 'en_cours'])
+    assert.equal(f.body.imprevus[0].motif, 'administration')
+    const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.find((x: any) => x.etape === 'codage' && x.cle === 'etat_codage')
+    assert.ok(t.deadline, 'le chronomètre de la première tâche démarre')
+    expectStatus(await api('delba', 'POST', `/api/dossiers/${id}/demarrer`, {}), 422, 'déjà démarrée')
+
+    // Imprévu en cours d'étape, communiqué au client
+    expectStatus(await api('odette', 'POST', `/api/dossiers/${id}/imprevus`, { motif: 'documents_client', commentaire: 'Facture commerciale signée manquante' }), 201)
+    const lien = await api('yasmine', 'POST', `/api/dossiers/${id}/suivi-client`, {})
+    const p = await api(null, 'GET', `/api/public/suivi/${lien.body.token}`)
+    assert.deepEqual(p.body.phases.map((x: any) => x.cle), ['pre_dedouanement', 'dedouanement'])
+    const messages = p.body.actualites.map((a: any) => a.message).join(' | ')
+    assert.match(messages, /documents complémentaires/)
+    assert.match(messages, /phase de DÉDOUANEMENT/)
+    const n = await api('delba', 'GET', '/api/notifications?limit=30')
+    assert.ok(n.body.data.some((x: any) => x.dossierId === id && x.titre === 'Imprévu signalé sur un dossier'))
   })
 })

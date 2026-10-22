@@ -13,6 +13,7 @@ import { AuthUser } from '../types'
 import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import { finaliserDossier } from '../services/finalisation'
+import { MOTIFS_IMPREVU, phaseDe, phasesDossier } from '../services/phases'
 import {
   STATUS_ORDER, STATUS_LABELS, applicableSousEtapes, assignStage, demarrerEtape, initSousEtapes, loadAttribution,
   nextStage, notifierDirection, notifierTitulaires, notify, resolveAssignee, stageCompletion, stageOwner, stagesForSite,
@@ -95,6 +96,18 @@ async function isInvolved(actor: AuthUser, dossier: { id: string; responsableId:
     where: { dossierId: dossier.id, responsableId: actor.id, ...(etape ? { etape } : {}) },
   })
   return count > 0
+}
+
+/** Enregistre un imprévu et, si demandé, le communique au client avec une formulation professionnelle. */
+async function enregistrerImprevu(dossierId: string, etape: string, motif: string, commentaire: string | undefined, informerClient: boolean, auteurNom: string) {
+  const imp = await prisma.imprevu.create({ data: { dossierId, etape, motif, commentaire: commentaire || null, informeClient: informerClient, auteurNom } })
+  if (informerClient) {
+    await prisma.actualiteClient.create({ data: {
+      dossierId, illustration: 'attention', auteurNom,
+      message: `${MOTIFS_IMPREVU[motif].client}${commentaire ? `\n${commentaire}` : ''}\nNous vous tiendrons informé de l'évolution.`,
+    } })
+  }
+  return imp
 }
 
 const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
@@ -210,6 +223,77 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.code(201).send(dossier)
   })
 
+  // POST /api/dossiers/:id/demarrer — lance l'étape en cours (chronomètre, première tâche), motif si imprévu
+  fastify.post('/:id/demarrer', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = z.object({
+      motif: z.enum(Object.keys(MOTIFS_IMPREVU) as [string, ...string[]]).optional(),
+      commentaire: z.string().trim().max(1000).optional(),
+      informerClient: z.boolean().default(true),
+    }).parse(request.body ?? {})
+    const user = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    if (dossier.etapeDemarree) return reply.code(422).send({ error: 'DEJA_DEMARREE', message: `L'étape « ${STATUS_LABELS[dossier.status]} » est déjà démarrée.` })
+    if (!user.superviseur && !(await isInvolved(user, dossier, dossier.status))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seuls le responsable de l\'étape, ses intervenants et la Direction peuvent la démarrer.' })
+    }
+    if (body.motif === 'autre' && !body.commentaire) {
+      return reply.code(422).send({ error: 'COMMENTAIRE_REQUIS', message: 'Précisez l\'imprévu dans le commentaire.' })
+    }
+    const maintenant = new Date()
+    const attente = dossier.etapeEnAttenteDepuis ? maintenant.getTime() - dossier.etapeEnAttenteDepuis.getTime() : 0
+    await prisma.dossier.update({ where: { id }, data: { etapeDemarree: true, etapeEnAttenteDepuis: null } })
+    // Le chronomètre de l'étape part du démarrage effectif
+    await prisma.dossierTiming.updateMany({ where: { dossierId: id, etape: dossier.status, dateFin: null }, data: { dateDebut: maintenant } })
+    await demarrerEtape(id, dossier.status, maintenant)
+    const phase = phaseDe(dossier.status)
+    const debutPhase = phase.etapes[0] === dossier.status || (dossier.status === 'codage')
+    const h = Math.floor(attente / 3_600_000), m = Math.round((attente % 3_600_000) / 60_000)
+    await logAudit(id, user.id, 'DEMARRAGE_ETAPE', `« ${STATUS_LABELS[dossier.status]} » démarrée${debutPhase ? ` — début de la phase ${phase.libelle}` : ''}${attente > 60_000 ? ` après ${h ? `${h} h ` : ''}${m} min d'attente` : ''}${body.motif ? ` — imprévu : ${MOTIFS_IMPREVU[body.motif].libelle}${body.commentaire ? ` (${body.commentaire})` : ''}` : ''}`)
+    if (body.motif) await enregistrerImprevu(id, dossier.status, body.motif, body.commentaire, body.informerClient, user.nom)
+    if (debutPhase) {
+      await prisma.actualiteClient.create({ data: {
+        dossierId: id, illustration: phase.cle === 'dedouanement' ? 'douane' : 'document', auteurNom: user.nom,
+        message: phase.cle === 'dedouanement'
+          ? 'Votre dossier entre en phase de DÉDOUANEMENT : déclaration en douane, paiement des droits, formalités portuaires puis libération de votre marchandise.'
+          : 'Votre dossier entre en phase de PRÉ-DÉDOUANEMENT : vérification des documents et inspection SGS jusqu\'à l\'obtention du RVC.',
+      } })
+    }
+    await notifierTitulaires(id, dossier.status, {
+      titre: `${dossier.numero} : « ${STATUS_LABELS[dossier.status]} » démarrée`,
+      message: `${dossier.numero} (${dossier.client}) — l'étape « ${STATUS_LABELS[dossier.status]} » est lancée par ${user.nom}. Le compte à rebours de votre tâche tourne.`,
+    }, { sauf: user.id })
+    return reply.send(await prisma.dossier.findUnique({ where: { id }, select: { id: true, status: true, etapeDemarree: true } }))
+  })
+
+  // POST /api/dossiers/:id/imprevus — signaler un imprévu (communiqué au client si souhaité)
+  fastify.post('/:id/imprevus', { preHandler }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const body = z.object({
+      motif: z.enum(Object.keys(MOTIFS_IMPREVU) as [string, ...string[]]),
+      commentaire: z.string().trim().max(1000).optional(),
+      informerClient: z.boolean().default(true),
+    }).parse(request.body)
+    const user = request.user
+    const dossier = await prisma.dossier.findUnique({ where: { id } })
+    if (!dossier) throw new NotFoundError('Dossier', id)
+    if (!user.superviseur && !VOIT_TOUS_LES_DOSSIERS.includes(user.profil) && !(await isInvolved(user, dossier))) {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Vous n\'intervenez pas sur ce dossier.' })
+    }
+    if (body.motif === 'autre' && !body.commentaire) {
+      return reply.code(422).send({ error: 'COMMENTAIRE_REQUIS', message: 'Précisez l\'imprévu dans le commentaire.' })
+    }
+    const imp = await enregistrerImprevu(id, dossier.status, body.motif, body.commentaire, body.informerClient, user.nom)
+    await logAudit(id, user.id, 'IMPREVU', `${STATUS_LABELS[dossier.status]} — ${MOTIFS_IMPREVU[body.motif].libelle}${body.commentaire ? ` : ${body.commentaire}` : ''}`)
+    await notifierDirection({
+      titre: 'Imprévu signalé sur un dossier',
+      message: `${dossier.numero} (${dossier.client}) — ${STATUS_LABELS[dossier.status]} : ${MOTIFS_IMPREVU[body.motif].libelle}${body.commentaire ? ` — ${body.commentaire}` : ''} (${user.nom})`,
+      dossierId: id, actionUrl: `/dossiers/${id}`,
+    }, user.id)
+    return reply.code(201).send(imp)
+  })
+
   // POST /api/dossiers/:id/finaliser — facturation terminée : le dossier est clos
   fastify.post('/:id/finaliser', { preHandler }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
@@ -231,13 +315,15 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       include: {
         responsable: { select: { id: true, nom: true, role: true, email: true } },
         timings: { orderBy: { dateDebut: 'asc' }, include: { responsable: { select: { id: true, nom: true, role: true } } } },
+        imprevus: { orderBy: { createdAt: 'desc' }, take: 30 },
       },
     })
     if (!dossier) throw new NotFoundError('Dossier', id)
+    const phases = phasesDossier(dossier)
     // Une étape ajoutée au parcours après coup et déjà dépassée sans y passer n'est pas affichée
     const parcoursSite = stagesForSite(dossier.site)
     const parcoursEtapes = parcoursSite.filter((e, i) => e !== 'operations_douala' || i >= parcoursSite.indexOf(dossier.status) || dossier.timings.some(t => t.etape === e))
-    return reply.send({ ...dossier, parcoursEtapes })
+    return reply.send({ ...dossier, parcoursEtapes, phases, motifsImprevu: MOTIFS_IMPREVU })
   })
 
   // GET /api/dossiers/:id/next-step — prochaine étape, responsable pressenti, droits de l'utilisateur
@@ -260,11 +346,11 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     const raisons: string[] = []
     if (!suivante) raisons.push('Dossier à la dernière étape')
-    if (!actor.superviseur) {
-      if (!involved) raisons.push('Vous n\'êtes pas responsable de cette étape')
-      if (!completion.allDone) raisons.push(`Tâches non validées : ${completion.manquantes.join(', ')}`)
-      if (preuves === 0) raisons.push('Aucun document de preuve pour l\'étape en cours')
-    }
+    if (!dossier.etapeDemarree) raisons.push('Étape pas encore démarrée')
+    if (!actor.superviseur && !involved) raisons.push('Vous n\'êtes pas responsable de cette étape')
+    // Validation obligatoire pour tous, Direction comprise
+    if (!completion.allDone) raisons.push(`Tâches non validées : ${completion.manquantes.join(', ')}`)
+    if (preuves === 0) raisons.push('Aucun document de preuve pour l\'étape en cours')
 
     return reply.send({
       etapeCourante: dossier.status,
@@ -273,8 +359,11 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       completion,
       preuves,
       responsableSuggere: suggere,
-      peutAvancer: !!suivante && (actor.superviseur || raisons.length === 0),
+      peutAvancer: !!suivante && raisons.length === 0,
       raisons,
+      etapeDemarree: dossier.etapeDemarree,
+      etapeEnAttenteDepuis: dossier.etapeEnAttenteDepuis,
+      peutDemarrer: !dossier.etapeDemarree && !dossier.finaliseLe && (actor.superviseur || involved),
     })
   })
 
@@ -483,6 +572,9 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     // Seul un retour à une étape antérieure (correction) reste possible pour la Direction.
     const parcoursEtapes = stagesForSite(dossier.site)
     const avance = parcoursEtapes.indexOf(body.status) > parcoursEtapes.indexOf(dossier.status)
+    if (avance && !dossier.etapeDemarree) {
+      return reply.code(422).send({ error: 'ETAPE_NON_DEMARREE', message: `L'étape « ${STATUS_LABELS[dossier.status]} » n'a pas été démarrée.` })
+    }
     if (!user.superviseur || avance) {
       const suivante = nextStage(dossier.status, dossier.site)
       if (body.status !== suivante) {
@@ -551,8 +643,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         data: { statut: 'todo', startedAt: null, deadline: null },
       })
     }
-    // Le chronomètre des tâches de la nouvelle étape démarre maintenant (échéances selon le SLA)
-    await demarrerEtape(id, body.status)
+    // La nouvelle étape attend le bouton « Démarrer » (les imprévus entre deux étapes ne pèsent pas sur son chronomètre)
 
     // Clôturer le timing actuel en enregistrant le responsable qui a traité l'étape
     await prisma.dossierTiming.updateMany({
@@ -575,7 +666,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     const updated = await prisma.dossier.update({
       where: { id },
-      data: { status: body.status, responsableId: nouveauResponsable },
+      data: { status: body.status, responsableId: nouveauResponsable, etapeDemarree: false, etapeEnAttenteDepuis: new Date() },
       include: { responsable: { select: { id: true, nom: true, role: true } } },
     })
 
@@ -592,8 +683,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
     // Prévenir le nouveau responsable et les titulaires des tâches de la nouvelle étape
     await notifierTitulaires(id, body.status, {
-      titre: `Dossier ${updated.numero} : ${STATUS_LABELS[body.status]}`,
-      message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Des tâches vous attendent.`,
+      titre: `Étape à démarrer : ${updated.numero} — ${STATUS_LABELS[body.status]}`,
+      message: `Le dossier ${updated.numero} (${updated.client}) est passé à l'étape « ${STATUS_LABELS[body.status]} ». Démarrez-la dès que possible (motif à indiquer en cas d'imprévu).`,
     }, { sauf: user.id, aussi: [nouveauResponsable] })
 
     await logAudit(id, user.id, 'CHANGEMENT_STATUT',

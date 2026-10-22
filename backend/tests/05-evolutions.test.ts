@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, aSonTour, closeApp, dansLOrdre, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, demarrer, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 before(async () => { ids = await userIds() })
@@ -120,6 +120,8 @@ describe('Passation : celui qui termine l\'étape choisit qui continue', () => {
     const d = await api('yasmine', 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs', responsableId: ids.odette, note: 'Odette prend la suite' })
     expectStatus(d, 200)
     assert.equal(d.body.responsableId, ids.odette)
+    assert.equal(d.body.etapeDemarree, false, 'la nouvelle étape attend son démarrage')
+    await demarrer(id, 'odette')
     const apres = await api('odette', 'GET', `/api/dossiers/${id}/sous-etapes`)
     const sgs = apres.body.filter((x: any) => x.etape === 'soumission_sgs')
     assert.ok(sgs.length > 0 && sgs.every((x: any) => x.responsableId === ids.odette))

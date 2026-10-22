@@ -3,7 +3,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
+import { api, closeApp, demarrer, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossier: { id: string; numero: string; responsableId: string }
@@ -59,6 +59,7 @@ describe('Les responsables assignent les étapes suivantes du parcours', () => {
     await preparerPassage(dossier.id, 'paiement')
     const r = await api('delba', 'PATCH', `/api/dossiers/${dossier.id}/status`, { status: 'bon_compagnie' })
     expectStatus(r, 200)
+    await demarrer(dossier.id)
     assert.equal(r.body.responsableId, ids.rasoul)
   })
 

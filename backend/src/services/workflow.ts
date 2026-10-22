@@ -304,8 +304,10 @@ export async function loadSlaSousEtapes(): Promise<Record<string, number>> {
 export async function demarrerEtape(
   dossierId: string, etape: DossierStatus, debut = new Date(), options: { recalculer?: boolean } = {},
 ): Promise<{ id: string; cle: string; responsableId: string | null; deadline: Date | null } | null> {
-  const dossier = await prisma.dossier.findUnique({ where: { id: dossierId }, select: { site: true } })
+  const dossier = await prisma.dossier.findUnique({ where: { id: dossierId }, select: { site: true, status: true, etapeDemarree: true } })
   if (!dossier) return null
+  // Étape en attente du bouton « Démarrer » : aucune tâche ne tourne encore
+  if (dossier.status === etape && !dossier.etapeDemarree) return null
   const sla = await loadSlaSousEtapes()
   const rows = await prisma.sousEtapeDossier.findMany({
     where: { dossierId, etape },
@@ -342,8 +344,11 @@ export async function demarrerEtape(
  * et que les tâches qui la précèdent dans l'étape sont validées. Renvoie le motif du refus, sinon null.
  */
 export async function motifHorsOrdre(
-  dossier: { id: string; status: DossierStatus; site: Site }, etape: DossierStatus, cle: string,
+  dossier: { id: string; status: DossierStatus; site: Site; etapeDemarree?: boolean }, etape: DossierStatus, cle: string,
 ): Promise<string | null> {
+  if (etape === dossier.status && dossier.etapeDemarree === false) {
+    return `L'étape « ${STATUS_LABELS[etape]} » n'est pas encore démarrée : cliquez sur « Démarrer l'étape » pour lancer le chronomètre.`
+  }
   const parcours = stagesForSite(dossier.site)
   if (parcours.indexOf(etape) > parcours.indexOf(dossier.status)) {
     return `L'étape « ${STATUS_LABELS[etape]} » n'est pas encore atteinte : le dossier est à l'étape « ${STATUS_LABELS[dossier.status]} ».`
