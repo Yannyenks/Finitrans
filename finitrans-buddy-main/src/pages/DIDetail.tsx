@@ -19,10 +19,11 @@ import {
 } from "recharts";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { montant } from "@/lib/devise";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, devise = "FCFA") => `${n.toLocaleString("fr-FR")} ${devise}`;
+const fmt = (n: number, devise = "FCFA") => devise === "FCFA" || devise === "XAF" ? montant(n) : `${n.toLocaleString("fr-FR")} ${devise}`;
 
 const alerteClasses = (niveau: string) => ({
   band:  niveau === "critical" ? "from-red-500 to-red-600" : niveau === "warning" ? "from-amber-400 to-orange-500" : "from-green-400 to-green-500",

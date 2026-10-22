@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { toast } from "@/hooks/use-toast";
+import { montant } from "@/lib/devise";
 
 export type DIAlerteNiveau = "ok" | "warning" | "critical";
 
@@ -96,18 +97,18 @@ export function useDI(diId: string | null | undefined) {
       if (niveau === "critical") {
         toast({
           title:       "🔴 Solde DI critique",
-          description: `Solde restant : ${Number(data.di?.soldeActuel).toLocaleString("fr-FR")} FCFA — moins de ${data.di?.seuilAlerte2}% disponible`,
+          description: `Solde restant : ${montant(Number(data.di?.soldeActuel))} — moins de ${data.di?.seuilAlerte2}% disponible`,
           variant:     "destructive",
         });
       } else if (niveau === "warning") {
         toast({
           title:       "⚠️ Solde DI faible",
-          description: `Solde restant : ${Number(data.di?.soldeActuel).toLocaleString("fr-FR")} FCFA — moins de ${data.di?.seuilAlerte1}% disponible`,
+          description: `Solde restant : ${montant(Number(data.di?.soldeActuel))} — moins de ${data.di?.seuilAlerte1}% disponible`,
         });
       } else {
         toast({
           title:       "DI débitée",
-          description: `Nouveau solde : ${Number(data.di?.soldeActuel).toLocaleString("fr-FR")} FCFA`,
+          description: `Nouveau solde : ${montant(Number(data.di?.soldeActuel))}`,
         });
       }
     },
@@ -131,7 +132,7 @@ export function useDI(diId: string | null | undefined) {
       qc.invalidateQueries({ queryKey: ["di-list"] });
       toast({
         title:       "DI rechargée",
-        description: `Nouveau solde : ${Number(data.soldeActuel).toLocaleString("fr-FR")} FCFA`,
+        description: `Nouveau solde : ${montant(Number(data.soldeActuel))}`,
       });
     },
     onError: (err: any) =>

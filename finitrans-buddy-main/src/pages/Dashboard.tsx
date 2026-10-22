@@ -68,7 +68,7 @@ const TiltCard = ({ children, delay = 0, className = "" }: { children: React.Rea
 
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", codage: "Codage", validation: "Validation",
-  paiement: "Paiement", bon_compagnie: "Bon Compagnie",
+  paiement: "Paiement", bon_compagnie: "Bon compagnie (Douala)",
   operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé", facturation: "Facturation",
 };
 

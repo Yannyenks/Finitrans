@@ -11,7 +11,7 @@ import { DEFAULT_SLA_SOUS_ETAPES, SOUS_ETAPES_CONFIG, STATUS_LABELS, invalidateA
 /** Clés gérées par des écrans dédiés (rôles, attribution, entreprise) : DG uniquement. */
 const CLES_DG = ['roles_config', 'attribution_etapes', 'entreprise']
 /** Délais et SLA : définis par la Direction (DG) et le Responsable Exploitation. */
-const CLES_SUPERVISION = ['sla_jours', 'sla_sous_etapes']
+const CLES_SUPERVISION = ['sla_jours', 'sla_sous_etapes', 'taux_change']
 
 const jsonValue = z.custom<Prisma.InputJsonValue>(v => v !== undefined, { message: 'Valeur requise' })
 

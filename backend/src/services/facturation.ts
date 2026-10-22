@@ -197,7 +197,7 @@ export async function genererFacturePdf(factureId: string): Promise<{ buffer: Bu
   doc.save().roundedRect(xr, y0, wr, 98, 6).fill(C.marine).restore()
   doc.font('Helvetica-Bold').fontSize(7).fillColor('#9FB3CF').text('RÉFÉRENCES DE L\'OPÉRATION', xr + 14, y0 + 12, { characterSpacing: 1.2 })
   const refs: [string, string][] = [
-    ['Marchandise', d.marchandise], ['Compagnie', compagnie], ['Conteneur(s)', `${d.nombreConteneurs} x ${d.tailleConteneur ?? 'TC'} — ${d.conteneur}`],
+    ['Marchandise', d.marchandise], ['Compagnie', compagnie], ['Conteneur(s)', `${d.nombreConteneurs} TC (${d.tailleConteneur ?? 'taille non précisée'}) — ${d.conteneur}`],
     ['BL / Déclaration', [d.numeroBL, d.numDeclaration].filter(Boolean).join(' / ') || '—'], ['DI', d.di?.numero ?? d.numeroDI ?? '—'],
   ]
   refs.forEach(([k, v], i) => {

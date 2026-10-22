@@ -8,18 +8,23 @@ import { marquerNotifies } from './evenements'
 
 export const STATUS_ORDER: DossierStatus[] = [
   'reception', 'soumission_sgs', 'codage', 'validation',
+  'paiement', 'bon_compagnie', 'operations_kribi', 'cloture', 'facturation',
+]
+
+/** Ordre de toutes les étapes, y compris celles retirées du parcours (« Opérations Douala »). */
+const ORDRE_COMPLET: DossierStatus[] = [
+  'reception', 'soumission_sgs', 'codage', 'validation',
   'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi', 'cloture', 'facturation',
 ]
 
 export const STATUS_LABELS: Record<DossierStatus, string> = {
   reception: 'Réception', soumission_sgs: 'Soumission SGS', codage: 'Codage',
-  validation: 'Validation', paiement: 'Paiement', bon_compagnie: 'Bon Compagnie',
+  validation: 'Validation', paiement: 'Paiement', bon_compagnie: 'Bon compagnie (Douala)',
   operations_douala: 'Opérations Douala', operations_kribi: 'Opérations Kribi', cloture: 'Clôture', facturation: 'Facturation client',
 }
 
-/** Parcours d'un dossier selon son site : « Opérations Douala » pour Douala, « Opérations Kribi » pour Kribi. */
+/** Parcours d'un dossier selon son site : « Opérations Kribi » pour les dossiers de Kribi seulement. */
 export function stagesForSite(site: Site): DossierStatus[] {
-  // Opérations Douala pour tous les dossiers (avant Kribi pour un dossier de Kribi) ; Opérations Kribi pour Kribi seulement
   return STATUS_ORDER.filter(s => site === 'Kribi' || s !== 'operations_kribi')
 }
 
@@ -27,9 +32,9 @@ export function nextStage(current: DossierStatus, site: Site): DossierStatus | n
   const stages = stagesForSite(site)
   const idx = stages.indexOf(current)
   if (idx === -1) {
-    // Étape hors parcours (ex. ancien dossier Douala en operations_kribi) → reprendre à la suivante globale
-    const g = STATUS_ORDER.indexOf(current)
-    return STATUS_ORDER.slice(g + 1).find(s => stages.includes(s)) ?? null
+    // Étape hors parcours (étape retirée, ancien dossier Douala en operations_kribi) → reprendre à la suivante
+    const g = ORDRE_COMPLET.indexOf(current)
+    return ORDRE_COMPLET.slice(g + 1).find(s => stages.includes(s)) ?? null
   }
   return stages[idx + 1] ?? null
 }
@@ -63,11 +68,8 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'facturation_compagnie', label: 'Bon de la compagnie maritime' },
     { cle: 'bon_a_delivrer',        label: 'Soumission & obtention du Bon à Délivrer' },
   ],
-  // Partie terminal de Douala, avant Kribi (mêmes tâches que Kribi, sans gate pass ; bon à délivrer au lieu du bon de livraison)
-  operations_douala: [
-    { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)' },
-    { cle: 'bad_terminal',         label: 'Bon à délivrer' },
-  ],
+  // Étape retirée du parcours (les opérations de Douala relèvent du « Bon compagnie (Douala) »)
+  operations_douala: [],
   operations_kribi: [
     { cle: 'facturation_terminal', label: 'Facturation & paiement (redevance portuaire)', sites: ['Kribi'] },
     { cle: 'bon_livraison',        label: 'Bon de livraison', sites: ['Kribi'] },
@@ -299,20 +301,62 @@ export async function loadSlaSousEtapes(): Promise<Record<string, number>> {
  * Le dossier entre dans une étape : chaque tâche attribuée démarre automatiquement
  * (plus de bouton « Démarrer ») et son échéance est calculée d'après le SLA (sauf délai déjà fixé).
  */
-export async function demarrerEtape(dossierId: string, etape: DossierStatus, debut = new Date()) {
+export async function demarrerEtape(
+  dossierId: string, etape: DossierStatus, debut = new Date(), options: { recalculer?: boolean } = {},
+): Promise<{ id: string; cle: string; responsableId: string | null; deadline: Date | null } | null> {
+  const dossier = await prisma.dossier.findUnique({ where: { id: dossierId }, select: { site: true } })
+  if (!dossier) return null
   const sla = await loadSlaSousEtapes()
   const rows = await prisma.sousEtapeDossier.findMany({
-    where: { dossierId, etape, statut: { not: 'valide' } },
-    select: { id: true, cle: true, statut: true, responsableId: true, startedAt: true, deadline: true },
+    where: { dossierId, etape },
+    select: { id: true, cle: true, statut: true, responsableId: true, startedAt: true, deadline: true, completedAt: true },
   })
-  for (const r of rows) {
-    const heures = sla[`${etape}.${r.cle}`]
-    const data: Prisma.SousEtapeDossierUpdateInput = {}
-    if (!r.startedAt) data.startedAt = debut
-    if (!r.deadline && heures > 0) data.deadline = new Date(debut.getTime() + heures * 3_600_000)
-    if (r.statut === 'todo' && r.responsableId) data.statut = 'en_cours'
-    if (Object.keys(data).length > 0) await prisma.sousEtapeDossier.update({ where: { id: r.id }, data })
+  // Les tâches s'enchaînent dans l'ordre : seule la première tâche non validée tourne ;
+  // son chronomètre part de la fin de la tâche précédente (ou de l'entrée dans l'étape).
+  let depart = debut
+  let suivante: (typeof rows)[number] | null = null
+  for (const se of applicableSousEtapes(etape, dossier.site)) {
+    const r = rows.find(x => x.cle === se.cle)
+    if (!r) continue
+    if (r.statut === 'valide') { if (r.completedAt && r.completedAt > depart) depart = r.completedAt; continue }
+    if (!suivante) { suivante = r; continue }
+    // Tâches suivantes : en attente tant que la précédente n'est pas validée
+    if (options.recalculer && (r.statut === 'en_cours' || r.startedAt || r.deadline)) {
+      await prisma.sousEtapeDossier.update({ where: { id: r.id }, data: { statut: r.statut === 'en_cours' ? 'todo' : r.statut, startedAt: null, deadline: null } })
+    }
   }
+  if (!suivante) return null
+  const heures = sla[`${etape}.${suivante.cle}`]
+  const recalcul = options.recalculer && (!suivante.startedAt || suivante.startedAt < depart)
+  const data: Prisma.SousEtapeDossierUpdateInput = {}
+  if (!suivante.startedAt || recalcul) data.startedAt = depart
+  if ((!suivante.deadline || recalcul) && heures > 0) data.deadline = new Date(depart.getTime() + heures * 3_600_000)
+  if (suivante.statut === 'todo' && suivante.responsableId) data.statut = 'en_cours'
+  if (Object.keys(data).length === 0) return null
+  const maj = await prisma.sousEtapeDossier.update({ where: { id: suivante.id }, data, select: { id: true, cle: true, responsableId: true, deadline: true } })
+  return maj
+}
+
+/**
+ * Ordre des tâches : une tâche ne peut démarrer ou être validée que si son étape est atteinte
+ * et que les tâches qui la précèdent dans l'étape sont validées. Renvoie le motif du refus, sinon null.
+ */
+export async function motifHorsOrdre(
+  dossier: { id: string; status: DossierStatus; site: Site }, etape: DossierStatus, cle: string,
+): Promise<string | null> {
+  const parcours = stagesForSite(dossier.site)
+  if (parcours.indexOf(etape) > parcours.indexOf(dossier.status)) {
+    return `L'étape « ${STATUS_LABELS[etape]} » n'est pas encore atteinte : le dossier est à l'étape « ${STATUS_LABELS[dossier.status]} ».`
+  }
+  if (etape !== dossier.status) return null
+  const ordre = applicableSousEtapes(etape, dossier.site)
+  const avant = ordre.slice(0, Math.max(0, ordre.findIndex(s => s.cle === cle)))
+  if (avant.length === 0) return null
+  const valides = await prisma.sousEtapeDossier.findMany({
+    where: { dossierId: dossier.id, etape, cle: { in: avant.map(s => s.cle) }, statut: 'valide' }, select: { cle: true },
+  })
+  const manquantes = avant.filter(s => !valides.some(v => v.cle === s.cle)).map(s => s.label)
+  return manquantes.length ? `Terminez d'abord la tâche précédente : ${manquantes.join(', ')}.` : null
 }
 
 /** Échéance d'une tâche qui démarre maintenant (SLA de la sous-étape). */

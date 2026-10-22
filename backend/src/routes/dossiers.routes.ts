@@ -20,12 +20,20 @@ import { rattacherClient } from '../services/crm'
 import { compagnieConnue, zCompagnie } from '../services/compagnies'
 import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 
+/** Un conteneur du dossier et sa taille (20' Dry, 40' HC…) */
+const conteneurSchema = z.object({
+  numero: z.string().trim().min(3).max(20).transform(s => s.toUpperCase()),
+  taille: z.string().trim().max(30).default(''),
+})
+
 const createDossierSchema = z.object({
   client:            z.string().min(2),
   compagnie:         zCompagnie,
-  conteneur:         z.string().min(3),
+  conteneur:         z.string().min(3).optional(),
+  /** Conteneurs de tailles différentes : la liste prime sur conteneur / nombre / taille */
+  conteneurs:        z.array(conteneurSchema).min(1).max(200).optional(),
   nombreConteneurs:  z.number().int().min(1).max(500).optional(),
-  tailleConteneur:   z.string().trim().max(30).optional(),
+  tailleConteneur:   z.string().trim().max(255).optional(),
   marchandise:       z.string().min(2),
   site:              z.enum(['Douala', 'Kribi']),
   responsableId:     z.string().uuid().optional(),
@@ -44,6 +52,19 @@ const createDossierSchema = z.object({
   prSaisie:          z.boolean().optional(),
   notes:             z.string().optional(),
 })
+
+/** Liste de conteneurs → champs de synthèse (n° séparés par des virgules, nombre, résumé des tailles). */
+function normaliserConteneurs<T extends { conteneurs?: { numero: string; taille: string }[]; conteneur?: string; nombreConteneurs?: number; tailleConteneur?: string }>(body: T): T {
+  if (!body.conteneurs?.length) return body
+  const parTaille = new Map<string, number>()
+  for (const c of body.conteneurs) parTaille.set(c.taille || 'taille non précisée', (parTaille.get(c.taille || 'taille non précisée') ?? 0) + 1)
+  return {
+    ...body,
+    conteneur: body.conteneurs.map(c => c.numero).join(', '),
+    nombreConteneurs: body.conteneurs.length,
+    tailleConteneur: [...parTaille].map(([t, n]) => `${n} × ${t}`).join(' · ').slice(0, 255),
+  }
+}
 
 const updateDossierSchema = createDossierSchema.partial().extend({
   priorite: z.enum(['haute', 'moyenne', 'basse']).optional(),
@@ -136,7 +157,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // POST /api/dossiers — enregistrement + attribution automatique des tâches
   fastify.post('/', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
-    const body = createDossierSchema.parse(request.body)
+    const body = normaliserConteneurs(createDossierSchema.parse(request.body))
+    if (!body.conteneur) return reply.code(422).send({ error: 'CONTENEUR_REQUIS', message: 'Indiquez au moins un conteneur.' })
     if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
       return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
     }
@@ -158,6 +180,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return prisma.dossier.create({
         data: {
           ...body,
+          conteneur: body.conteneur!,
           responsableId: responsableId!,
           numero,
           dateArrivee: new Date(body.dateArrivee),
@@ -375,7 +398,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   // PATCH /api/dossiers/:id
   fastify.patch('/:id', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
-    const body    = updateDossierSchema.parse(request.body)
+    const body    = normaliserConteneurs(updateDossierSchema.parse(request.body))
     if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
       return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
     }

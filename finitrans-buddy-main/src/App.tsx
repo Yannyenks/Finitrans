@@ -34,6 +34,7 @@ const Administration = lazy(() => import("./pages/Administration"));
 const ComptabiliteAvancee = lazy(() => import("./pages/ComptabiliteAvancee"));
 const Crm = lazy(() => import("./pages/Crm"));
 import NotFound from "./pages/NotFound";
+import { AffichageDevise } from "@/lib/devise";
 
 // ── Error Boundary ─────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
@@ -116,6 +117,7 @@ const App = () => (
       <Sonner />
       <SessionSync />
       <BrowserRouter>
+        <AffichageDevise>
         <Routes>
           <Route path="/" element={<Login />} />
           <Route path="/dashboard"            element={R("dashboard", <Dashboard />)} />
@@ -147,6 +149,7 @@ const App = () => (
           <Route path="/crm/:id"              element={R("crm", <Crm />)} />
           <Route path="*"                     element={<NotFound />} />
         </Routes>
+        </AffichageDevise>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

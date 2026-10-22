@@ -15,7 +15,7 @@ const STEP_LABELS: Record<string, string> = {
   codage:           "Codage",
   validation:       "Validation",
   paiement:         "Paiement",
-  bon_compagnie:    "Bon Compagnie",
+  bon_compagnie:    "Bon compagnie (Douala)",
   operations_douala: "Douala", operations_kribi: "Kribi",
   cloture:          "Clôture", facturation: "Facturation client",
 };

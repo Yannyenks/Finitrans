@@ -12,10 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { motion, AnimatePresence } from "framer-motion";
 import DIForm from "@/components/di/DIForm";
+import { montant } from "@/lib/devise";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, devise = "FCFA") => `${n.toLocaleString("fr-FR")} ${devise}`;
+const fmt = (n: number, devise = "FCFA") => devise === "FCFA" || devise === "XAF" ? montant(n) : `${n.toLocaleString("fr-FR")} ${devise}`;
 
 const alerteColor = (n: string) =>
   n === "critical" ? { bg: "bg-red-50 border-red-200", badge: "bg-red-100 text-red-700", bar: "#ef4444" } :

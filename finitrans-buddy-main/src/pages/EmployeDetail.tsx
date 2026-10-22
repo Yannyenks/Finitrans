@@ -9,7 +9,7 @@ import { Progress } from "@/components/ui/progress";
 
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", soumission_sgs: "SGS", codage: "Codage", validation: "Validation",
-  paiement: "Paiement", bon_compagnie: "Bon Cie", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé", facturation: "Facturation",
+  paiement: "Paiement", bon_compagnie: "Bon Cie (Douala)", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé", facturation: "Facturation",
 };
 const STATUS_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-700", codage: "bg-purple-100 text-purple-700",

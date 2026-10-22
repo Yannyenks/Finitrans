@@ -24,6 +24,7 @@ import FactureClientDialog from "@/components/dossier/FactureClientDialog";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
+import { montant } from "@/lib/devise";
 
 // ── Définition des champs par sous-étape ──────────────────────────────────────
 
@@ -576,7 +577,7 @@ function valeurLisible(cle: string, v: unknown): string {
   if (cle === "mode_paiement") return s === "cash" ? "Cash / espèces" : s === "autres" ? "Autres" : s === "virement" ? "Virement" : s;
   if (cle === "pvc_resultat") return s === "succes" ? "Succès" : "Rejet";
   if (cle === "enregistrement_type") return ENREGISTREMENTS[s] ?? s;
-  if (/montant|total_ttc|solde/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
+  if (/montant|total_ttc|solde/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return montant(Number(s.replace(/\s/g, "")));
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).toLocaleDateString("fr-FR");
   return s;
 }
@@ -1007,6 +1008,7 @@ const SousEtapeCard = ({
   peutPrendre,
   peutAssigner,
   clientDossier,
+  attente,
 }: {
   etape:      string;
   config:     SousEtapeConfig;
@@ -1018,6 +1020,8 @@ const SousEtapeCard = ({
   /** Direction, responsable du dossier ou intervenant de l'étape : peut désigner qui fait la tâche */
   peutAssigner: boolean;
   clientDossier: string;
+  /** Tâche précédente non validée : celle-ci attend son tour (pas de chronomètre, pas de validation) */
+  attente?: string;
 }) => {
   const currentUser  = getStoredUser();
   const { update, prendre } = useSousEtapes(dossierId);
@@ -1225,7 +1229,7 @@ const SousEtapeCard = ({
                 ✓ {meta.enregistrement_type === "paiement_douane" ? "Paiement douane enregistré en Finance"
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
                   : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
-                  : meta.enregistrement_type === "debit_di" ? `${Number(meta.ff_montant_debite ?? 0).toLocaleString("fr-FR")} FCFA débités sur la DI${meta.ff_solde_di_apres !== undefined ? ` · solde ${Number(meta.ff_solde_di_apres).toLocaleString("fr-FR")} FCFA` : ""}`
+                  : meta.enregistrement_type === "debit_di" ? `${montant(meta.ff_montant_debite ?? 0)} débités sur la DI${meta.ff_solde_di_apres !== undefined ? ` · solde ${montant(meta.ff_solde_di_apres)}` : ""}`
                   : meta.enregistrement_type === "facture_client" ? `Facture n° ${meta.facture_numero ?? ""} enregistrée`
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
@@ -1444,7 +1448,12 @@ const SousEtapeCard = ({
 
 
                   {/* Le titulaire (ou la Direction) termine la tâche */}
-                  {(statut === "todo" || statut === "en_cours") && canEdit && (
+                  {attente && statut !== "valide" && (
+                    <span className="inline-flex items-center gap-1 h-7 px-2.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground" data-testid="attente-tache">
+                      <Clock className="w-3 h-3" /> En attente : « {attente} »
+                    </span>
+                  )}
+                  {(statut === "todo" || statut === "en_cours") && canEdit && !attente && (
                     <Button size="sm"
                       className="h-7 text-xs gap-1 bg-success text-white hover:bg-success/90"
                       disabled={isPending}
@@ -1583,6 +1592,9 @@ export default function SousEtapesPanel({
 
   const renderConfig = (cfg: SousEtapeConfig) => {
     const rowData = rows.find(r => r.cle === cfg.cle);
+    // Les tâches s'enchaînent dans l'ordre : une tâche attend que la précédente soit validée
+    const precedente = configs.slice(0, configs.findIndex(c => c.cle === cfg.cle)).find(c => rows.find(r => r.cle === c.cle)?.statut !== "valide");
+    const attente = dossierInfo?.status === etape && precedente ? precedente.label : undefined;
     return (
       <SousEtapeCard
         key={cfg.cle}
@@ -1595,6 +1607,7 @@ export default function SousEtapesPanel({
         peutPrendre={!!user && profilDe(cfg.cle) === user.profil}
         peutAssigner={canManage || (!!user && (dossierInfo?.responsableId === user.id || rows.some(r => r.responsableId === user.id)))}
         clientDossier={dossierInfo?.client ?? ""}
+        attente={attente}
       />
     );
   };

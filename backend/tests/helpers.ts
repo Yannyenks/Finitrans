@@ -118,6 +118,28 @@ export async function placerEtape(dossierId: string, status: string) {
   await prisma.dossier.update({ where: { id: dossierId }, data: { status: status as never } })
 }
 
+/** Ordre des tâches d'une étape (configuration du parcours). */
+export async function ordreTaches(etape: string): Promise<string[]> {
+  const { SOUS_ETAPES_CONFIG } = await import('../src/services/workflow')
+  return (SOUS_ETAPES_CONFIG as Record<string, { cle: string }[]>)[etape]?.map(s => s.cle) ?? []
+}
+
+/** Trie des tâches dans l'ordre du parcours. */
+export async function dansLOrdre<T extends { cle: string }>(etape: string, taches: T[]): Promise<T[]> {
+  const ordre = await ordreTaches(etape)
+  return [...taches].sort((a, b) => ordre.indexOf(a.cle) - ordre.indexOf(b.cle))
+}
+
+/** Amène une tâche à son tour (base de test) : dossier à l'étape, tâches précédentes de l'étape validées. */
+export async function aSonTour(dossierId: string, etape: string, cle: string) {
+  const { prisma } = await import('../src/config/prisma')
+  const d = await prisma.dossier.findUnique({ where: { id: dossierId }, select: { status: true } })
+  if (d?.status !== etape) await placerEtape(dossierId, etape)
+  const ordre = await ordreTaches(etape)
+  const avant = ordre.slice(0, Math.max(0, ordre.indexOf(cle)))
+  if (avant.length) await prisma.sousEtapeDossier.updateMany({ where: { dossierId, etape, cle: { in: avant } }, data: { statut: 'valide' } })
+}
+
 /** Rend l'étape franchissable (base de test) : tâches validées + une preuve déposée par la Direction. */
 export async function preparerPassage(dossierId: string, etape: string) {
   const { prisma } = await import('../src/config/prisma')

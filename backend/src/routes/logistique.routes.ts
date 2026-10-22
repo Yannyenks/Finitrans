@@ -47,6 +47,8 @@ const transportSchema = z.object({
   allerRetour:    z.boolean().optional(),
   statut:         z.enum(STATUTS).optional(),
   notes:          z.string().nullable().optional(),
+  /** Obligatoire pour passer le TC en « vide retourné » */
+  justificationRetourVide: z.string().trim().max(1000).nullable().optional(),
 })
 
 const includeTransport = {
@@ -173,11 +175,20 @@ const logistiqueRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       dateEnlevement: body.dateEnlevement ? new Date(body.dateEnlevement) : undefined,
       dateLivraison: body.dateLivraison === undefined ? undefined : body.dateLivraison ? new Date(body.dateLivraison) : null,
     }
+    // TC vide retourné : justification obligatoire
+    if (body.statut === 'retour_vide' && existing.statut !== 'retour_vide') {
+      const justification = (body.justificationRetourVide ?? existing.justificationRetourVide ?? '').trim()
+      if (justification.length < 5) {
+        return reply.code(422).send({ error: 'JUSTIFICATION_REQUISE', message: 'Indiquez la justification du retour du TC vide (au moins 5 caractères).' })
+      }
+      data.justificationRetourVide = justification
+      data.dateRetourVide = new Date()
+    }
     // Livraison : date renseignée automatiquement si absente
     if (body.statut === 'livre' && !existing.dateLivraison && body.dateLivraison === undefined) data.dateLivraison = new Date()
     const t = await prisma.transport.update({ where: { id }, data, include: includeTransport })
     if (t.dossierId && body.statut && body.statut !== existing.statut) {
-      await logAudit(t.dossierId, request.user.id, 'TRANSPORT_STATUT', `TC ${t.conteneur} : ${existing.statut} → ${body.statut}`)
+      await logAudit(t.dossierId, request.user.id, 'TRANSPORT_STATUT', `TC ${t.conteneur} : ${existing.statut} → ${body.statut}${body.statut === 'retour_vide' ? ` — justification : ${t.justificationRetourVide}` : ''}`)
     }
     return reply.send(t)
   })

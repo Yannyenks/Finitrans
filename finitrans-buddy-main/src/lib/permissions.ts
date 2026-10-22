@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { AuthUser, getStoredUser, onUserChange } from "./api";
+import { montant } from "@/lib/devise";
 
 export type Module =
   | "dashboard" | "mon_espace" | "bibliotheque" | "repertoire" | "supervision" | "exploitation" | "dossiers" | "codage"
@@ -69,10 +70,10 @@ export const STATUS_LABELS: Record<string, string> = {
   codage:           "Codage",
   validation:       "Validation",
   paiement:         "Paiement",
-  bon_compagnie:    "Bon Compagnie",
+  bon_compagnie:    "Bon compagnie (Douala)",
   operations_douala: "Opérations Douala", operations_kribi: "Opérations Kribi",
   cloture:          "Clôture", facturation: "Facturation client",
 };
 
-export const fcfa = (n: number | string | null | undefined) =>
-  `${Math.round(Number(n ?? 0)).toLocaleString("fr-FR")} FCFA`;
+/** Montant (enregistré en FCFA) affiché dans la devise choisie : FCFA, $ ou €. */
+export const fcfa = (n: number | string | null | undefined) => montant(n);

@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, expectStatus, placerEtape, preparerPassage, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossierId = ''
@@ -27,32 +27,42 @@ before(async () => {
 after(closeApp)
 
 describe('Chronométrage et SLA des tâches', () => {
-  it('à la création, les tâches de réception démarrent avec une échéance issue du SLA', async () => {
-    const t = await taches('reception')
+  it('à la création, seule la première tâche (BL) démarre ; les suivantes attendent leur tour sans chronomètre', async () => {
+    const t = await dansLOrdre('reception', await taches('reception'))
     assert.ok(t.length >= 5)
-    for (const x of t) {
-      assert.ok(x.startedAt, `${x.cle} démarrée`)
-      assert.ok(x.deadline, `${x.cle} a une échéance`)
-      assert.ok(new Date(x.deadline) > new Date(x.startedAt))
+    assert.equal(t[0].cle, 'bl')
+    assert.equal(t[0].statut, 'en_cours', 'plus besoin de « Démarrer »')
+    assert.ok(t[0].startedAt && t[0].deadline && new Date(t[0].deadline) > new Date(t[0].startedAt))
+    for (const x of t.slice(1)) {
+      assert.equal(x.statut, 'todo', `${x.cle} attend la tâche précédente`)
+      assert.equal(x.deadline, null, `${x.cle} : pas de compte à rebours avant son tour`)
     }
-  })
-
-  it('démarrage automatique : les tâches reçues sont « en cours » et la notification porte l\'échéance', async () => {
-    const t = await taches('reception')
-    assert.ok(t.filter(x => x.responsableId).every(x => x.statut === 'en_cours'), 'plus besoin de « Démarrer »')
+    // M. Honoré (paiement client, 4e tâche) est prévenu, sans compte à rebours tant que ce n'est pas son tour
     const n = await api('honore', 'GET', '/api/notifications?limit=20')
     const notif = n.body.data.find((x: any) => x.dossierId === dossierId && x.titre === 'Nouveau dossier à traiter')
-    assert.ok(notif?.echeance, 'compte à rebours dès la réception')
-    const sienne = t.find(x => nom(x.responsableId) === 'honore')
-    assert.equal(new Date(notif.echeance).getTime(), new Date(sienne.deadline).getTime())
+    assert.ok(notif, 'titulaire prévenu')
+    assert.equal(notif.echeance, null)
   })
 
-  it('une tâche terminée garde son début et sa fin (à la seconde)', async () => {
+  it('on ne peut pas terminer une tâche avant la précédente', async () => {
+    const pr = (await taches('reception')).find(x => x.cle === 'saisie_pr')
+    const r = await api(nom(pr.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/saisie_pr`, { statut: 'valide' })
+    expectStatus(r, 422)
+    assert.equal(r.body.error, 'ORDRE_NON_RESPECTE')
+    const tot = await api('odette', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/codage/declaration`, { statut: 'en_cours' })
+    expectStatus(tot, 422, 'étape pas encore atteinte')
+  })
+
+  it('une tâche terminée garde son début et sa fin ; la suivante démarre à ce moment-là', async () => {
     const bl = (await taches('reception')).find(x => x.cle === 'bl')
     const r = await api(nom(bl.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/bl`, { statut: 'valide' })
     expectStatus(r, 200)
     assert.ok(r.body.startedAt && r.body.completedAt)
     assert.ok(new Date(r.body.completedAt).getTime() >= new Date(r.body.startedAt).getTime())
+    const fp = (await taches('reception')).find(x => x.cle === 'facture_proforma')
+    assert.equal(fp.statut, 'en_cours')
+    assert.ok(new Date(fp.startedAt).getTime() >= new Date(r.body.completedAt).getTime() - 1000, 'le chronomètre part de la fin de la tâche précédente')
+    assert.ok(fp.deadline)
   })
 
   it('les SLA des tâches sont définis par la Direction et M. Soudi uniquement', async () => {
@@ -87,6 +97,7 @@ describe('Passage de relais au niveau des tâches', () => {
 
   it('paiement par le client : mode de règlement + client → règlement enregistré dans le CRM', async () => {
     const t = (await taches('reception')).find(x => x.cle === 'paiement_client')
+    await aSonTour(dossierId, 'reception', 'paiement_client')
     const ref = unique('CHQ')
     const r = await api(nom(t.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/paiement_client`, {
       statut: 'valide',
@@ -105,7 +116,7 @@ describe('Passage de relais au niveau des tâches', () => {
   })
 
   it('passation : chaque tâche de l\'étape suivante peut être confiée à un compte précis, et son chronomètre démarre', async () => {
-    for (const t of await taches('reception')) {
+    for (const t of await dansLOrdre('reception', await taches('reception'))) {
       if (t.statut !== 'valide') expectStatus(await api(nom(t.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/reception/${t.cle}`, { statut: 'valide' }), 200)
     }
     expectStatus(await upload('yasmine', `/api/dossiers/${dossierId}/upload`, { name: 'r.pdf', type: 'application/pdf', content: `%PDF ${Date.now()}` }, { etape: 'reception' }), 201)
@@ -116,7 +127,9 @@ describe('Passage de relais au niveau des tâches', () => {
     const sgs = await taches('soumission_sgs')
     assert.equal(nom(sgs.find(x => x.cle === 'pvc').responsableId), 'delba')
     assert.equal(nom(sgs.find(x => x.cle === 'ff_soumission').responsableId), 'soudi')
-    assert.ok(sgs.every(x => x.startedAt && x.deadline))
+    // Seule la première tâche de l'étape tourne ; l'obtention du RVC attend la soumission
+    assert.ok(sgs.find(x => x.cle === 'ff_soumission').deadline)
+    assert.equal(sgs.find(x => x.cle === 'pvc').deadline, null)
     // Une tâche inconnue est refusée
     const bad = await api('soudi', 'PATCH', `/api/dossiers/${dossierId}/status`, { status: 'codage', taches: { inexistante: ids.odette } })
     expectStatus(bad, 422)
@@ -271,6 +284,7 @@ describe('Conteneurs, sous-étapes retirées et bon de compagnie sans montant', 
     assert.ok(!t.some((x: any) => x.etape === 'validation'), 'l\'étape Validation n\'a plus de tâche')
 
     // Bon de la compagnie : numéro et date, aucun paiement créé
+    await aSonTour(r.body.id, 'bon_compagnie', 'facturation_compagnie')
     const bon = await api('delba', 'PUT', `/api/dossiers/${r.body.id}/sous-etapes/bon_compagnie/facturation_compagnie`, {
       statut: 'valide', metadata: { bc_bon_numero: 'MSC-BON-001', bc_bon_date: '2026-10-20' },
     })
@@ -289,6 +303,7 @@ describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
     })
     const id = d.body.id
     await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
+    await aSonTour(id, 'soumission_sgs', 'ff_soumission')
     // Sans DI liée : refus explicite
     const sansDi = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
       statut: 'valide', metadata: { ff_montant_facture: 100000, ff_reference_facture: unique('PI') },
@@ -321,6 +336,7 @@ describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
     })
     const id = d.body.id
     await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
+    await aSonTour(id, 'soumission_sgs', 'ff_soumission')
     const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-FF2'), client: 'CLIENT DI2', montant: 1_000_000, dateEmission: new Date().toISOString() })
     expectStatus(await api('yasmine', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: id }), 200)
     const url = `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`
@@ -405,17 +421,76 @@ describe('Validation obligatoire d\'une étape avant la suivante', () => {
   })
 })
 
-describe('Opérations Douala avant Kribi', () => {
-  it('un dossier de Kribi passe par Opérations Douala puis Opérations Kribi', async () => {
-    const d = await api('yasmine', 'POST', '/api/dossiers', {
+describe('Bon compagnie (Douala) ; étape Opérations Douala retirée', () => {
+  it('Kribi : Bon compagnie (Douala) puis Opérations Kribi ; Douala : Bon compagnie (Douala) puis Clôture', async () => {
+    const k = await api('yasmine', 'POST', '/api/dossiers', {
       client: unique('CLIENT KRIBI'), compagnie: 'MSC', conteneur: 'MSCU6666666', marchandise: 'Divers', site: 'Kribi', dateArrivee: new Date().toISOString(),
     })
-    const detail = await api('delba', 'GET', `/api/dossiers/${d.body.id}`)
-    const p: string[] = detail.body.parcoursEtapes
-    assert.ok(p.includes('operations_douala') && p.includes('operations_kribi'))
-    assert.ok(p.indexOf('operations_douala') < p.indexOf('operations_kribi'), 'Douala avant Kribi')
-    const t = (await api('delba', 'GET', `/api/dossiers/${d.body.id}/sous-etapes`)).body
-    assert.deepEqual(t.filter((x: any) => x.etape === 'operations_douala').map((x: any) => x.cle).sort(), ['bad_terminal', 'facturation_terminal'])
+    const p: string[] = (await api('delba', 'GET', `/api/dossiers/${k.body.id}`)).body.parcoursEtapes
+    assert.ok(!p.includes('operations_douala'))
+    assert.equal(p[p.indexOf('bon_compagnie') + 1], 'operations_kribi')
+    const t = (await api('delba', 'GET', `/api/dossiers/${k.body.id}/sous-etapes`)).body
+    assert.ok(!t.some((x: any) => x.etape === 'operations_douala'))
+    const ns = await api('delba', 'GET', `/api/dossiers/${k.body.id}/next-step`)
+    expectStatus(ns, 200)
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT DOUALA'), compagnie: 'MSC', conteneur: 'MSCU6666667', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const pd: string[] = (await api('delba', 'GET', `/api/dossiers/${d.body.id}`)).body.parcoursEtapes
+    assert.equal(pd[pd.indexOf('bon_compagnie') + 1], 'cloture')
+  })
+
+  it('un dossier resté sur l\'étape retirée reprend à l\'étape suivante (et non à la réception)', async () => {
+    const { nextStage } = await import('../src/services/workflow')
+    assert.equal(nextStage('operations_douala', 'Kribi'), 'operations_kribi')
+    assert.equal(nextStage('operations_douala', 'Douala'), 'cloture')
+  })
+})
+
+describe('Conteneurs de tailles différentes', () => {
+  it('chaque conteneur a sa taille ; le dossier en garde la synthèse', async () => {
+    const r = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT MULTI TC'), compagnie: 'MSC', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+      conteneurs: [{ numero: 'mscu1000001', taille: "40' HC" }, { numero: 'MSCU1000002', taille: "20' Dry" }, { numero: 'MSCU1000003', taille: "40' HC" }],
+    })
+    expectStatus(r, 201)
+    assert.equal(r.body.nombreConteneurs, 3)
+    assert.equal(r.body.conteneur, 'MSCU1000001, MSCU1000002, MSCU1000003')
+    assert.equal(r.body.tailleConteneur, "2 × 40' HC · 1 × 20' Dry")
+    assert.equal(r.body.conteneurs[1].taille, "20' Dry")
+    const m = await api('yasmine', 'PATCH', `/api/dossiers/${r.body.id}`, { conteneurs: [{ numero: 'MSCU1000001', taille: "45' HC" }] })
+    expectStatus(m, 200)
+    assert.equal(m.body.nombreConteneurs, 1)
+    assert.equal(m.body.tailleConteneur, "1 × 45' HC")
+    expectStatus(await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT SANS TC'), compagnie: 'MSC', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    }), 422)
+  })
+})
+
+describe('Logistique : TC vide retourné', () => {
+  it('le retour à vide exige une justification, conservée sur le transport', async () => {
+    const t = await api('delba', 'POST', '/api/logistique/transports', {
+      conteneur: 'MSCU4040404', destination: 'Kribi', dateEnlevement: new Date().toISOString(),
+    })
+    expectStatus(t, 201)
+    expectStatus(await api('delba', 'PATCH', `/api/logistique/transports/${t.body.id}`, { statut: 'livre' }), 200)
+    const sans = await api('delba', 'PATCH', `/api/logistique/transports/${t.body.id}`, { statut: 'retour_vide' })
+    expectStatus(sans, 422)
+    assert.equal(sans.body.error, 'JUSTIFICATION_REQUISE')
+    const ok = await api('delba', 'PATCH', `/api/logistique/transports/${t.body.id}`, { statut: 'retour_vide', justificationRetourVide: 'Marchandise dépotée chez le client' })
+    expectStatus(ok, 200)
+    assert.equal(ok.body.justificationRetourVide, 'Marchandise dépotée chez le client')
+    assert.ok(ok.body.dateRetourVide)
+  })
+})
+
+describe('Devises : taux de change', () => {
+  it('les taux sont définis par la Direction', async () => {
+    expectStatus(await api('honore', 'PATCH', '/api/parametres/taux_change', { valeur: { USD: 600, EUR: 655.957 } }), 403)
+    expectStatus(await api('delba', 'PATCH', '/api/parametres/taux_change', { valeur: { USD: 600, EUR: 655.957 } }), 200)
+    const p = await api('yaya', 'GET', '/api/parametres')
+    assert.equal(p.body.taux_change.USD, 600)
   })
 })
 

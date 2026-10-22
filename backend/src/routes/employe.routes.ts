@@ -118,7 +118,8 @@ const employeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const toTask = (t: (typeof mesTaches)[number] | (typeof aPrendre)[number]) => ({
       id: t.id, etape: t.etape, cle: t.cle, label: label(t.etape, t.cle), statut: t.statut,
       deadline: t.deadline, startedAt: t.startedAt, notes: t.notes, dossier: t.dossier,
-      actionnable: t.dossier.status === t.etape,
+      // À traiter maintenant : c'est son tour (tâche précédente validée) sur l'étape en cours
+      actionnable: t.dossier.status === t.etape && t.statut !== 'todo',
       enRetard: !!t.deadline && t.deadline < now,
     })
 

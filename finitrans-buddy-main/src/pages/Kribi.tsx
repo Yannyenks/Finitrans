@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
+import { montant } from "@/lib/devise";
 
 const STATUS_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-700", soumission_sgs: "bg-indigo-100 text-indigo-700",
@@ -298,7 +299,7 @@ const Kribi = () => {
                               </div>
                               <p className="text-[10px] text-muted-foreground">{bon.dossier?.numero} — {bon.description}</p>
                               <div className="flex items-center justify-between mt-1">
-                                {bon.montant ? <span className="text-[10px] font-medium text-foreground">{Number(bon.montant).toLocaleString("fr-FR")} FCFA</span> : <span />}
+                                {bon.montant ? <span className="text-[10px] font-medium text-foreground">{montant(Number(bon.montant))}</span> : <span />}
                                 {suivant && peutEcrire && (
                                   <button
                                     className="text-[10px] text-secondary hover:underline flex items-center gap-1"

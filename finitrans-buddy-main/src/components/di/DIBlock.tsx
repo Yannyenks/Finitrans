@@ -9,11 +9,12 @@ import { Button } from "@/components/ui/button";
 import { useDI, DIEnriched, DIAlerteNiveau } from "@/hooks/useDI";
 import DIForm from "./DIForm";
 import DIHistorique from "./DIHistorique";
+import { montant } from "@/lib/devise";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const fmt = (n: number, devise = "FCFA") =>
-  `${n.toLocaleString("fr-FR")} ${devise}`;
+  devise === "FCFA" || devise === "XAF" ? montant(n) : `${n.toLocaleString("fr-FR")} ${devise}`;
 
 const alerteColor = (n: DIAlerteNiveau) =>
   n === "critical" ? "#ef4444" : n === "warning" ? "#f59e0b" : "#22c55e";

@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { Progress } from "@/components/ui/progress";
 import { useCompagnies, couleurCompagnie } from "@/lib/compagnies";
+import { montant } from "@/lib/devise";
 
 const paiementDouaneLabel: Record<string, string> = { droits: "Droits", taxes: "Taxes", redevances: "Redevances", penalite: "Pénalité" };
 const paiementCompagnieLabel: Record<string, string> = { surestaries: "Surestaries", frais_portuaires: "Frais portuaires", manutention: "Manutention", terminal: "Terminal" };
@@ -59,10 +60,10 @@ const Finance = () => {
       `Client : ${f.dossier?.client ?? ""}`,
       `Dossier : ${f.dossier?.numero ?? ""}`, "",
       `Désignation : ${f.description}`, "",
-      `Honoraires HT : ${(total - tva - debours).toLocaleString("fr-FR")} FCFA`,
-      tva ? `TVA : ${tva.toLocaleString("fr-FR")} FCFA` : "",
-      debours ? `Débours refacturés : ${debours.toLocaleString("fr-FR")} FCFA` : "",
-      `TOTAL TTC : ${total.toLocaleString("fr-FR")} FCFA`,
+      `Honoraires HT : ${montant((total - tva - debours))}`,
+      tva ? `TVA : ${montant(tva)}` : "",
+      debours ? `Débours refacturés : ${montant(debours)}` : "",
+      `TOTAL TTC : ${montant(total)}`,
       f.type === "reglee" ? `\nRéglée le ${new Date(f.datePaiement ?? Date.now()).toLocaleDateString("fr-FR")}` : "",
     ].filter(l => l !== "").join("\n");
     try { printDocument(f.type === "proforma" ? "Facture proforma" : "Facture", lignes, entreprise); } catch (e: any) { erreur(e); }
@@ -245,8 +246,8 @@ const Finance = () => {
               {/* KPI résumé */}
               <div className="grid grid-cols-3 gap-4 mt-4 mb-4">
                 {[
-                  { label: "Enveloppes totales",  value: Number(diData?.totalMontant ?? 0).toLocaleString("fr-FR"), unit: "FCFA", color: "text-foreground" },
-                  { label: "Solde restant total",  value: Number(diData?.totalSolde   ?? 0).toLocaleString("fr-FR"), unit: "FCFA", color: "text-success"   },
+                  { label: "Enveloppes totales",  value: montant(diData?.totalMontant ?? 0), unit: "", color: "text-foreground" },
+                  { label: "Solde restant total",  value: montant(diData?.totalSolde ?? 0), unit: "", color: "text-success"   },
                   { label: "DI en alerte",         value: diData?.diEnAlerte ?? 0,                                   unit: "budgets", color: (diData?.diEnAlerte ?? 0) > 0 ? "text-warning" : "text-success" },
                 ].map((kpi) => (
                   <div key={kpi.label} className="stat-card text-center py-4">
@@ -343,11 +344,11 @@ const Finance = () => {
                         <div className="space-y-2 text-xs">
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Montant total</span>
-                            <span className="font-medium">{Number(c.montantTotal ?? 0).toLocaleString("fr-FR")} FCFA</span>
+                            <span className="font-medium">{montant(Number(c.montantTotal ?? 0))}</span>
                           </div>
                           <div className="flex justify-between">
                             <span className="text-muted-foreground">Solde restant</span>
-                            <span className="font-medium text-success">{Number(c.soldeTotal ?? 0).toLocaleString("fr-FR")} FCFA</span>
+                            <span className="font-medium text-success">{montant(Number(c.soldeTotal ?? 0))}</span>
                           </div>
                           {c.montantTotal > 0 && (
                             <div className="mt-2 h-1.5 rounded-full bg-muted overflow-hidden">
@@ -460,7 +461,7 @@ const Finance = () => {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="compagnie" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
                 <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} tickFormatter={(v) => `${(v / 1_000_000).toFixed(1)}M`} />
-                <Tooltip formatter={(v: number) => [`${v.toLocaleString("fr-FR")} FCFA`]} contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
+                <Tooltip formatter={(v: number) => [`${montant(v)}`]} contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: "8px", fontSize: "12px" }} />
                 <Bar dataKey="douane"        fill="hsl(var(--secondary))" radius={[4, 4, 0, 0]} name="Droits de Douane" />
                 <Bar dataKey="compagnieFrais" fill="hsl(var(--accent))"   radius={[4, 4, 0, 0]} name="Frais Compagnie" />
               </BarChart>

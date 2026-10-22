@@ -15,6 +15,17 @@ import { nomCompagnie } from './compagnies'
 import { LIBELLES_ACTION } from '../utils/audit'
 import type { DossierStatus } from '@prisma/client'
 
+/** « 3 TC : 2 × 40' HC · 1 × 20' Dry » ou « 2 x 40' HC » */
+function resumeTC(d: { conteneurs?: unknown; nombreConteneurs: number; tailleConteneur: string | null }) {
+  return Array.isArray(d.conteneurs) && d.conteneurs.length ? `${d.nombreConteneurs} TC : ${d.tailleConteneur ?? ''}` : `${d.nombreConteneurs} x ${d.tailleConteneur ?? 'conteneur'}`
+}
+
+/** « MSCU1234567 (40' HC), MSCU7654321 (20' Dry) » */
+function detailTC(d: { conteneurs?: unknown }) {
+  const l = Array.isArray(d.conteneurs) ? d.conteneurs as { numero?: string; taille?: string }[] : []
+  return l.length ? l.map(c => `${c.numero}${c.taille ? ` (${c.taille})` : ''}`).join(', ') : null
+}
+
 /** Délai exprimé en jours (décimaux) → « 1 j 4 h 30 min ». */
 function delaiJHM(joursDecimaux: number): string {
   const t = Math.max(0, Math.round(joursDecimaux * 1440))
@@ -373,7 +384,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   doc.font('Helvetica').fontSize(7).fillColor('#9FB3CF').text('CLIENT', MARGE + 18, yc + 14, { characterSpacing: 1.2 })
   doc.font('Helvetica-Bold').fontSize(16).fillColor('#FFFFFF').text(txt(dossier.client), MARGE + 18, yc + 24, { width: LARGEUR - 180, lineBreak: false, ellipsis: true })
   doc.font('Helvetica').fontSize(8.5).fillColor('#C9D6E8')
-    .text(txt(`${dossier.marchandise}  ·  ${compagnie}  ·  ${dossier.site}  ·  ${dossier.nombreConteneurs} x ${dossier.tailleConteneur ?? 'conteneur'}  ·  ${dossier.conteneur}`), MARGE + 18, yc + 46, { width: LARGEUR - 180 })
+    .text(txt(`${dossier.marchandise}  ·  ${compagnie}  ·  ${dossier.site}  ·  ${resumeTC(dossier)}  ·  ${dossier.conteneur}`), MARGE + 18, yc + 46, { width: LARGEUR - 180 })
     .text(txt(`Ouvert le ${heure(dossier.dateCreation)}  ·  Responsable : ${dossier.responsable?.nom ?? '—'}`), MARGE + 18, yc + 62, { width: LARGEUR - 180 })
   const badge = factureClient ? 'FACTURÉ' : dossier.status === 'cloture' ? 'CLÔTURÉ' : txt(STATUS_LABELS[dossier.status]).toUpperCase()
   doc.font('Helvetica').fontSize(7).fillColor('#9FB3CF').text('ÉTAPE', MARGE + LARGEUR - 122, yc + 14, { characterSpacing: 1.2 })
@@ -422,7 +433,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   r.champs([
     ['Client', dossier.client], ['Marchandise', dossier.marchandise], ['Fournisseur', dossier.fournisseur],
     ['Compagnie maritime', compagnie], ['Site', dossier.site], ['Conteneur(s)', dossier.conteneur],
-    ['Nombre de conteneurs', String(dossier.nombreConteneurs)], ['Taille', dossier.tailleConteneur], ['Honoraires prévus', dossier.montantHonoraires ? fcfa(dossier.montantHonoraires) : null],
+    ['Nombre de conteneurs', String(dossier.nombreConteneurs)], ['Tailles', dossier.tailleConteneur], ['Détail des conteneurs', detailTC(dossier)], ['Honoraires prévus', dossier.montantHonoraires ? fcfa(dossier.montantHonoraires) : null],
     ['N° BL', dossier.numeroBL], ['N° déclaration', dossier.numDeclaration], ['Régime douanier', dossier.regimeDouanier],
     ['DI', dossier.di?.numero ?? dossier.numeroDI], ['Arrivée', jour(dossier.dateArrivee)], ['Date limite de sortie', jour(dossier.dateLimiteSortie)],
     ['Ouverture', heure(dossier.dateCreation)], [cloture ? 'Responsable de clôture' : 'Responsable actuel', dossier.responsable?.nom], ['Priorité', dossier.priorite],

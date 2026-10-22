@@ -12,7 +12,7 @@ import { archiverCompteRendu } from '../services/compteRendu'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
   SOUS_ETAPES_CONFIG, STATUS_LABELS, applicableSousEtapes, initSousEtapes,
-  demarrerEtape, echeanceSla, isStatus, loadAttribution, notifierDirection, notify, stageCompletion,
+  demarrerEtape, echeanceSla, isStatus, motifHorsOrdre, loadAttribution, notifierDirection, notify, stageCompletion,
 } from '../services/workflow'
 
 export { SOUS_ETAPES_CONFIG }
@@ -108,6 +108,13 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       if (!target?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
     }
 
+    // Ordre du parcours : pas de mise en cours ni de validation avant que la tâche précédente soit validée
+    if (body.statut === 'en_cours' || body.statut === 'valide') {
+      const motif = await motifHorsOrdre(dossier, etape, cle)
+      if (motif) return reply.code(422).send({ error: 'ORDRE_NON_RESPECTE', message: motif })
+    }
+    const estSuivante = dossier.status === etape && !(await motifHorsOrdre(dossier, etape, cle))
+
     const data: Record<string, unknown> = {}
     if (body.statut        !== undefined) data.statut        = body.statut
     if (body.responsableId !== undefined) data.responsableId = body.responsableId
@@ -136,8 +143,8 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     }
     if (body.statut === 'en_cours' && !existing?.startedAt) data.startedAt = maintenant
 
-    // Tâche confiée sur l'étape en cours : elle démarre automatiquement (compte à rebours jusqu'à l'échéance)
-    if (body.responsableId && body.statut === undefined && dossier.status === etape && (existing?.statut ?? 'todo') === 'todo') {
+    // Tâche confiée alors que c'est son tour : elle démarre automatiquement (compte à rebours jusqu'à l'échéance)
+    if (body.responsableId && body.statut === undefined && estSuivante && (existing?.statut ?? 'todo') === 'todo') {
       data.statut = 'en_cours'
       if (!existing?.startedAt) data.startedAt = maintenant
       if (!existing?.deadline && body.deadline === undefined) data.deadline = await echeanceSla(etape, cle, maintenant)
@@ -185,6 +192,19 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       if (ajoutDI) row = { ...row, metadata: { ...((row.metadata ?? {}) as Record<string, unknown>), ...ajoutDI } as typeof row.metadata }
     }
 
+    // Tâche validée sur l'étape en cours : la tâche suivante démarre maintenant, son titulaire est prévenu
+    if (body.statut === 'valide' && dossier.status === etape) {
+      const suivante = await demarrerEtape(id, etape, new Date())
+      if (suivante?.responsableId && suivante.responsableId !== actor.id) {
+        await notify([suivante.responsableId], {
+          type: 'action_requise',
+          titre: 'À vous : votre tâche démarre',
+          message: `${dossier.numero} — ${STATUS_LABELS[etape]} : « ${labelOf(etape, suivante.cle)} » (la tâche précédente vient d'être validée)`,
+          dossierId: id, actionUrl: `/dossiers/${id}`, echeance: suivante.deadline,
+        })
+      }
+    }
+
     const label = labelOf(etape, cle)
     if (body.statut && body.statut !== existing?.statut) {
       const actions: Record<string, string> = {
@@ -208,7 +228,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         message: `${dossier.numero} — ${STATUS_LABELS[etape]} : ${label}`,
         dossierId: id,
         actionUrl: `/dossiers/${id}`,
-        echeance: dossier.status === etape ? row.deadline : null,
+        echeance: estSuivante ? row.deadline : null,
       })
     }
 
@@ -248,14 +268,15 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       return reply.code(422).send({ error: 'NON_APPLICABLE', message: 'Sous-étape non applicable à ce site.' })
     }
 
+    const sonTour = dossier.status === etape && !(await motifHorsOrdre(dossier, etape, cle))
     const row = await prisma.sousEtapeDossier.upsert({
       where:  { dossierId_etape_cle: { dossierId: id, etape, cle } },
-      create: { dossierId: id, etape, cle, responsableId: actor.id, statut: 'en_cours', startedAt: new Date() },
+      create: { dossierId: id, etape, cle, responsableId: actor.id, ...(sonTour ? { statut: 'en_cours' as const, startedAt: new Date(), deadline: await echeanceSla(etape, cle) } : {}) },
       update: {
         responsableId: actor.id,
-        statut: existing?.statut === 'todo' ? 'en_cours' : undefined,
-        startedAt: existing?.startedAt ? undefined : new Date(),
-        deadline: existing?.deadline || dossier.status !== etape ? undefined : await echeanceSla(etape, cle),
+        statut: sonTour && existing?.statut === 'todo' ? 'en_cours' : undefined,
+        startedAt: !sonTour || existing?.startedAt ? undefined : new Date(),
+        deadline: !sonTour || existing?.deadline ? undefined : await echeanceSla(etape, cle),
       },
       include: includeUsers,
     })

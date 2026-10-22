@@ -16,11 +16,12 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "@/hooks/use-toast";
+import { montant } from "@/lib/devise";
 
 const STATUS_LABELS: Record<string, string> = {
   reception: "Réception", soumission_sgs: "Soumission SGS",
   codage: "Codage", validation: "Validation",
-  paiement: "Paiement", bon_compagnie: "Bon Cie",
+  paiement: "Paiement", bon_compagnie: "Bon Cie (Douala)",
   operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôturé", facturation: "Facturation",
 };
 const STATUS_COLORS: Record<string, string> = {
@@ -308,7 +309,7 @@ const CodagePanel = ({ dossier, onClose, onSuccess }: { dossier: any; onClose: (
                 </tr>
                 <tr>
                   <td colSpan={4} className="px-3 py-1.5 text-xs text-muted-foreground">Total droits + TVA</td>
-                  <td className="px-3 py-1.5 text-right text-sm font-display font-black text-foreground">{totalGeneral.toLocaleString("fr-FR")} FCFA</td>
+                  <td className="px-3 py-1.5 text-right text-sm font-display font-black text-foreground">{montant(totalGeneral)}</td>
                   <td></td>
                 </tr>
               </tfoot>

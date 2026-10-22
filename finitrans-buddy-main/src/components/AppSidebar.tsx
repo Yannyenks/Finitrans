@@ -13,6 +13,7 @@ import { api, logout } from "@/lib/api";
 import { Module, PROFIL_LABELS, useAuth } from "@/lib/permissions";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import FinitransLogo from "./FinitransLogo";
+import { SelecteurDevise } from "@/lib/devise";
 
 type NavItem = {
   label:  string;
@@ -240,6 +241,10 @@ export function MenuMobile({ ouvert, onOuvert }: { ouvert: boolean; onOuvert: (v
           <FinitransLogo variant="full" darkBg iconSize={42} />
         </div>
         <EnteteUtilisateur />
+        <div className="px-4 py-2.5 border-b border-sidebar-border flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-sidebar-muted uppercase tracking-wider">Devise</span>
+          <SelecteurDevise />
+        </div>
         <ListeNavigation onNavigate={() => onOuvert(false)} />
       </SheetContent>
     </Sheet>

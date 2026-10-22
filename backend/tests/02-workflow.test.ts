@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, placerEtape, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, expectStatus, placerEtape, upload, userIds, type UserKey } from './helpers'
 
 type Task = { etape: string; cle: string; responsableId: string | null; statut: string }
 
@@ -19,7 +19,8 @@ async function tasks(who: UserKey, dossierId: string, etape?: string): Promise<T
 
 /** Le titulaire de chaque tâche de l'étape la valide lui-même. */
 async function completeStage(dossierId: string, etape: string) {
-  const list = await tasks('delba', dossierId, etape)
+  // Les tâches s'enchaînent dans l'ordre du parcours
+  const list = await dansLOrdre(etape, await tasks('delba', dossierId, etape))
   // L'étape Validation n'a plus de tâche : elle se termine avec une preuve
   if (etape !== 'validation') assert.ok(list.length > 0, `tâches de ${etape}`)
   for (const t of list) {
@@ -68,7 +69,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(owner('codage', 'etat_codage'), 'odette')
     assert.equal(owner('paiement', 'paiement_droits'), 'yaya')
     assert.equal(owner('bon_compagnie', 'facturation_compagnie'), 'wandala', 'MSC → Wandala')
-    assert.equal(owner('operations_douala', 'bad_terminal'), 'wandala', 'Opérations Douala → Mr Wandala (MSC)')
+    assert.ok(!all.some(t => t.etape === 'operations_douala'), 'étape Opérations Douala retirée')
     assert.equal(owner('cloture', 'rapport_final'), 'yasmine')
     assert.ok(!all.some(t => t.etape === 'operations_kribi'), 'pas d\'étape Kribi pour Douala')
     // Fournisseur & soumission + RVC : M. Soudi ; ailleurs, la Direction supervise
@@ -80,7 +81,10 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
   it('les tâches apparaissent dans « Mon espace » de chaque compte', async () => {
     const odette = await api('odette', 'GET', '/api/employe/mes-taches')
     expectStatus(odette, 200)
-    assert.ok(odette.body.taches.some((t: any) => t.dossier.id === dossierId && t.cle === 'saisie_pr' && t.actionnable))
+    // Tâches enchaînées : la saisie du PR attend le BL et la facture proforma ; le BL (Yasmine) est à traiter tout de suite
+    assert.ok(odette.body.taches.some((t: any) => t.dossier.id === dossierId && t.cle === 'saisie_pr' && !t.actionnable))
+    const yasmine = await api('yasmine', 'GET', '/api/employe/mes-taches')
+    assert.ok(yasmine.body.taches.some((t: any) => t.dossier.id === dossierId && t.cle === 'bl' && t.actionnable))
     const honore = await api('honore', 'GET', '/api/employe/mes-taches')
     assert.ok(honore.body.taches.some((t: any) => t.dossier.id === dossierId && t.cle === 'paiement_client'))
     const list = await api('odette', 'GET', '/api/dossiers?limit=100')
@@ -158,13 +162,11 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(d.responsableId, ids.wandala)
   })
 
-  it('Bon compagnie → Opérations Douala → Clôture (pas d\'étape Kribi pour un dossier Douala)', async () => {
+  it('Bon compagnie (Douala) → Clôture (pas d\'étape Kribi pour un dossier Douala)', async () => {
     await completeStage(dossierId, 'bon_compagnie')
     await preuve('wandala', dossierId, 'bon_compagnie')
     await advance('wandala', dossierId, 'operations_kribi', 422)
-    await advance('wandala', dossierId, 'operations_douala')
-    await completeStage(dossierId, 'operations_douala')
-    await preuve('wandala', dossierId, 'operations_douala')
+    await advance('wandala', dossierId, 'operations_douala', 400)
     const d = await advance('wandala', dossierId, 'cloture')
     assert.equal(d.responsableId, ids.yasmine)
     await completeStage(dossierId, 'cloture')
@@ -181,7 +183,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(traitePar.paiement, 'yaya')
     assert.equal(traitePar.bon_compagnie, 'wandala')
     const audit = await api('delba', 'GET', `/api/dossiers/${dossierId}/audit`)
-    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 15)
+    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 13)
   })
 })
 
@@ -211,15 +213,10 @@ describe('Workflow Kribi (MAERSK) et supervision', () => {
     await placerEtape(dossierId, 'bon_compagnie')
   })
 
-  it('Mr Rasoul termine le bon compagnie → Opérations Douala → Opérations Kribi (Mr Raphael) → Clôture', async () => {
+  it('Mr Rasoul termine le bon compagnie (Douala) → Opérations Kribi (Mr Raphael) → Clôture', async () => {
     await completeStage(dossierId, 'bon_compagnie')
     await preuve('rasoul', dossierId, 'bon_compagnie')
-    await advance('rasoul', dossierId, 'operations_kribi', 422)
-    const od = await advance('rasoul', dossierId, 'operations_douala')
-    const quiDouala = Object.entries(ids).find(([, v]) => v === od.responsableId)![0] as UserKey
-    await completeStage(dossierId, 'operations_douala')
-    await preuve(quiDouala, dossierId, 'operations_douala')
-    const d = await advance(quiDouala, dossierId, 'operations_kribi')
+    const d = await advance('rasoul', dossierId, 'operations_kribi')
     assert.equal(d.responsableId, ids.raphael)
     await completeStage(dossierId, 'operations_kribi')
     await preuve('raphael', dossierId, 'operations_kribi')
@@ -265,6 +262,11 @@ describe('Workflow Kribi (MAERSK) et supervision', () => {
     const ok = await api('odette', 'POST', `/api/dossiers/${id}/sous-etapes/reception/saisie_pr/prendre`)
     expectStatus(ok, 200)
     assert.equal(ok.body.responsableId, ids.odette)
+    // Pas encore son tour : le BL et la facture proforma ne sont pas validés
+    const tot = await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/reception/saisie_pr`, { statut: 'valide' })
+    expectStatus(tot, 422)
+    assert.equal(tot.body.error, 'ORDRE_NON_RESPECTE')
+    await aSonTour(id, 'reception', 'saisie_pr')
     expectStatus(await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/reception/saisie_pr`, { statut: 'valide' }), 200)
   })
 

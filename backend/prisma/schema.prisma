@@ -78,10 +78,12 @@ model Dossier {
   clientCrm          Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
   reglementsClient   ReglementClient[]
   compagnie          String @db.VarChar(80)
-  conteneur          String                  @db.VarChar(100)
-  /// Nombre de conteneurs du dossier et taille (20', 40', 40' HC, 45' HC, frigo…)
+  conteneur          String                  @db.VarChar(1000)
+  /// Nombre de conteneurs du dossier et résumé des tailles (ex. « 2 × 40' HC · 1 × 20' Dry »)
   nombreConteneurs   Int                     @default(1) @map("nombre_conteneurs")
-  tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(30)
+  tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(255)
+  /// Détail des conteneurs : [{ numero, taille }] — chaque conteneur a sa propre taille
+  conteneurs         Json?
   marchandise        String
   site               Site
   status             DossierStatus           @default(reception)
@@ -1230,6 +1232,9 @@ model Transport {
   allerRetour    Boolean         @default(false) @map("aller_retour")
   statut         StatutTransport @default(planifie)
   notes          String?
+  /// Justification obligatoire quand le TC est retourné vide
+  justificationRetourVide String? @map("justification_retour_vide")
+  dateRetourVide DateTime?       @map("date_retour_vide")
   createdById    String          @map("created_by_id") @db.Uuid
   createdAt      DateTime        @default(now()) @map("created_at")
   updatedAt      DateTime        @updatedAt @map("updated_at")

@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, unique, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, expectStatus, placerEtape, unique, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 let dossierId = ''
@@ -31,6 +31,7 @@ describe('Une tâche terminée crée l\'enregistrement correspondant', () => {
     const who = await titulaire('paiement', 'paiement_droits')
     assert.equal(who, 'yaya')
     const quittance = unique('QTT')
+    await aSonTour(dossierId, 'paiement', 'paiement_droits')
     const r = await api('yaya', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/paiement/paiement_droits`, {
       statut: 'valide', metadata: { paiement_montant: '1 250 000', paiement_quittance: quittance, mode_paiement: 'virement' },
     })
@@ -49,17 +50,14 @@ describe('Une tâche terminée crée l\'enregistrement correspondant', () => {
     assert.equal(fin2.body.data.length, 1)
   })
 
-  it('bon de la compagnie (numéro, date) puis redevance terminal de Douala (Mr Wandala) → paiement terminal', async () => {
+  it('bon de la compagnie (Douala) : numéro et date, sans montant (Mr Wandala)', async () => {
     assert.equal(await titulaire('bon_compagnie', 'facturation_compagnie'), 'wandala')
+    await aSonTour(dossierId, 'bon_compagnie', 'facturation_compagnie')
     expectStatus(await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/bon_compagnie/facturation_compagnie`, {
       statut: 'valide', metadata: { bc_bon_numero: unique('MSC-BON'), bc_bon_date: '2026-10-20' },
     }), 200)
-    assert.equal(await titulaire('operations_douala', 'facturation_terminal'), 'wandala')
-    expectStatus(await api('wandala', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/operations_douala/facturation_terminal`, {
-      statut: 'valide', metadata: { term_montant: 120000 },
-    }), 200)
     const pc = await api('wandala', 'GET', `/api/finance/paiements-compagnie?dossierId=${dossierId}`)
-    assert.deepEqual(pc.body.data.map((p: any) => p.type), ['terminal'], 'le bon de la compagnie ne porte pas de montant')
+    assert.deepEqual(pc.body.data, [], 'le bon de la compagnie ne porte pas de montant')
   })
 
   it('gate pass (Kribi) validé avec chauffeur → ticket de sortie enregistré', async () => {
@@ -68,6 +66,7 @@ describe('Une tâche terminée crée l\'enregistrement correspondant', () => {
     })
     const t = await api('delba', 'GET', `/api/dossiers/${k.body.id}/sous-etapes`)
     const gp = t.body.find((x: any) => x.etape === 'operations_kribi' && x.cle === 'gate_pass')
+    await aSonTour(k.body.id, 'operations_kribi', 'gate_pass')
     const r = await api(nom(gp.responsableId), 'PUT', `/api/dossiers/${k.body.id}/sous-etapes/operations_kribi/gate_pass`, {
       statut: 'valide', metadata: { immatriculation: 'LT 999 ZZ', gp_chauffeur: 'MBARGA Paul', gp_telephone: '677112233', gp_destination: 'Yaoundé' },
     })

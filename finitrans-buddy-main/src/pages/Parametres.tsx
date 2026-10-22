@@ -3,8 +3,9 @@ import AppLayout from "@/components/AppLayout";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { DureeJHM } from "@/components/DureeJHM";
+import { TAUX_DEFAUT } from "@/lib/devise";
 import { delaiJHM } from "@/lib/temps";
-import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship } from "lucide-react";
+import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship, Coins } from "lucide-react";
 import CompagniesMaritimes from "@/components/CompagniesMaritimes";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
@@ -24,7 +25,7 @@ const STEP_LABELS: Record<string, string> = {
   codage:           "Codage",
   validation:       "Validation",
   paiement:         "Paiement",
-  bon_compagnie:    "Bon Compagnie",
+  bon_compagnie:    "Bon compagnie (Douala)",
   operations_douala: "Douala", operations_kribi: "Kribi",
   cloture:          "Clôture", facturation: "Facturation client",
 };
@@ -37,7 +38,7 @@ const DEFAULT_SLA: Record<string, number> = {
   validation:       2,
   paiement:         3,
   bon_compagnie:    2,
-  operations_douala: 2, operations_kribi: 3,
+  operations_kribi: 3,
   cloture:          1, facturation: 2,
 };
 
@@ -79,6 +80,18 @@ const Parametres = () => {
   const groupesSla = (slaSE ?? []).reduce<Record<string, SlaSousEtape[]>>((acc, l) => { (acc[l.etape] ??= []).push(l); return acc; }, {});
   const majSla = (cle: string, minutes: number) => setSlaTaches(p => ({ ...p, [cle]: Math.max(0, Math.round(minutes)) / 60 }));
 
+  // Taux de change (FCFA pour 1 USD / 1 EUR) — affichage des montants en dollar ou en euro
+  const [taux, setTaux] = useState<{ USD: string; EUR: string }>({ USD: String(TAUX_DEFAUT.USD), EUR: String(TAUX_DEFAUT.EUR) });
+  useEffect(() => {
+    if (params?.taux_change) setTaux({ USD: String(params.taux_change.USD ?? TAUX_DEFAUT.USD), EUR: String(params.taux_change.EUR ?? TAUX_DEFAUT.EUR) });
+  }, [params]);
+  const tauxValides = Number(taux.USD) > 0 && Number(taux.EUR) > 0;
+  const saveTaux = useMutation({
+    mutationFn: () => api.patch("/api/parametres/taux_change", { valeur: { USD: Number(taux.USD), EUR: Number(taux.EUR), majLe: new Date().toISOString() } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["parametres"] }); toast({ title: "Taux de change enregistrés", description: "Les montants en dollar et en euro sont recalculés." }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
   // Liens externes (portails ouverts depuis une sous-étape)
   const { data: attribution } = useQuery({ queryKey: ["roles-attribution"], queryFn: () => api.get<any>("/api/roles/attribution") });
   const sousEtapes: { cle: string; label: string }[] = (attribution?.etapes ?? []).flatMap((e: any) =>
@@ -114,6 +127,7 @@ const Parametres = () => {
           <TabsTrigger value="alertes"  className="gap-1.5"><Bell   className="w-3.5 h-3.5" /> Alertes</TabsTrigger>
           <TabsTrigger value="sla"      className="gap-1.5"><Timer  className="w-3.5 h-3.5" /> SLA &amp; Délais</TabsTrigger>
           <TabsTrigger value="compagnies" className="gap-1.5"><Ship className="w-3.5 h-3.5" /> Compagnies maritimes</TabsTrigger>
+          <TabsTrigger value="devises"  className="gap-1.5"><Coins  className="w-3.5 h-3.5" /> Devises</TabsTrigger>
           <TabsTrigger value="liens"    className="gap-1.5"><Link2  className="w-3.5 h-3.5" /> Liens &amp; portails</TabsTrigger>
           <TabsTrigger value="securite" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Sécurité</TabsTrigger>
           <TabsTrigger value="general"  className="gap-1.5"><Globe  className="w-3.5 h-3.5" /> Général</TabsTrigger>
@@ -160,6 +174,37 @@ const Parametres = () => {
           </motion.div>
         </TabsContent>
 
+        <TabsContent value="devises">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card">
+            <h3 className="font-display font-semibold text-foreground mb-1">Taux de change</h3>
+            <p className="text-sm text-muted-foreground mb-5">
+              Les montants sont enregistrés en FCFA. Le sélecteur <strong>FCFA · $ · €</strong> de l'en-tête les affiche en dollar ou en euro avec ces taux.
+              {!superviseur && <strong> Modifiable par la Direction et le Responsable Exploitation.</strong>}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              {([["USD", "1 dollar US ($)"], ["EUR", "1 euro (€)"]] as const).map(([code, libelle]) => (
+                <div key={code} className="p-3.5 rounded-xl bg-muted/40 border border-border/50 space-y-1.5">
+                  <Label className="text-xs">{libelle} =</Label>
+                  <div className="flex items-center gap-2">
+                    <Input type="number" min={1} step="0.001" inputMode="decimal" value={taux[code]} disabled={!superviseur} aria-label={`Taux ${code}`}
+                      onChange={e => setTaux(t => ({ ...t, [code]: e.target.value }))} className="bg-card font-mono" />
+                    <span className="text-sm font-semibold text-muted-foreground">FCFA</span>
+                  </div>
+                  {Number(taux[code]) > 0 && (
+                    <p className="text-[11px] text-muted-foreground">1 000 000 FCFA ≈ {(1_000_000 / Number(taux[code])).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} {code === "USD" ? "$" : "€"}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mb-4">L'euro est à parité fixe avec le franc CFA (655,957 FCFA). {params?.taux_change?.majLe && <>Dernière mise à jour : {new Date(params.taux_change.majLe).toLocaleString("fr-FR")}.</>}</p>
+            <div className="flex justify-end">
+              <Button onClick={() => saveTaux.mutate()} disabled={!superviseur || !tauxValides || saveTaux.isPending} className="gap-2 bg-primary text-primary-foreground">
+                <Save className="w-4 h-4" /> Enregistrer les taux
+              </Button>
+            </div>
+          </motion.div>
+        </TabsContent>
+
         <TabsContent value="sla">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card">
             <h3 className="font-display font-semibold text-foreground mb-1">Délais SLA par étape</h3>
@@ -169,7 +214,7 @@ const Parametres = () => {
             </p>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
-              {Object.entries(slaConfig).map(([step, h]) => (
+              {Object.entries(slaConfig).filter(([step]) => step !== "operations_douala").map(([step, h]) => (
                 <div key={step} className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl bg-muted/40 border border-border/50" data-testid={`sla-etape-${step}`}>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{STEP_LABELS[step] ?? step}</p>

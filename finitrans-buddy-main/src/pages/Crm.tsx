@@ -49,7 +49,7 @@ const ECHANGES: Record<string, { label: string; icon: any; couleur: string }> = 
 };
 const ETAPES: Record<string, string> = {
   reception: "Réception", soumission_sgs: "Soumission SGS", codage: "Codage", validation: "Validation",
-  paiement: "Paiement", bon_compagnie: "Bon compagnie", operations_douala: "Opérations Douala", operations_kribi: "Opérations Kribi", cloture: "Clôturé", facturation: "Facturation",
+  paiement: "Paiement", bon_compagnie: "Bon compagnie (Douala)", operations_douala: "Opérations Douala", operations_kribi: "Opérations Kribi", cloture: "Clôturé", facturation: "Facturation",
 };
 
 // ── Formatage ─────────────────────────────────────────────────────────────────

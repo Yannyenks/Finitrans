@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import EquipeParcours from "@/components/dossier/EquipeParcours";
-import { TAILLES_CONTENEUR } from "@/components/NouveauDossierDialog";
+import { ListeConteneurs, LigneConteneur, resumeConteneurs } from "@/components/ListeConteneurs";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
@@ -28,6 +28,7 @@ import FactureDialog from "@/components/di/FactureDialog";
 import SousEtapesPanel, { SOUS_ETAPES_CONFIG, applicableConfigs } from "@/components/dossier/SousEtapesPanel";
 import { useSousEtapes } from "@/hooks/useSousEtapes";
 import { dateHeure, delaiJHM, dureeEntre } from "@/lib/temps";
+import { montant as montantDevise, tauxActuels } from "@/lib/devise";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -35,7 +36,7 @@ const STATUS_LABELS: Record<string, string> = {
   codage:           "Codage",
   validation:       "Validation",
   paiement:         "Paiement",
-  bon_compagnie:    "Bon Compagnie",
+  bon_compagnie:    "Bon compagnie (Douala)",
   operations_douala: "Douala", operations_kribi: "Kribi",
   cloture:          "Clôturé", facturation: "Facturation",
 };
@@ -51,7 +52,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 const STATUS_ORDER = [
   "reception", "soumission_sgs", "codage", "validation",
-  "paiement", "bon_compagnie", "operations_douala", "operations_kribi", "cloture", "facturation",
+  "paiement", "bon_compagnie", "operations_kribi", "cloture", "facturation",
 ];
 
 const STEP_CONFIG: Record<string, {
@@ -121,7 +122,7 @@ const getSLAStatus = (
   return { elapsedH: Math.round(elapsedH), slaH, pct, status };
 };
 
-const TAUX_CHANGE: Record<string, number> = { XAF: 1, EUR: 655.96, USD: 605 };
+const TAUX_CHANGE = (): Record<string, number> => ({ XAF: 1, ...tauxActuels() });
 
 const EVENT_LABELS: Record<string, string> = {
   ETAPE_DEBUT: "Début d'étape", ETAPE_FIN: "Fin d'étape", DOCUMENT: "Document joint",
@@ -152,7 +153,7 @@ const CreateDIInline = ({
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const montantXAF = montant ? Math.round(parseFloat(montant) * TAUX_CHANGE[devise]) : 0;
+  const montantXAF = montant ? Math.round(parseFloat(montant) * TAUX_CHANGE()[devise]) : 0;
 
   const handleCreate = async () => {
     const m = montantXAF;
@@ -289,6 +290,14 @@ const CreateDIInline = ({
   );
 };
 
+/** Conteneurs d'un dossier avec leur taille (liste détaillée, sinon n° séparés + taille commune). */
+function conteneursDuDossier(dossier: any): { numero: string; taille: string }[] {
+  if (Array.isArray(dossier.conteneurs) && dossier.conteneurs.length) {
+    return dossier.conteneurs.map((c: any) => ({ numero: String(c.numero ?? ""), taille: String(c.taille ?? "") }));
+  }
+  return String(dossier.conteneur ?? "").split(/[,;\s]+/).filter(Boolean).map(numero => ({ numero, taille: dossier.tailleConteneur ?? "" }));
+}
+
 // ── Modification des informations du dossier ────────────────────────────────
 
 const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open: boolean; onClose: () => void }) => {
@@ -301,12 +310,13 @@ const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open:
     dateLimiteSortie: dossier.dateLimiteSortie ? String(dossier.dateLimiteSortie).slice(0, 10) : "", notes: dossier.notes ?? "",
   });
   const [v, setV] = useState(initial);
+  const [tcs, setTcs] = useState<LigneConteneur[]>(() => conteneursDuDossier(dossier).map(c => ({ numero: c.numero, taille: c.taille })));
   const champ = (k: keyof ReturnType<typeof initial>) => ({ value: v[k], onChange: (e: any) => setV(x => ({ ...x, [k]: e.target.value })) });
   const enregistrer = useMutation({
     mutationFn: () => {
       const corps: Record<string, unknown> = {
-        client: v.client.trim(), marchandise: v.marchandise.trim(), conteneur: v.conteneur.trim(), priorite: v.priorite,
-        nombreConteneurs: Math.max(1, parseInt(v.nombreConteneurs, 10) || 1), ...(v.tailleConteneur ? { tailleConteneur: v.tailleConteneur } : {}),
+        client: v.client.trim(), marchandise: v.marchandise.trim(), priorite: v.priorite,
+        conteneurs: tcs.map(c => ({ numero: c.numero.trim(), taille: c.taille })).filter(c => c.numero),
       };
       for (const k of ["fournisseur", "numeroBL", "numDeclaration", "regimeDouanier", "notes"] as const) if (v[k].trim() || dossier[k]) corps[k] = v[k].trim();
       if (v.dateLimiteSortie) corps.dateLimiteSortie = new Date(`${v.dateLimiteSortie}T23:59:00`).toISOString();
@@ -322,20 +332,13 @@ const ModifierDossierDialog = ({ dossier, open, onClose }: { dossier: any; open:
   });
   return (
     <Dialog open={open} onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-xl">
         <DialogHeader><DialogTitle>Modifier le dossier {dossier.numero}</DialogTitle></DialogHeader>
-        <form className="grid grid-cols-2 gap-3" onSubmit={e => { e.preventDefault(); enregistrer.mutate(); }}>
+        <form className="grid grid-cols-2 gap-3" onSubmit={e => { e.preventDefault(); if (!tcs.some(c => c.numero.trim())) { toast({ title: "Indiquez au moins un conteneur", variant: "destructive" }); return; } enregistrer.mutate(); }}>
           <div className="col-span-2"><Label htmlFor="md-client">Client *</Label><Input id="md-client" required minLength={2} {...champ("client")} /></div>
           <div><Label htmlFor="md-march">Marchandise *</Label><Input id="md-march" required minLength={2} {...champ("marchandise")} /></div>
-          <div><Label htmlFor="md-tc">N° de conteneur(s) *</Label><Input id="md-tc" required minLength={3} {...champ("conteneur")} /></div>
-          <div><Label htmlFor="md-nb">Nombre de conteneurs *</Label><Input id="md-nb" type="number" min={1} max={500} required {...champ("nombreConteneurs")} /></div>
-          <div>
-            <Label>Taille du conteneur</Label>
-            <Select value={v.tailleConteneur} onValueChange={x => setV(p => ({ ...p, tailleConteneur: x }))}>
-              <SelectTrigger aria-label="Taille du conteneur"><SelectValue placeholder="Choisir…" /></SelectTrigger>
-              <SelectContent>{TAILLES_CONTENEUR.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-            </Select>
-          </div>
+          <div />
+          <div className="col-span-2"><ListeConteneurs lignes={tcs} onChange={setTcs} /></div>
           <div><Label htmlFor="md-fourn">Fournisseur</Label><Input id="md-fourn" {...champ("fournisseur")} /></div>
           <div><Label htmlFor="md-bl">N° BL</Label><Input id="md-bl" {...champ("numeroBL")} /></div>
           <div><Label htmlFor="md-decl">N° déclaration</Label><Input id="md-decl" {...champ("numDeclaration")} /></div>
@@ -580,9 +583,7 @@ const DossierDetail = () => {
   const timeline        = parcoursData?.timeline ?? [];
   const finance         = parcoursData?.finance  ?? {};
   const diId            = dossier.diId as string | undefined;
-  const conteneurs: any[] = dossier.conteneur
-    ? String(dossier.conteneur).split(/[,;\s]+/).filter(Boolean).map((numero: string, i: number) => ({ id: `${i}`, numero, statut: dossier.status }))
-    : [];
+  const conteneurs: any[] = conteneursDuDossier(dossier).map((c, i) => ({ id: `${i}`, numero: c.numero, type: c.taille, statut: dossier.status }));
 
   // Preuves obligatoires — docs de l'étape courante
   const currentStepDocs = docs.filter((d: any) => d.etape === dossier.status);
@@ -1305,7 +1306,7 @@ const DossierDetail = () => {
                       <p className="text-xs text-muted-foreground">
                         Solde DI disponible :{" "}
                         <span className={`font-semibold ${(diInfo.soldeNum ?? 0) <= (diInfo.montantNum ?? 0) * 0.2 ? "text-warning" : "text-success"}`}>
-                          {(diInfo.soldeNum ?? 0).toLocaleString("fr-FR")} {diInfo.devise ?? "XAF"}
+                          {montantDevise(diInfo.soldeNum ?? 0)}
                         </span>
                       </p>
                     </div>
@@ -1549,8 +1550,7 @@ const DossierDetail = () => {
             {[
               { icon: Package,       label: "Marchandise",   value: dossier.marchandise },
               { icon: Ship,          label: "Compagnie",     value: dossier.compagnie?.replace("_", "-") },
-              { icon: FileText,      label: "Conteneur",     value: dossier.conteneur },
-              { icon: Package,       label: "Conteneurs",    value: `${dossier.nombreConteneurs ?? 1}${dossier.tailleConteneur ? ` × ${dossier.tailleConteneur}` : ""}` },
+              { icon: Package,       label: "Conteneurs",    value: `${dossier.nombreConteneurs ?? 1} — ${resumeConteneurs(conteneursDuDossier(dossier)) || "taille non précisée"}` },
               { icon: FileText,      label: "N° de BL",      value: dossier.numeroBL },
               { icon: MapPin,        label: "Site",          value: dossier.site },
               { icon: User,          label: "Responsable",   value: dossier.responsable?.nom ?? "—" },
@@ -1582,26 +1582,26 @@ const DossierDetail = () => {
               {dossier.montantTaxes && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Droits & Taxes</span>
-                  <span className="font-medium">{Number(dossier.montantTaxes).toLocaleString("fr-FR")} FCFA</span>
+                  <span className="font-medium">{montantDevise(Number(dossier.montantTaxes))}</span>
                 </div>
               )}
               {dossier.montantHonoraires && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Honoraires</span>
-                  <span className="font-medium">{Number(dossier.montantHonoraires).toLocaleString("fr-FR")} FCFA</span>
+                  <span className="font-medium">{montantDevise(Number(dossier.montantHonoraires))}</span>
                 </div>
               )}
               {dossier.montantRedevances && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Redevances</span>
-                  <span className="font-medium">{Number(dossier.montantRedevances).toLocaleString("fr-FR")} FCFA</span>
+                  <span className="font-medium">{montantDevise(Number(dossier.montantRedevances))}</span>
                 </div>
               )}
               {finance.totalPaiementsDouane > 0 && (
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Paiements douane</span>
                   <span className="font-medium text-success">
-                    {Number(finance.totalPaiementsDouane).toLocaleString("fr-FR")} FCFA
+                    {montantDevise(Number(finance.totalPaiementsDouane))}
                   </span>
                 </div>
               )}
@@ -1610,7 +1610,7 @@ const DossierDetail = () => {
                   <div className="border-t border-border my-2" />
                   <div className="flex justify-between text-sm font-display font-bold">
                     <span className="text-foreground">Total estimé</span>
-                    <span className="text-secondary">{totalCost.toLocaleString("fr-FR")} FCFA</span>
+                    <span className="text-secondary">{montantDevise(totalCost)}</span>
                   </div>
                 </>
               )}
@@ -1639,7 +1639,7 @@ const DossierDetail = () => {
             <h3 className="font-display font-semibold text-foreground mb-3 flex items-center gap-2">
               <Container className="w-4 h-4 text-secondary" />
               Conteneurs ({dossier.nombreConteneurs ?? conteneurs.length})
-              {dossier.tailleConteneur && <span className="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">{dossier.nombreConteneurs ?? 1} × {dossier.tailleConteneur}</span>}
+              {conteneurs.some(c => c.type) && <span className="ml-auto text-[11px] font-semibold px-2 py-0.5 rounded-full bg-secondary/10 text-secondary">{resumeConteneurs(conteneursDuDossier(dossier))}</span>}
             </h3>
             {conteneurs.length === 0 ? (
               <p className="text-xs text-muted-foreground">Aucun conteneur renseigné</p>

@@ -4,7 +4,7 @@
  */
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
-import { api, closeApp, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
+import { api, aSonTour, closeApp, dansLOrdre, expectStatus, unique, upload, userIds, type UserKey } from './helpers'
 
 let ids: Record<UserKey, string>
 before(async () => { ids = await userIds() })
@@ -111,7 +111,7 @@ describe('Passation : celui qui termine l\'étape choisit qui continue', () => {
     const id = r.body.id
     const taches = await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
     const nom = (uid: string) => Object.entries(ids).find(([, v]) => v === uid)?.[0] as UserKey
-    for (const t of taches.body.filter((x: any) => x.etape === 'reception')) {
+    for (const t of await dansLOrdre('reception', taches.body.filter((x: any) => x.etape === 'reception'))) {
       expectStatus(await api(nom(t.responsableId), 'PUT', `/api/dossiers/${id}/sous-etapes/reception/${t.cle}`, { statut: 'valide' }), 200)
     }
     expectStatus(await upload('yasmine', `/api/dossiers/${id}/upload`, { name: 'p.pdf', type: 'application/pdf', content: `%PDF ${Date.now()}` }, { etape: 'reception' }), 201)

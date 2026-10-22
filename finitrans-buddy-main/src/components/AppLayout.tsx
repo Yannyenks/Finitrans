@@ -1,4 +1,5 @@
-import { ReactNode, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import AppSidebar, { BarreMobile, MenuMobile } from "./AppSidebar";
 import { Search, LogOut, Menu, X } from "lucide-react";
@@ -6,7 +7,8 @@ import { Input } from "@/components/ui/input";
 import NotificationPanel from "./NotificationPanel";
 import DIAlarme from "./DIAlarme";
 import FinitransLogo from "./FinitransLogo";
-import { logout } from "@/lib/api";
+import { api, logout } from "@/lib/api";
+import { SelecteurDevise, definirTaux } from "@/lib/devise";
 import { PROFIL_LABELS, useAuth } from "@/lib/permissions";
 
 interface AppLayoutProps {
@@ -21,6 +23,9 @@ const AppLayout = ({ children, title, subtitle }: AppLayoutProps) => {
   const [recherche, setRecherche] = useState("");
   const [menuOuvert, setMenuOuvert] = useState(false);
   const [rechercheMobile, setRechercheMobile] = useState(false);
+  // Taux de change définis par la Direction (paramètre « taux_change »)
+  const { data: params } = useQuery({ queryKey: ["parametres"], queryFn: () => api.get<Record<string, any>>("/api/parametres"), staleTime: 300_000 });
+  useEffect(() => { definirTaux(params?.taux_change); }, [params]);
   const initiales = user?.nom
     ? user.nom.replace(/^(Mr|Mme|M\.)\s+/i, "").split(" ").map(p => p[0]).join("").toUpperCase().slice(0, 2)
     : "??";
@@ -67,6 +72,7 @@ const AppLayout = ({ children, title, subtitle }: AppLayoutProps) => {
                   </button>
                 </>
               )}
+              <SelecteurDevise className="hidden sm:inline-flex" />
               <DIAlarme />
               <NotificationPanel />
               <div className="flex items-center gap-2">

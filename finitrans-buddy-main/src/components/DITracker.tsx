@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { AlertTriangle, TrendingDown, Receipt, Clock, Loader2 } from "lucide-react";
 import { Progress } from "@/components/ui/progress";
+import { montant as montantDevise } from "@/lib/devise";
 
 interface DITrackerProps {
   dossierId: string;
@@ -55,7 +56,7 @@ const DITracker = ({ dossierId, diId }: DITrackerProps) => {
               />
               <div className="flex justify-between text-[10px] text-muted-foreground">
                 <span>0 FCFA</span>
-                <span>{montant.toLocaleString("fr-FR")} FCFA</span>
+                <span>{montantDevise(montant)}</span>
               </div>
             </div>
 
@@ -82,7 +83,7 @@ const DITracker = ({ dossierId, diId }: DITrackerProps) => {
                     {isCritique ? "Solde DI critique !" : "Solde DI bas"}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5">
-                    Il reste {pctRestant.toFixed(1)}% ({solde.toLocaleString("fr-FR")} FCFA).
+                    Il reste {pctRestant.toFixed(1)}% ({montantDevise(solde)}).
                   </p>
                 </div>
               </div>

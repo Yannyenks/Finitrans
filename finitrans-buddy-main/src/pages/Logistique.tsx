@@ -289,7 +289,53 @@ const CamionDialog = ({ initial, onClose }: { initial?: any; onClose: () => void
   );
 };
 
-type Dlg = { type: "transport"; initial?: any } | { type: "chauffeur"; initial?: any } | { type: "camion"; initial?: any } | null;
+/** Motifs fréquents de retour d'un TC vide */
+const MOTIFS_RETOUR_VIDE = ["Marchandise dépotée chez le client", "Dépotage au magasin / entrepôt", "Restitution à la compagnie (fin de franchise)", "Conteneur endommagé", "Annulation de la livraison"];
+
+/** TC vide retourné : justification obligatoire. */
+const RetourVideDialog = ({ transport, onClose }: { transport: any; onClose: () => void }) => {
+  const qc = useQueryClient();
+  const [motif, setMotif] = useState("");
+  const [detail, setDetail] = useState("");
+  const justification = [motif, detail.trim()].filter(Boolean).join(" — ");
+  const valider = useMutation({
+    mutationFn: () => api.patch(`/api/logistique/transports/${transport.id}`, { statut: "retour_vide", justificationRetourVide: justification }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["logistique-transports"] }); qc.invalidateQueries({ queryKey: ["logistique-resume"] }); toast({ title: "TC vide retourné", description: `${transport.conteneur} — ${justification}` }); onClose(); },
+    onError: erreur,
+  });
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-card sm:max-w-[460px]">
+        <DialogHeader><DialogTitle className="font-display flex items-center gap-2"><Container className="w-4 h-4 text-secondary" /> TC vide retourné — <span className="font-mono">{transport.conteneur}</span></DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Motif du retour *</Label>
+            <div className="flex flex-wrap gap-1.5">
+              {MOTIFS_RETOUR_VIDE.map(m => (
+                <button key={m} type="button" onClick={() => setMotif(p => p === m ? "" : m)}
+                  className={`text-[11px] px-2.5 py-1.5 rounded-full border transition-colors ${motif === m ? "bg-secondary text-secondary-foreground border-secondary" : "border-border text-muted-foreground hover:bg-muted"}`}>{m}</button>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Justification {motif ? "(précisions)" : "*"}</Label>
+            <textarea value={detail} onChange={e => setDetail(e.target.value)} rows={3} maxLength={900}
+              placeholder="Ex. : dépoté le 21/10 chez SOCIÉTÉ ALPHA, conteneur restitué au terminal MSC Douala"
+              className="w-full rounded-md border border-input bg-muted/50 px-3 py-2 text-sm" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>Annuler</Button>
+            <Button disabled={justification.length < 5 || valider.isPending} onClick={() => valider.mutate()} className="gap-1.5 bg-secondary text-secondary-foreground">
+              {valider.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />} Confirmer le retour
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+type Dlg = { type: "transport"; initial?: any } | { type: "chauffeur"; initial?: any } | { type: "camion"; initial?: any } | { type: "retour_vide"; initial: any } | null;
 
 const Logistique = () => {
   const navigate = useNavigate();
@@ -387,10 +433,11 @@ const Logistique = () => {
                         <td className="py-2 px-3 text-xs"><span className="flex items-center gap-1"><MapPin className="w-3 h-3" />{trajet(t)}</span></td>
                         <td className="py-2 px-3 text-xs whitespace-nowrap">{new Date(t.dateEnlevement).toLocaleDateString("fr-FR")}{t.dateLivraison && <div className="text-muted-foreground">livré {new Date(t.dateLivraison).toLocaleDateString("fr-FR")}</div>}</td>
                         <td className="py-2 px-3 text-xs">{t.dossier ? <button className="text-secondary hover:underline" onClick={() => navigate(`/dossiers/${t.dossier.id}`)}>{t.dossier.numero}</button> : "—"}</td>
-                        <td className="py-2 px-3"><span className={`status-badge ${st.cls}`}>{st.label}</span></td>
+                        <td className="py-2 px-3"><span className={`status-badge ${st.cls}`}>{st.label}</span>
+                          {t.justificationRetourVide && <div className="text-[10px] text-muted-foreground mt-0.5 max-w-[16rem] whitespace-normal" title={t.justificationRetourVide}>{t.justificationRetourVide}</div>}</td>
                         <td className="py-2 px-3">
                           <div className="flex gap-1 justify-end">
-                            {st.suivant && <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={avancer.isPending} onClick={() => avancer.mutate({ id: t.id, statut: st.suivant! })}><CheckCircle2 className="w-3 h-3" /> {st.action}</Button>}
+                            {st.suivant && <Button size="sm" variant="outline" className="h-7 text-xs gap-1" disabled={avancer.isPending} onClick={() => st.suivant === "retour_vide" ? setDlg({ type: "retour_vide", initial: t }) : avancer.mutate({ id: t.id, statut: st.suivant! })}><CheckCircle2 className="w-3 h-3" /> {st.action}</Button>}
                             {(t.statut === "planifie" || t.statut === "en_route") && <Button size="sm" variant="ghost" className="h-7 px-2" title="Modifier" onClick={() => setDlg({ type: "transport", initial: t })}><Pencil className="w-3.5 h-3.5" /></Button>}
                             {t.statut === "planifie" && <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive" onClick={() => avancer.mutate({ id: t.id, statut: "annule" })}>Annuler</Button>}
                           </div>
@@ -448,6 +495,7 @@ const Logistique = () => {
 
       </Tabs>
 
+      {dlg?.type === "retour_vide" && <RetourVideDialog transport={dlg.initial} onClose={() => setDlg(null)} />}
       {dlg?.type === "transport" && <TransportDialog dossiers={dossiers} camions={camions} chauffeurs={chauffeurs} initial={dlg.initial} onClose={() => setDlg(null)} />}
       {dlg?.type === "chauffeur" && <ChauffeurDialog initial={dlg.initial} onClose={() => setDlg(null)} />}
       {dlg?.type === "camion" && <CamionDialog initial={dlg.initial} onClose={() => setDlg(null)} />}
