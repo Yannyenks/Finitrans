@@ -9,7 +9,7 @@ import { buildPagination, paginate } from '../utils/pagination'
 import { logActivity } from '../utils/audit'
 import {
   SAFE_USER_SELECT, assertCanGrantProfil, assertNotLastDG, compagnieEnum, createUser, createUserSchema,
-  permissionEnum, profilEnum,
+  permissionEnum, profilEnum, supprimerCompte, EMAIL_COMPTE_ARCHIVE,
 } from '../services/users'
 
 const updateEmployeSchema = z.object({
@@ -45,7 +45,7 @@ const employesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       actif: z.enum(['true', 'false']).optional(),
     }).parse(request.query)
 
-    const where: Record<string, unknown> = {}
+    const where: Record<string, unknown> = { email: { not: EMAIL_COMPTE_ARCHIVE } }
     if (q.site)   where.site  = q.site
     if (q.profil) where.profil = q.profil
     if (q.actif !== undefined) where.actif = q.actif === 'true'
@@ -118,6 +118,25 @@ const employesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     await prisma.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } })
     await logActivity(request.user.id, 'COMPTE_DESACTIVE', 'user', id, target.nom)
     return reply.code(204).send()
+  })
+
+  // POST /api/employes/:id/supprimer — suppression définitive (dossiers en cours transmis au successeur)
+  fastify.post('/:id/supprimer', { preHandler: [authenticate, requireSupervisor] }, async (request, reply) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
+    const { successeurId } = z.object({ successeurId: z.string().uuid().optional() }).parse(request.body ?? {})
+    if (id === request.user.id) {
+      return reply.code(400).send({ error: 'BAD_REQUEST', message: 'Impossible de supprimer son propre compte' })
+    }
+    const target = await prisma.user.findUnique({ where: { id } })
+    if (!target) throw new NotFoundError('Employé', id)
+    if (target.profil === 'dg' && request.user.profil !== 'dg') {
+      return reply.code(403).send({ error: 'FORBIDDEN', message: 'Seul le Directeur Général peut supprimer un compte DG' })
+    }
+    await assertNotLastDG(id)
+    const r = await supprimerCompte(id, successeurId ?? request.user.id)
+    await logActivity(request.user.id, 'COMPTE_SUPPRIME', 'user', id,
+      `${r.nom} — ${r.transmis} élément(s) en cours transmis à ${r.successeur}`)
+    return reply.send(r)
   })
 
   // POST /api/employes/:id/reactiver

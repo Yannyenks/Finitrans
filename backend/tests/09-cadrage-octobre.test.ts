@@ -418,3 +418,34 @@ describe('Opérations Douala avant Kribi', () => {
     assert.deepEqual(t.filter((x: any) => x.etape === 'operations_douala').map((x: any) => x.cle).sort(), ['bad_terminal', 'facturation_terminal'])
   })
 })
+
+describe('Suppression définitive d\'un compte', () => {
+  it('les dossiers en cours passent au successeur, l\'historique est conservé, le compte disparaît', async () => {
+    const email = `${unique('suppr').toLowerCase()}@finitrans.cm`
+    const cree = await api('delba', 'POST', '/api/employes', { email, password: 'finitrans2025', nom: 'Mme TEMPORAIRE', site: 'Douala', profil: 'administration' })
+    expectStatus(cree, 201)
+    const id = cree.body.id
+    const d = await api(email as UserKey, 'POST', '/api/dossiers', {
+      client: unique('CLIENT SUPPR'), compagnie: 'MSC', conteneur: 'MSCU5555555', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    expectStatus(d, 201)
+    const { prisma } = await import('../src/config/prisma')
+    await prisma.dossier.update({ where: { id: d.body.id }, data: { responsableId: id } })
+
+    expectStatus(await api('yasmine', 'POST', `/api/employes/${id}/supprimer`, { successeurId: ids.yasmine }), 403)
+    expectStatus(await api('delba', 'POST', `/api/employes/${ids.delba}/supprimer`, {}), 400)
+
+    const r = await api('delba', 'POST', `/api/employes/${id}/supprimer`, { successeurId: ids.yasmine })
+    expectStatus(r, 200)
+    assert.ok(r.body.transmis >= 1)
+
+    expectStatus(await api('delba', 'GET', `/api/employes/${id}`), 404)
+    assert.equal((await prisma.dossier.findUnique({ where: { id: d.body.id } }))!.responsableId, ids.yasmine, 'dossier en cours repris par le successeur')
+    const audit = await api('delba', 'GET', `/api/dossiers/${d.body.id}/audit`)
+    assert.ok(JSON.stringify(audit.body).includes('[Mme TEMPORAIRE]'), 'historique conservé avec le nom du compte supprimé')
+    const liste = await api('delba', 'GET', '/api/employes?limit=200')
+    assert.ok(!liste.body.data.some((e: any) => e.id === id || e.email.includes('archive')), 'ni le compte supprimé ni le compte d\'archive ne sont listés')
+    const login = await api(null, 'POST', '/api/auth/login', { email, password: 'finitrans2025' })
+    assert.equal(login.status, 401)
+  })
+})

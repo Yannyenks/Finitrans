@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MapPin, ChevronRight, Loader2, Plus, ShieldCheck, KeyRound, UserX, UserCheck, Search } from "lucide-react";
+import { MapPin, ChevronRight, Loader2, Plus, ShieldCheck, KeyRound, UserX, UserCheck, Search, Trash2, AlertTriangle } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -198,7 +198,59 @@ const ResetMotDePasse = ({ emp, onClose }: { emp: any; onClose: () => void }) =>
   );
 };
 
-type Dlg = { type: "nouveau" } | { type: "role" | "mdp"; emp: any } | null;
+/** Suppression définitive : les dossiers et tâches en cours passent au successeur choisi, l'historique est conservé. */
+const SuppressionCompte = ({ emp, employes, moi, onClose }: { emp: any; employes: any[]; moi?: string; onClose: () => void }) => {
+  const qc = useQueryClient();
+  const [successeurId, setSuccesseurId] = useState(moi ?? "");
+  const [confirmation, setConfirmation] = useState("");
+  const candidats = employes.filter(e => e.actif && e.id !== emp.id);
+  const supprimer = useMutation({
+    mutationFn: () => api.post<any>(`/api/employes/${emp.id}/supprimer`, { successeurId }),
+    onSuccess: (r: any) => {
+      qc.invalidateQueries({ queryKey: ["employes-tous"] });
+      toast({ title: "Compte supprimé", description: `${r.nom} — ${r.transmis} élément(s) en cours transmis à ${r.successeur}` });
+      onClose();
+    },
+    onError: erreur,
+  });
+  const ok = !!successeurId && confirmation.trim().toUpperCase() === "SUPPRIMER";
+  return (
+    <Dialog open onOpenChange={onClose}>
+      <DialogContent className="bg-card sm:max-w-[460px]">
+        <DialogHeader><DialogTitle className="font-display flex items-center gap-2 text-destructive"><Trash2 className="w-4 h-4" /> Supprimer définitivement le compte</DialogTitle></DialogHeader>
+        <div className="space-y-4">
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
+            <p className="font-semibold text-foreground">{emp.nom}</p>
+            <p className="text-xs text-muted-foreground">{emp.email}</p>
+            <p className="text-xs text-destructive mt-2 flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+              Action irréversible : le compte ne pourra plus se connecter ni être réactivé. Son historique (journal, documents, messages) est conservé sous « Compte supprimé ».</p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Reprise des dossiers et tâches en cours par *</Label>
+            <Select value={successeurId} onValueChange={setSuccesseurId}>
+              <SelectTrigger className="bg-muted/50"><SelectValue placeholder="Choisir un collaborateur" /></SelectTrigger>
+              <SelectContent>
+                {candidats.map(e => <SelectItem key={e.id} value={e.id}>{e.nom} — {PROFIL_LABELS[e.profil] ?? e.profil}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">Tapez <span className="font-mono font-bold">SUPPRIMER</span> pour confirmer</Label>
+            <Input value={confirmation} onChange={e => setConfirmation(e.target.value)} className="bg-muted/50 font-mono" autoComplete="off" />
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" onClick={onClose}>Annuler</Button>
+            <Button variant="destructive" className="gap-1.5" disabled={!ok || supprimer.isPending} onClick={() => supprimer.mutate()}>
+              {supprimer.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} Supprimer
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+type Dlg = { type: "nouveau" } | { type: "role" | "mdp" | "supprimer"; emp: any } | null;
 
 const Employes = () => {
   const navigate = useNavigate();
@@ -279,6 +331,9 @@ const Employes = () => {
                       onClick={() => (!emp.actif || confirm(`Désactiver le compte de ${emp.nom} ?`)) && basculer.mutate(emp)}>
                       {emp.actif ? <><UserX className="w-3 h-3" /> Désactiver</> : <><UserCheck className="w-3 h-3" /> Réactiver</>}
                     </Button>
+                    <Button size="sm" variant="ghost" className="h-7 text-xs gap-1 text-destructive hover:bg-destructive/10" onClick={() => setDlg({ type: "supprimer", emp })}>
+                      <Trash2 className="w-3 h-3" /> Supprimer
+                    </Button>
                   </div>
                 )}
               </div>
@@ -290,6 +345,7 @@ const Employes = () => {
       {dlg?.type === "nouveau" && <NouveauCompte roles={roles} estDG={estDG} onClose={() => setDlg(null)} />}
       {dlg?.type === "role" && <AttributionRole emp={dlg.emp} roles={roles} estDG={estDG} onClose={() => setDlg(null)} />}
       {dlg?.type === "mdp" && <ResetMotDePasse emp={dlg.emp} onClose={() => setDlg(null)} />}
+      {dlg?.type === "supprimer" && <SuppressionCompte emp={dlg.emp} employes={empData?.data ?? []} moi={user?.id} onClose={() => setDlg(null)} />}
     </AppLayout>
   );
 };

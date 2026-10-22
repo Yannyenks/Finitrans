@@ -96,3 +96,85 @@ export async function buildSessionUser(userId: string) {
     profilLabel: template.label,
   }
 }
+
+// ── Suppression définitive d'un compte ───────────────────────────────────────
+
+/** Compte d'archive (inactif, invisible) qui porte l'historique des comptes supprimés. */
+export const EMAIL_COMPTE_ARCHIVE = 'compte-supprime@finitrans.archive'
+
+async function compteArchive(): Promise<string> {
+  const existant = await prisma.user.findUnique({ where: { email: EMAIL_COMPTE_ARCHIVE }, select: { id: true } })
+  if (existant) return existant.id
+  const cree = await prisma.user.create({
+    data: {
+      email: EMAIL_COMPTE_ARCHIVE, nom: 'Compte supprimé', role: 'Archive', site: 'Douala', profil: 'administration', actif: false,
+      passwordHash: await bcrypt.hash(crypto.randomUUID() + crypto.randomUUID(), 10),
+    },
+    select: { id: true },
+  })
+  return cree.id
+}
+
+/** Responsabilités en cours : transmises au successeur. */
+const EN_COURS: { table: string; colonne: string; condition?: string }[] = [
+  { table: 'dossiers',                 colonne: 'responsable_id', condition: `status::text NOT IN ('cloture', 'facturation')` },
+  { table: 'affectations_etapes',      colonne: 'responsable_id' },
+  { table: 'sous_etapes_dossier',      colonne: 'responsable_id', condition: `statut::text <> 'valide'` },
+  { table: 'vehicules',                colonne: 'responsable_id' },
+  { table: 'interchanges',             colonne: 'responsable_id' },
+  { table: 'declarations_importation', colonne: 'gestionnaire_id' },
+]
+
+/** Historique (auteur d'une action passée) : rattaché au compte d'archive. */
+const HISTORIQUE: { table: string; colonne: string }[] = [
+  { table: 'dossiers', colonne: 'responsable_id' },
+  { table: 'affectations_etapes', colonne: 'assigne_par_id' },
+  { table: 'audit_entries', colonne: 'auteur_id' },
+  { table: 'bons_kribi', colonne: 'responsable_id' },
+  { table: 'bons_livraison', colonne: 'effectue_par' },
+  { table: 'commentaires', colonne: 'auteur_id' },
+  { table: 'comptes_rendus_kribi', colonne: 'auteur_id' },
+  { table: 'contacts', colonne: 'created_by_id' },
+  { table: 'conversations', colonne: 'created_by' },
+  { table: 'di_documents', colonne: 'uploade_par' },
+  { table: 'documents', colonne: 'uploade_par' },
+  { table: 'ecritures_comptables', colonne: 'created_by_id' },
+  { table: 'gate_passes', colonne: 'emetteur_id' },
+  { table: 'messages', colonne: 'auteur_id' },
+  { table: 'mouvements_di', colonne: 'created_by' },
+  { table: 'soumissions_sgs', colonne: 'soumis_par_id' },
+  { table: 'transports', colonne: 'created_by_id' },
+  { table: 'virements', colonne: 'effectue_par' },
+  { table: 'sous_etapes_dossier', colonne: 'completed_by_id' },
+  { table: 'dossier_timings', colonne: 'responsable_id' },
+]
+
+/**
+ * Supprime définitivement un compte : ses dossiers et tâches en cours passent au successeur,
+ * son historique (journal, documents, messages, écritures…) est conservé sous « Compte supprimé »
+ * avec son nom dans le journal ; notifications, sessions, fiche RH et congés sont effacés.
+ */
+export async function supprimerCompte(id: string, successeurId: string) {
+  const [cible, successeur] = await Promise.all([
+    prisma.user.findUnique({ where: { id }, select: { id: true, nom: true, email: true } }),
+    prisma.user.findUnique({ where: { id: successeurId }, select: { id: true, nom: true, actif: true } }),
+  ])
+  if (!cible) throw new AppError(404, 'NOT_FOUND', 'Compte introuvable')
+  if (cible.email === EMAIL_COMPTE_ARCHIVE) throw new AppError(422, 'COMPTE_ARCHIVE', 'Le compte d\'archive ne peut pas être supprimé')
+  if (!successeur?.actif || successeur.id === id) throw new AppError(422, 'SUCCESSEUR_INVALIDE', 'Choisissez un compte actif pour reprendre les dossiers en cours')
+  const archive = await compteArchive()
+
+  const transmis = await prisma.$transaction(async tx => {
+    let n = 0
+    for (const r of EN_COURS) {
+      n += await tx.$executeRawUnsafe(`UPDATE "${r.table}" SET "${r.colonne}" = $1::uuid WHERE "${r.colonne}" = $2::uuid${r.condition ? ` AND ${r.condition}` : ''}`, successeurId, id)
+    }
+    await tx.$executeRawUnsafe(`UPDATE "audit_entries" SET "details" = $1 || COALESCE("details", '') WHERE "auteur_id" = $2::uuid`, `[${cible.nom}] `, id)
+    for (const r of HISTORIQUE) {
+      await tx.$executeRawUnsafe(`UPDATE "${r.table}" SET "${r.colonne}" = $1::uuid WHERE "${r.colonne}" = $2::uuid`, archive, id)
+    }
+    await tx.user.delete({ where: { id } })
+    return n
+  })
+  return { nom: cible.nom, successeur: successeur.nom, transmis }
+}
