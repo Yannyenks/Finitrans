@@ -314,6 +314,35 @@ describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
     const apres = await api('yasmine', 'GET', `/api/di/${di.body.id}`)
     assert.equal(Number(apres.body.soldeActuel), 750_000)
   })
+
+  it('montant saisi dans les informations de l\'étape (sans validation) : débité aussitôt ; correction = écart seulement', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT DI2'), compagnie: 'MSC', conteneur: 'MSCU4545455', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const id = d.body.id
+    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
+    const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-FF2'), client: 'CLIENT DI2', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    expectStatus(await api('yasmine', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: id }), 200)
+    const url = `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`
+    const solde = async () => Number((await api('yasmine', 'GET', `/api/di/${di.body.id}`)).body.soldeActuel)
+
+    const saisie = await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '300000', ff_reference_facture: unique('PI') } })
+    expectStatus(saisie, 200)
+    assert.equal(saisie.body.metadata.ff_montant_debite, 300_000)
+    assert.equal(await solde(), 700_000)
+
+    // Réenregistrer le même montant (ex. validation) ne débite pas deux fois ; un client ne peut pas falsifier le montant débité
+    expectStatus(await api('soudi', 'PUT', url, { statut: 'valide', metadata: { ff_montant_facture: '300000', ff_montant_debite: 0 } }), 200)
+    assert.equal(await solde(), 700_000)
+
+    // Correction à la hausse puis à la baisse : seul l'écart est appliqué
+    expectStatus(await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '450000' } }), 200)
+    assert.equal(await solde(), 550_000)
+    const baisse = await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '200000' } })
+    expectStatus(baisse, 200)
+    assert.equal(baisse.body.metadata.ff_montant_debite, 200_000)
+    assert.equal(await solde(), 800_000)
+  })
 })
 
 describe('Facturation client après la clôture', () => {

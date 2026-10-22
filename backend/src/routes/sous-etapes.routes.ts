@@ -7,7 +7,7 @@ import { authenticate } from '../middleware/authenticate'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { recevoirFichier } from '../services/televersement'
-import { verifierDebitDI } from '../services/di'
+import { appliquerFactureFournisseur, verifierFactureFournisseur } from '../services/di'
 import { archiverCompteRendu } from '../services/compteRendu'
 import { enregistrerDepuisSousEtape, memoriserEnregistrement } from '../services/enregistrements'
 import {
@@ -114,6 +114,8 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     if (body.deadline      !== undefined) data.deadline      = body.deadline ? new Date(body.deadline) : null
     if (body.notes         !== undefined) data.notes         = body.notes
     if (body.metadata      !== undefined) {
+      // Champs calculés par le serveur (débit DI, enregistrement métier) : jamais fournis par le client
+      for (const k of ['ff_montant_debite', 'ff_solde_di_apres', 'enregistrement_type', 'enregistrement_id']) delete body.metadata[k]
       // Fusion : préserve preuve_url et les autres champs déjà saisis
       const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
       data.metadata = { ...existingMeta, ...body.metadata } as Prisma.InputJsonValue
@@ -141,16 +143,10 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
       if (!existing?.deadline && body.deadline === undefined) data.deadline = await echeanceSla(etape, cle, maintenant)
     }
 
-    // Facture fournisseur (FF et soumission) : débitée sur la DI du dossier — contrôle avant validation
-    if (body.statut === 'valide' && cle === 'ff_soumission' && !(existing?.metadata as Record<string, unknown> | null)?.enregistrement_id) {
-      const meta = { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) }
-      const montant = Number(String(meta.ff_montant_facture ?? '').replace(/\s/g, '').replace(',', '.'))
-      if (montant > 0) {
-        if (!dossier.diId) {
-          return reply.code(422).send({ error: 'DI_REQUISE', message: 'Aucune DI n\'est liée à ce dossier : liez la déclaration d\'importation avant de saisir la facture fournisseur.' })
-        }
-        await verifierDebitDI(dossier.diId, montant, typeof meta.ff_reference_facture === 'string' ? meta.ff_reference_facture : null)
-      }
+    // Facture fournisseur (FF et soumission) : le montant saisi est déduit de la DI dès son enregistrement
+    // (avec ou sans validation de la tâche) — contrôle préalable : DI liée, solde suffisant, facture non dupliquée
+    if (cle === 'ff_soumission' && (body.metadata !== undefined || body.statut === 'valide')) {
+      await verifierFactureFournisseur(dossier.diId, { ...((existing?.metadata ?? {}) as Record<string, unknown>), ...(body.metadata ?? {}) })
     }
 
     // Facture client : contrôle des lignes avant de terminer la tâche
@@ -181,6 +177,12 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
           await archiverCompteRendu(id, actor.id, { nom: actor.nom }).catch(err => request.log.error({ err }, 'Compte rendu non régénéré'))
         }
       }
+    }
+
+    // Facture fournisseur : débit (ou ajustement de l'écart) sur la DI du dossier
+    if (cle === 'ff_soumission') {
+      const ajoutDI = await appliquerFactureFournisseur(row.id, actor.id)
+      if (ajoutDI) row = { ...row, metadata: { ...((row.metadata ?? {}) as Record<string, unknown>), ...ajoutDI } as typeof row.metadata }
     }
 
     const label = labelOf(etape, cle)

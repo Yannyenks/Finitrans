@@ -8,7 +8,6 @@ import { prisma } from '../config/prisma'
 import { logAudit } from '../utils/audit'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { clientParNom } from './crm'
-import { debiterDI } from './di'
 import { creerFactureClient } from './facturation'
 
 export const MODES_REGLEMENT = ['virement', 'cheque', 'especes', 'traite', 'mobile_money', 'autre'] as const
@@ -51,18 +50,7 @@ export async function enregistrerDepuisSousEtape(
     return { enregistrement_id: facture.id, enregistrement_type: 'facture_client', facture_numero: facture.numero }
   }
 
-  // Facture fournisseur (FF et soumission) → débit de la DI du dossier
-  if (cle === 'ff_soumission') {
-    const montant = nombre(meta.ff_montant_facture)
-    if (!montant || !dossier.diId) return null
-    const ref = texte(meta.ff_reference_facture)
-    const debit = await debiterDI({
-      diId: dossier.diId, montant, referenceFacture: ref, dossierId, userId,
-      motif: `Facture fournisseur${ref ? ` ${ref}` : ''} — dossier ${dossier.numero}`,
-    })
-    await logAudit(dossierId, userId, 'DEBIT_DI', `Facture fournisseur ${ref ?? ''} : ${montant.toLocaleString('fr-FR')} FCFA débités sur la DI ${debit.numero} (solde ${Math.round(debit.nouveauSolde).toLocaleString('fr-FR')} FCFA)`.replace('  ', ' '))
-    return { enregistrement_id: debit.mouvement.id, enregistrement_type: 'debit_di' }
-  }
+  // Facture fournisseur (FF et soumission) : débitée sur la DI par appliquerFactureFournisseur (services/di.ts)
 
   // Paiement par le client → règlement client (mode, payeur, référence), rattaché à la fiche CRM
   if (cle === 'paiement_client') {

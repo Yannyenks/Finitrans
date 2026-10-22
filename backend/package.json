@@ -21,7 +21,8 @@
     "test:reset": "node --env-file=.env.test --import tsx src/scripts/convertir-compagnies.ts && node --env-file=.env.test ./node_modules/prisma/build/index.js db push --skip-generate --accept-data-loss && node --env-file=.env.test --import tsx src/seed.ts",
     "test:run": "node --env-file=.env.test --import tsx --test --test-concurrency=1 --test-reporter=spec tests/*.test.ts",
     "db:migrate-sous-etapes": "tsx src/scripts/migrate-sous-etapes.ts",
-    "db:convertir-compagnies": "tsx src/scripts/convertir-compagnies.ts"
+    "db:convertir-compagnies": "tsx src/scripts/convertir-compagnies.ts",
+    "db:appliquer-factures-fournisseurs": "tsx src/scripts/appliquer-factures-fournisseurs.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

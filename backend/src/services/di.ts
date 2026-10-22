@@ -63,3 +63,91 @@ export async function debiterDI(p: DebitDI) {
   }
   return { mouvement, nouveauSolde, numero: di.numero }
 }
+
+// ── Facture fournisseur saisie à « FF et soumission » ─────────────────────────
+
+const montantSaisi = (v: unknown) => {
+  const n = Number(String(v ?? '').replace(/\s/g, '').replace(',', '.'))
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 0
+}
+
+/** Montant déjà débité sur la DI pour cette tâche (anciennes saisies : mouvement d'origine). */
+async function dejaDebite(meta: Record<string, unknown>): Promise<number> {
+  if (meta.ff_montant_debite !== undefined) return Number(meta.ff_montant_debite) || 0
+  if (meta.enregistrement_type === 'debit_di' && typeof meta.enregistrement_id === 'string') {
+    const mv = await prisma.mouvementDI.findUnique({ where: { id: meta.enregistrement_id }, select: { montant: true } })
+    return mv ? Number(mv.montant) : 0
+  }
+  return 0
+}
+
+/** Contrôle avant enregistrement : DI liée et solde suffisant pour l'écart à débiter. */
+export async function verifierFactureFournisseur(diId: string | null, meta: Record<string, unknown>) {
+  const montant = montantSaisi(meta.ff_montant_facture)
+  const ecart = montant - await dejaDebite(meta)
+  if (ecart === 0 || montant === 0 && ecart <= 0) return
+  if (!diId) {
+    throw new AppError(422, 'DI_REQUISE', 'Aucune DI n\'est liée à ce dossier : liez la déclaration d\'importation pour que la facture fournisseur soit débitée.')
+  }
+  if (ecart > 0) {
+    const premiere = !(await dejaDebite(meta))
+    await verifierDebitDI(diId, ecart, premiere && typeof meta.ff_reference_facture === 'string' ? meta.ff_reference_facture : null)
+  }
+}
+
+/**
+ * Applique sur la DI le montant de la facture fournisseur de la tâche « FF et soumission » :
+ * débit à la première saisie, puis ajustement de l'écart si le montant est corrigé.
+ * Renvoie les métadonnées à fusionner (montant débité, solde) ou null si rien à faire.
+ */
+export async function appliquerFactureFournisseur(sousEtapeId: string, userId: string): Promise<Record<string, unknown> | null> {
+  const t = await prisma.sousEtapeDossier.findUnique({
+    where: { id: sousEtapeId },
+    include: { dossier: { select: { id: true, numero: true, diId: true } } },
+  })
+  if (!t || t.cle !== 'ff_soumission') return null
+  const meta = (t.metadata ?? {}) as Record<string, unknown>
+  const montant = montantSaisi(meta.ff_montant_facture)
+  const deja = await dejaDebite(meta)
+  const ecart = montant - deja
+  if (ecart === 0 || !t.dossier.diId) return null
+  const ref = typeof meta.ff_reference_facture === 'string' && meta.ff_reference_facture.trim() ? meta.ff_reference_facture.trim() : null
+
+  let mouvementId: string
+  let solde: number
+  let numero: string
+  if (ecart > 0) {
+    const r = await debiterDI({
+      diId: t.dossier.diId, montant: ecart, dossierId: t.dossier.id, userId,
+      referenceFacture: deja === 0 ? ref : null,
+      motif: deja === 0
+        ? `Facture fournisseur${ref ? ` ${ref}` : ''} — dossier ${t.dossier.numero}`
+        : `Correction facture fournisseur${ref ? ` ${ref}` : ''} (+${ecart.toLocaleString('fr-FR')}) — dossier ${t.dossier.numero}`,
+    })
+    mouvementId = r.mouvement.id; solde = r.nouveauSolde; numero = r.numero
+  } else {
+    const di = await prisma.declarationImportation.findUnique({ where: { id: t.dossier.diId } })
+    if (!di) return null
+    solde = Number(di.soldeActuel) - ecart
+    numero = di.numero
+    const [mv] = await prisma.$transaction([
+      prisma.mouvementDI.create({
+        data: {
+          diId: di.id, type: 'credit', categorie: 'remboursement', montant: -ecart, dossierId: t.dossier.id, createdBy: userId,
+          motif: `Correction facture fournisseur${ref ? ` ${ref}` : ''} (${ecart.toLocaleString('fr-FR')}) — dossier ${t.dossier.numero}`,
+        },
+      }),
+      prisma.declarationImportation.update({ where: { id: di.id }, data: { soldeActuel: solde } }),
+    ])
+    mouvementId = mv.id
+  }
+  const ajout = {
+    ff_montant_debite: montant, ff_solde_di_apres: Math.round(solde),
+    enregistrement_type: 'debit_di', enregistrement_id: (meta.enregistrement_id as string | undefined) ?? mouvementId,
+  }
+  await prisma.sousEtapeDossier.update({ where: { id: t.id }, data: { metadata: { ...meta, ...ajout } } })
+  const { logAudit } = await import('../utils/audit')
+  await logAudit(t.dossier.id, userId, 'DEBIT_DI',
+    `${ecart > 0 ? 'Débit' : 'Crédit'} de ${Math.abs(ecart).toLocaleString('fr-FR')} FCFA sur la DI ${numero} (facture fournisseur${ref ? ` ${ref}` : ''}) — solde ${Math.round(solde).toLocaleString('fr-FR')} FCFA`)
+  return ajout
+}

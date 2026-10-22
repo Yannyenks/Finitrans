@@ -554,6 +554,7 @@ const LIBELLES_META: Record<string, string> = {
   reglement_observations: "Observations",
   pc_montant: "Montant reçu", pc_date: "Date de paiement", pc_reference: "Référence", pc_mode: "Mode de règlement",
   enregistrement_type: "Enregistrement créé",
+  ff_montant_debite: "Montant débité sur la DI", ff_solde_di_apres: "Solde de la DI après débit",
   facture_numero: "N° de facture", facture_total_ttc: "Total TTC", facture_tva_taux: "Taux de TVA (%)",
 };
 const META_CACHEES = new Set(["preuve_url", "preuve_doc_id", "enregistrement_id", "facture_lignes"]);
@@ -569,7 +570,7 @@ function valeurLisible(cle: string, v: unknown): string {
   if (cle === "mode_paiement") return s === "cash" ? "Cash / espèces" : s === "autres" ? "Autres" : s === "virement" ? "Virement" : s;
   if (cle === "pvc_resultat") return s === "succes" ? "Succès" : "Rejet";
   if (cle === "enregistrement_type") return ENREGISTREMENTS[s] ?? s;
-  if (/montant|total_ttc/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
+  if (/montant|total_ttc|solde/.test(cle) && Number.isFinite(Number(s.replace(/\s/g, "")))) return `${Number(s.replace(/\s/g, "")).toLocaleString("fr-FR")} FCFA`;
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T00:00:00`).toLocaleDateString("fr-FR");
   return s;
 }
@@ -1218,7 +1219,7 @@ const SousEtapeCard = ({
                 ✓ {meta.enregistrement_type === "paiement_douane" ? "Paiement douane enregistré en Finance"
                   : meta.enregistrement_type === "paiement_compagnie" ? "Paiement compagnie enregistré en Finance"
                   : meta.enregistrement_type === "reglement_client" ? "Règlement client enregistré (CRM)"
-                  : meta.enregistrement_type === "debit_di" ? "Facture débitée sur la DI"
+                  : meta.enregistrement_type === "debit_di" ? `${Number(meta.ff_montant_debite ?? 0).toLocaleString("fr-FR")} FCFA débités sur la DI${meta.ff_solde_di_apres !== undefined ? ` · solde ${Number(meta.ff_solde_di_apres).toLocaleString("fr-FR")} FCFA` : ""}`
                   : meta.enregistrement_type === "facture_client" ? `Facture ${meta.facture_numero ?? ""} émise`
                   : `Gate pass ${meta.gate_pass_numero ?? ""} enregistré`}
               </p>
