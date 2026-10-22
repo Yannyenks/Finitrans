@@ -84,6 +84,9 @@ model Dossier {
   tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(255)
   /// Détail des conteneurs : [{ numero, taille }] — chaque conteneur a sa propre taille
   conteneurs         Json?
+  /// Lien de suivi partagé avec le client (jeton secret ; null = pas de lien actif)
+  suiviToken         String?                 @unique @map("suivi_token") @db.VarChar(64)
+  actualitesClient   ActualiteClient[]
   marchandise        String
   site               Site
   status             DossierStatus           @default(reception)
@@ -280,6 +283,21 @@ model BonLivraison {
   @@map("bons_livraison")
 }
 
+/// Actualité publiée pour le client sur sa page de suivi (message + illustration)
+model ActualiteClient {
+  id           String   @id @default(uuid()) @db.Uuid
+  dossierId    String   @map("dossier_id") @db.Uuid
+  message      String
+  /// Illustration : navire, douane, document, paiement, camion, port, valide, info…
+  illustration String   @default("info") @db.VarChar(30)
+  auteurNom    String   @map("auteur_nom") @db.VarChar(255)
+  createdAt    DateTime @default(now()) @map("created_at")
+  dossier      Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+
+  @@index([dossierId, createdAt])
+  @@map("actualites_client")
+}
+
 model GatePass {
   id           String         @id @default(uuid()) @db.Uuid
   dossierId    String         @map("dossier_id") @db.Uuid
@@ -289,6 +307,8 @@ model GatePass {
   telephone    String         @db.VarChar(50)
   destination  String         @db.VarChar(255)
   dateEmission DateTime       @map("date_emission")
+  /// Date et heure de sortie du véhicule (saisies sur le gate pass)
+  dateSortie   DateTime?      @map("date_sortie")
   emetteurId   String         @map("emetteur_id") @db.Uuid
   statut       StatutGatePass @default(emis)
   createdAt    DateTime       @default(now()) @map("created_at")

@@ -36,6 +36,16 @@ async function referenceLibre(base: string, existe: (r: string) => Promise<boole
   return `${base}-${Date.now().toString(36).toUpperCase()}`
 }
 
+/** Date + heure de sortie du gate pass (heure du Cameroun, UTC+1). */
+function dateHeureSortie(meta: Record<string, unknown>): Date | null {
+  const heure = typeof meta.gp_heure_sortie === 'string' && /^\d{2}:\d{2}$/.test(meta.gp_heure_sortie) ? meta.gp_heure_sortie : null
+  if (!heure) return null
+  const jour = typeof meta.gp_date_sortie === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(meta.gp_date_sortie)
+    ? meta.gp_date_sortie : new Date(Date.now() + 3_600_000).toISOString().slice(0, 10)
+  const d = new Date(`${jour}T${heure}:00+01:00`)
+  return isNaN(d.getTime()) ? null : d
+}
+
 export async function enregistrerDepuisSousEtape(
   dossierId: string, etape: string, cle: string, meta: Meta, userId: string,
 ): Promise<Meta | null> {
@@ -105,7 +115,7 @@ export async function enregistrerDepuisSousEtape(
     return { enregistrement_id: p.id, enregistrement_type: 'paiement_compagnie' }
   }
 
-  // Gate pass → ticket de sortie enregistré (visible dans Kribi / exports)
+  // Gate pass → ticket de sortie enregistré (visible dans Kribi / exports), avec l'heure de sortie
   if (cle === 'gate_pass') {
     const chauffeur = texte(meta.gp_chauffeur) ?? texte(meta.kgp_chauffeur)
     const telephone = texte(meta.gp_telephone)
@@ -118,11 +128,11 @@ export async function enregistrerDepuisSousEtape(
       return prisma.gatePass.create({
         data: {
           dossierId, numero, conteneur: texte(meta.gp_conteneur) ?? dossier.conteneur, chauffeur, telephone, destination,
-          dateEmission: new Date(), emetteurId: userId,
+          dateEmission: new Date(), emetteurId: userId, dateSortie: dateHeureSortie(meta),
         },
       })
     })
-    await logAudit(dossierId, userId, 'GATE_PASS', `Gate pass ${gp.numero} — ${chauffeur} (${texte(meta.immatriculation) ?? 'immat. ?'}) → ${destination}`)
+    await logAudit(dossierId, userId, 'GATE_PASS', `Gate pass ${gp.numero} — ${chauffeur} (${texte(meta.immatriculation) ?? 'immat. ?'}) → ${destination}${gp.dateSortie ? ` — sortie le ${gp.dateSortie.toLocaleDateString('fr-FR', { timeZone: 'Africa/Douala' })} à ${texte(meta.gp_heure_sortie)}` : ''}`)
     return { enregistrement_id: gp.id, enregistrement_type: 'gate_pass', gate_pass_numero: gp.numero }
   }
 

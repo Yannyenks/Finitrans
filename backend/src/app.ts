@@ -44,6 +44,7 @@ import televersementsRoutes from './routes/televersements.routes'
 import crmRoutes           from './routes/crm.routes'
 import compagniesRoutes    from './routes/compagnies.routes'
 import facturationRoutes   from './routes/facturation.routes'
+import suiviClientRoutes, { suiviPublicRoutes } from './routes/suivi-client.routes'
 
 export async function buildApp(opts: { serverless?: boolean } = {}): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -171,6 +172,8 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
   fastify.register(crmRoutes,           { prefix: '/api/crm' })
   fastify.register(compagniesRoutes,    { prefix: '/api/compagnies' })
   fastify.register(facturationRoutes,   { prefix: '/api/facturation' })
+  fastify.register(suiviClientRoutes,   { prefix: '/api/dossiers' })
+  fastify.register(suiviPublicRoutes,   { prefix: '/api/public' })
 
   // ─── Gestion d'erreurs globale ────────────────────────────
 

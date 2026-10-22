@@ -25,13 +25,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, isAfter, differenceInDays } from "date-fns";
 import { fr } from "date-fns/locale";
 import { montant } from "@/lib/devise";
+import { ChoixHeure, heureMaintenant } from "@/components/ChoixHeure";
 
 // ── Définition des champs par sous-étape ──────────────────────────────────────
 
 export type FieldDef = {
   key:          string;
   label:        string;
-  type:         "text" | "date" | "number" | "textarea";
+  type:         "text" | "date" | "number" | "textarea" | "heure";
   placeholder?: string;
   required?:    boolean;
 };
@@ -219,7 +220,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
       description: "Gate pass Kribi — enregistrement de l'immatriculation du véhicule de transport", hasImmatriculation: true,
       fields: [
         { key: "kgp_chauffeur",    label: "Nom du chauffeur",  type: "text", placeholder: "Ex : M. MARTIN" },
-        { key: "kgp_heure_sort",   label: "Heure de sortie",   type: "text", placeholder: "Ex : 09h15" },
+        { key: "gp_heure_sortie",  label: "Heure de sortie",   type: "heure" },
       ],
     },
   ],
@@ -554,7 +555,7 @@ const LIBELLES_META: Record<string, string> = {
   mode_paiement: "Mode de paiement", reference: "Référence", paiement_quittance: "N° de quittance",
   paiement_montant: "Montant payé", paiement_date: "Date de paiement",
   pvc_resultat: "Résultat RVC", pvc_motif: "Motif / observations",
-  immatriculation: "Immatriculation", gp_chauffeur: "Chauffeur", gp_telephone: "Téléphone du chauffeur", gp_destination: "Destination",
+  immatriculation: "Immatriculation", gp_chauffeur: "Chauffeur", gp_telephone: "Téléphone du chauffeur", gp_destination: "Destination", gp_date_sortie: "Date de sortie", gp_heure_sortie: "Heure de sortie",
   gate_pass_numero: "N° gate pass", preuve_nom: "Preuve jointe",
   reglement_client: "Client", reglement_payeur: "Payé par", reglement_mode: "Mode de règlement", reglement_montant: "Montant reçu",
   reglement_date: "Date du règlement", reglement_reference: "Référence", reglement_banque: "Banque", reglement_echeance: "Échéance",
@@ -721,6 +722,8 @@ const GatePassDialog = ({
   const [chauffeur, setChauffeur] = useState(meta.gp_chauffeur ?? meta.kgp_chauffeur ?? "");
   const [telephone, setTelephone] = useState(meta.gp_telephone ?? "");
   const [destination, setDestination] = useState(meta.gp_destination ?? "");
+  const [dateSortie, setDateSortie] = useState(meta.gp_date_sortie ?? new Date().toLocaleDateString("en-CA"));
+  const [heureSortie, setHeureSortie] = useState(meta.gp_heure_sortie ?? heureMaintenant());
   const [notes, setNotes] = useState("");
   const choisirChauffeur = (v: string) => {
     setChauffeur(v);
@@ -759,14 +762,22 @@ const GatePassDialog = ({
             <Label className="text-xs font-semibold">Destination *</Label>
             <Input value={destination} onChange={e => setDestination(e.target.value)} placeholder="Ex : Yaoundé — entrepôt client" className="bg-muted/40" />
           </div>
+          <div className="rounded-xl border border-secondary/20 bg-secondary/[0.04] p-3 space-y-2">
+            <Label className="text-xs font-semibold flex items-center gap-1.5">Sortie du véhicule *</Label>
+            <div className="flex flex-wrap items-center gap-2">
+              <Input type="date" value={dateSortie} onChange={e => setDateSortie(e.target.value)} className="h-10 w-40 bg-card" aria-label="Date de sortie" />
+              <button type="button" onClick={() => setDateSortie(new Date().toLocaleDateString("en-CA"))} className="text-[11px] font-semibold text-secondary hover:underline">Aujourd'hui</button>
+            </div>
+            <ChoixHeure valeur={heureSortie} onChange={setHeureSortie} libelle="Heure de sortie" />
+          </div>
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Observations</Label>
             <Textarea value={notes} onChange={e => setNotes(e.target.value)} className="bg-muted/40 text-sm h-14 resize-none" />
           </div>
           <div className="flex gap-2 pt-1">
             <Button
-              onClick={() => onConfirm({ immatriculation: immat, gp_chauffeur: chauffeur, gp_telephone: telephone, gp_destination: destination }, notes)}
-              disabled={!immat.trim() || chauffeur.trim().length < 2 || telephone.replace(/\D/g, "").length < 8 || destination.trim().length < 2 || loading}
+              onClick={() => onConfirm({ immatriculation: immat, gp_chauffeur: chauffeur, gp_telephone: telephone, gp_destination: destination, gp_date_sortie: dateSortie, gp_heure_sortie: heureSortie }, notes)}
+              disabled={!immat.trim() || chauffeur.trim().length < 2 || telephone.replace(/\D/g, "").length < 8 || destination.trim().length < 2 || !/^\d{2}:\d{2}$/.test(heureSortie) || !dateSortie || loading}
               className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
               {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer le Gate Pass
             </Button>
@@ -815,11 +826,13 @@ const StepInfoSection = ({
       </p>
       <div className="grid grid-cols-2 gap-2">
         {fields.map(f => (
-          <div key={f.key} className={f.type === "textarea" ? "col-span-2 space-y-1" : "space-y-1"}>
+          <div key={f.key} className={f.type === "textarea" || f.type === "heure" ? "col-span-2 space-y-1" : "space-y-1"}>
             <Label className="text-[10px] font-medium text-muted-foreground">
               {f.label}{f.required && <span className="text-destructive ml-0.5">*</span>}
             </Label>
-            {f.type === "textarea" ? (
+            {f.type === "heure" ? (
+              <ChoixHeure compact valeur={values[f.key] ?? ""} onChange={h => set(f.key, h)} libelle={f.label} />
+            ) : f.type === "textarea" ? (
               <Textarea
                 value={values[f.key]}
                 onChange={e => set(f.key, e.target.value)}

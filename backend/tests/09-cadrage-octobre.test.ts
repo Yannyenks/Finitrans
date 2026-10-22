@@ -524,3 +524,48 @@ describe('Suppression définitive d\'un compte', () => {
     assert.equal(login.status, 401)
   })
 })
+
+describe('Suivi client par lien partagé', () => {
+  it('lien secret, page publique sans compte, messages au client, désactivation', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT SUIVI'), compagnie: 'MSC', marchandise: 'Pièces', site: 'Kribi', dateArrivee: new Date().toISOString(),
+      conteneurs: [{ numero: 'MSCU2020202', taille: "20' Dry" }],
+    })
+    const id = d.body.id
+    expectStatus(await api('raphael', 'POST', `/api/dossiers/${id}/suivi-client`, {}), 403)
+    const l = await api('yasmine', 'POST', `/api/dossiers/${id}/suivi-client`, {})
+    expectStatus(l, 200)
+    const token = l.body.token
+    assert.ok(token.length >= 30)
+    expectStatus(await api('yasmine', 'POST', `/api/dossiers/${id}/suivi-client/actualites`, { message: 'Votre conteneur est arrivé au port.', illustration: 'navire' }), 201)
+
+    const p = await api(null, 'GET', `/api/public/suivi/${token}`)
+    expectStatus(p, 200)
+    assert.equal(p.body.numero, d.body.numero)
+    assert.equal(p.body.etapes[0].etat, 'courant')
+    assert.equal(p.body.conteneurs[0].taille, "20' Dry")
+    assert.equal(p.body.actualites[0].illustration, 'navire')
+    assert.equal(p.body.montantTaxes, undefined, 'aucune donnée interne exposée')
+    assert.equal(p.body.responsableId, undefined)
+
+    expectStatus(await api('yasmine', 'DELETE', `/api/dossiers/${id}/suivi-client`), 204)
+    expectStatus(await api(null, 'GET', `/api/public/suivi/${token}`), 404)
+  })
+})
+
+describe('Gate pass : heure de sortie', () => {
+  it('la date et l\'heure de sortie sont enregistrées sur le ticket', async () => {
+    const k = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT GP HEURE'), compagnie: 'MSC', conteneur: 'MSCU3030303', marchandise: 'Divers', site: 'Kribi', dateArrivee: new Date().toISOString(),
+    })
+    const t = (await api('delba', 'GET', `/api/dossiers/${k.body.id}/sous-etapes`)).body.find((x: any) => x.cle === 'gate_pass')
+    await aSonTour(k.body.id, 'operations_kribi', 'gate_pass')
+    const r = await api('delba', 'PUT', `/api/dossiers/${k.body.id}/sous-etapes/operations_kribi/gate_pass`, {
+      statut: 'valide', metadata: { immatriculation: 'LT 111 AA', gp_chauffeur: 'NJOYA Paul', gp_telephone: '677000111', gp_destination: 'Douala', gp_date_sortie: '2026-10-22', gp_heure_sortie: '14:30' },
+    })
+    expectStatus(r, 200)
+    assert.ok(t)
+    const gps = await api('delba', 'GET', `/api/dossiers/${k.body.id}/gate-passes`)
+    assert.equal(new Date(gps.body[0].dateSortie).toISOString(), '2026-10-22T13:30:00.000Z', '14 h 30 heure du Cameroun')
+  })
+})

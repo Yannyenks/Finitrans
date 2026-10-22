@@ -18,6 +18,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { motion } from "framer-motion";
 import { toast } from "@/hooks/use-toast";
 import { montant } from "@/lib/devise";
+import { ChoixHeure, heureMaintenant } from "@/components/ChoixHeure";
 
 const STATUS_COLORS: Record<string, string> = {
   reception: "bg-blue-100 text-blue-700", soumission_sgs: "bg-indigo-100 text-indigo-700",
@@ -38,7 +39,7 @@ const BON_STATUT_SUIVANT: Record<string, { statut: string; label: string } | und
   valide: { statut: "utilise", label: "Marquer utilisé" },
 };
 
-const GP_VIDE = { dossierId: "", chauffeur: "", telephone: "", destination: "", conteneur: "" };
+const GP_VIDE = () => ({ dossierId: "", chauffeur: "", telephone: "", destination: "", conteneur: "", dateSortie: new Date().toLocaleDateString("en-CA"), heureSortie: heureMaintenant() });
 const BON_VIDE = { dossierId: "", type: "douane" as BonType, numero: "", description: "", montant: "" };
 
 const Kribi = () => {
@@ -90,12 +91,13 @@ const Kribi = () => {
     mutationFn: () => api.post<any>("/api/kribi/gate-passes", {
       dossierId: gpForm.dossierId, conteneur: gpForm.conteneur, chauffeur: gpForm.chauffeur,
       telephone: gpForm.telephone, destination: gpForm.destination,
+      dateSortie: /^\d{2}:\d{2}$/.test(gpForm.heureSortie) ? new Date(`${gpForm.dateSortie}T${gpForm.heureSortie}:00`).toISOString() : undefined,
     }),
     onSuccess: (gp) => {
       refresh();
       toast({ title: "Gate-pass émis", description: `${gp.numero} — ${gp.chauffeur}` });
       setGpOpen(false);
-      setGpForm(GP_VIDE);
+      setGpForm(GP_VIDE());
     },
     onError: (err: any) => toast({ title: "Erreur", description: err.message, variant: "destructive" }),
   });
@@ -336,7 +338,7 @@ const Kribi = () => {
                         <p className="text-xs text-muted-foreground font-mono mt-0.5">{gp.conteneur} · {gp.dossier?.numero}</p>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">{new Date(gp.dateEmission).toLocaleDateString("fr-FR")}</span>
+                        <span className="text-xs text-muted-foreground">{gp.dateSortie ? <>Sortie {new Date(gp.dateSortie).toLocaleDateString("fr-FR")} à {new Date(gp.dateSortie).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" })}</> : new Date(gp.dateEmission).toLocaleDateString("fr-FR")}</span>
                         <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => telechargerGP(gp)}>
                           <Download className="w-3 h-3" /> Imprimer
                         </Button>
@@ -426,6 +428,11 @@ const Kribi = () => {
                 <Label className="text-xs">Destination *</Label>
                 <Input placeholder="Ex : Yaoundé" value={gpForm.destination} onChange={e => setGpForm({ ...gpForm, destination: e.target.value })} className="bg-muted/50" />
               </div>
+            </div>
+            <div className="rounded-xl border border-secondary/20 bg-secondary/[0.04] p-3 space-y-2">
+              <Label className="text-xs">Sortie du véhicule</Label>
+              <Input type="date" value={gpForm.dateSortie} onChange={e => setGpForm({ ...gpForm, dateSortie: e.target.value })} className="h-10 w-40 bg-card" aria-label="Date de sortie" />
+              <ChoixHeure valeur={gpForm.heureSortie} onChange={h => setGpForm({ ...gpForm, heureSortie: h })} libelle="Heure de sortie" />
             </div>
             <div className="flex gap-2 justify-end pt-1">
               <Button type="button" variant="outline" onClick={() => setGpOpen(false)}>Annuler</Button>

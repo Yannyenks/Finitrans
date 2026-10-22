@@ -180,6 +180,8 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       telephone:   z.string().min(8),
       destination: z.string().min(2),
       dateEmission: z.string().datetime().optional(),
+      /** Date et heure de sortie du véhicule */
+      dateSortie:   z.string().datetime().optional(),
     }).parse(request.body)
 
     const userId  = request.user.id
@@ -195,6 +197,7 @@ const kribiRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           numero,
           emetteurId:  userId,
           dateEmission: body.dateEmission ? new Date(body.dateEmission) : new Date(),
+          dateSortie:   body.dateSortie ? new Date(body.dateSortie) : undefined,
         },
         include: {
           dossier:  { select: { numero: true, client: true, conteneur: true } },

@@ -29,6 +29,7 @@ import SousEtapesPanel, { SOUS_ETAPES_CONFIG, applicableConfigs } from "@/compon
 import { useSousEtapes } from "@/hooks/useSousEtapes";
 import { dateHeure, delaiJHM, dureeEntre } from "@/lib/temps";
 import { montant as montantDevise, tauxActuels } from "@/lib/devise";
+import SuiviClientCarte from "@/components/dossier/SuiviClientCarte";
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",
@@ -1633,6 +1634,9 @@ const DossierDetail = () => {
                 : "—"}
             </span>
           </div>
+
+          {/* Suivi client : lien partagé + messages */}
+          <SuiviClientCarte dossierId={dossier.id} numero={dossier.numero} client={dossier.client} />
 
           {/* Conteneurs */}
           <div className="stat-card">

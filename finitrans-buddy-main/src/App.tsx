@@ -15,6 +15,7 @@ const EmployeDetail = lazy(() => import("./pages/EmployeDetail"));
 const Alertes = lazy(() => import("./pages/Alertes"));
 const Finance = lazy(() => import("./pages/Finance"));
 const Kribi = lazy(() => import("./pages/Kribi"));
+const SuiviClient = lazy(() => import("./pages/SuiviClient"));
 const Exploitation = lazy(() => import("./pages/Exploitation"));
 const Parametres = lazy(() => import("./pages/Parametres"));
 const Messagerie = lazy(() => import("./pages/Messagerie"));
@@ -120,6 +121,7 @@ const App = () => (
         <AffichageDevise>
         <Routes>
           <Route path="/" element={<Login />} />
+          <Route path="/suivi/:token" element={<Suspense fallback={<Chargement />}><SuiviClient /></Suspense>} />
           <Route path="/dashboard"            element={R("dashboard", <Dashboard />)} />
           <Route path="/mon-espace"           element={R("mon_espace", <MonEspace />)} />
           <Route path="/supervision"          element={R("supervision", <Supervision />)} />
