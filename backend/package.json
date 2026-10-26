@@ -22,7 +22,8 @@
     "test:run": "node --env-file=.env.test --import tsx --test --test-concurrency=1 --test-reporter=spec tests/*.test.ts",
     "db:migrate-sous-etapes": "tsx src/scripts/migrate-sous-etapes.ts",
     "db:convertir-compagnies": "tsx src/scripts/convertir-compagnies.ts",
-    "db:appliquer-factures-fournisseurs": "tsx src/scripts/appliquer-factures-fournisseurs.ts"
+    "db:appliquer-factures-fournisseurs": "tsx src/scripts/appliquer-factures-fournisseurs.ts",
+    "db:restaurer": "tsx src/scripts/restaurer-sauvegarde.ts"
   },
   "dependencies": {
     "@fastify/cors": "^11.2.0",

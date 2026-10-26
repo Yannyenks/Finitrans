@@ -6,6 +6,8 @@ import {
   Pencil, Wallet, Plane, Activity, FileText,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
+import Sauvegardes from "@/components/Sauvegardes";
+import { DatabaseBackup } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -468,6 +470,7 @@ const Administration = () => {
           <TabsTrigger value="attribution" className="gap-1.5"><Workflow className="w-3.5 h-3.5" /> Attribution des étapes</TabsTrigger>
           <TabsTrigger value="rh" className="gap-1.5"><Users className="w-3.5 h-3.5" /> Ressources humaines</TabsTrigger>
           <TabsTrigger value="journal" className="gap-1.5"><History className="w-3.5 h-3.5" /> Journal d'activité</TabsTrigger>
+          <TabsTrigger value="sauvegardes" className="gap-1.5"><DatabaseBackup className="w-3.5 h-3.5" /> Sauvegardes</TabsTrigger>
         </TabsList>
         <TabsContent value="synthese"><Synthese /></TabsContent>
         <TabsContent value="entreprise"><Entreprise /></TabsContent>
@@ -475,6 +478,7 @@ const Administration = () => {
         <TabsContent value="attribution"><Attribution /></TabsContent>
         <TabsContent value="rh"><RH /></TabsContent>
         <TabsContent value="journal"><Journal /></TabsContent>
+        <TabsContent value="sauvegardes"><Sauvegardes /></TabsContent>
       </Tabs>
     </AppLayout>
   );

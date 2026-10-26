@@ -290,6 +290,23 @@ model BonLivraison {
   @@map("bons_livraison")
 }
 
+/// Sauvegarde complète de la base (JSON compressé) — hebdomadaire (cron) ou manuelle
+model Sauvegarde {
+  id           String   @id @default(uuid()) @db.Uuid
+  declencheur  String   @db.VarChar(20)
+  statut       String   @db.VarChar(10)
+  auteur       String   @db.VarChar(255)
+  tailleOctets Int?     @map("taille_octets")
+  lignes       Json?
+  contenu      Bytes?
+  message      String?
+  dureeMs      Int?     @map("duree_ms")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("sauvegardes")
+}
+
 /// Imprévu ou démarrage inhabituel d'une étape (motif, commentaire) — communiqué au client si souhaité
 model Imprevu {
   id            String   @id @default(uuid()) @db.Uuid
@@ -781,6 +798,7 @@ enum TypeAlerte {
   document
   charge
   di_seuil
+  systeme
 
   @@map("type_alerte")
 }
