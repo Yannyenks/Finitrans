@@ -62,6 +62,16 @@ export async function enregistrerDepuisSousEtape(
 
   // Facture fournisseur (FF et soumission) : débitée sur la DI par appliquerFactureFournisseur (services/di.ts)
 
+  // Liquidation par la douane → montant des droits et taxes du dossier (repris au paiement)
+  if (cle === 'liquidation') {
+    const montant = Math.round(Number(String(meta.liq_montant ?? '').replace(/\s/g, '').replace(',', '.')))
+    const inspecteur = texte(meta.liq_inspecteur)
+    if (montant > 0) await prisma.dossier.update({ where: { id: dossierId }, data: { montantTaxes: montant } })
+    await logAudit(dossierId, userId, 'LIQUIDATION',
+      `Déclaration liquidée${texte(meta.liq_numero) ? ` (n° ${texte(meta.liq_numero)})` : ''} par ${texte(meta.liq_responsable) ?? 'la douane'}${inspecteur ? ` — inspecteur ${inspecteur}` : ''}${montant > 0 ? ` : ${montant.toLocaleString('fr-FR')} FCFA de droits et taxes` : ''}`)
+    return null
+  }
+
   // Paiement par le client → règlement client (mode, payeur, référence), rattaché à la fiche CRM
   if (cle === 'paiement_client') {
     const montant = nombre(meta.reglement_montant)

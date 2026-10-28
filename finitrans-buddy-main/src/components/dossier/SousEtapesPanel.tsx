@@ -4,7 +4,7 @@ import {
   CheckCircle2, Clock, AlertTriangle, UserCheck, Calendar,
   ChevronDown, ChevronRight, FileText, Loader2, Edit3,
   XCircle, PlayCircle, AlertCircle, Receipt, Stamp, Upload,
-  Paperclip, ExternalLink, Timer, Hand,
+  Paperclip, ExternalLink, Timer, Hand, Landmark,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,9 +32,13 @@ import { ChoixHeure, heureMaintenant } from "@/components/ChoixHeure";
 export type FieldDef = {
   key:          string;
   label:        string;
-  type:         "text" | "date" | "number" | "textarea" | "heure";
+  type:         "text" | "date" | "number" | "textarea" | "heure" | "select";
   placeholder?: string;
   required?:    boolean;
+  /** Choix proposés (type « select ») */
+  options?:     string[];
+  /** Valeur proposée par défaut */
+  defaut?:      string;
 };
 
 export type SousEtapeConfig = {
@@ -58,6 +62,8 @@ export type SousEtapeConfig = {
   reglementClient?:    boolean;
   /** Sites où la sous-étape s'applique (toutes si absent) */
   sites?:              ("Douala" | "Kribi")[];
+  /** Responsable externe (ex. la douane) : choisi dans le champ indiqué ; le titulaire FINITRANS assure le suivi */
+  responsableExterne?: { champ: string; defaut: string; detail?: string };
 };
 
 export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
@@ -143,7 +149,23 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
     },
   ],
   // Plus de sous-étape : la validation se termine avec une preuve jointe à l'étape
-  validation: [],
+  validation: [
+    {
+      cle: "liquidation", label: "Liquidation de la déclaration (douane)",
+      description: "L'inspecteur des douanes liquide les droits et taxes de la déclaration. Étape dépendant de la douane : elle peut prendre 2 à 3 jours. Le suivi FINITRANS enregistre la liquidation dès qu'elle est obtenue.",
+      responsableExterne: { champ: "liq_responsable", defaut: "Douane — Inspecteur vérificateur", detail: "liq_inspecteur" },
+      outputLabel: "Bulletin de liquidation",
+      fields: [
+        { key: "liq_responsable", label: "Responsable de la liquidation", type: "select", defaut: "Douane — Inspecteur vérificateur",
+          options: ["Douane — Inspecteur vérificateur", "Douane — Chef de bureau", "Douane — Chef de visite", "Douane — Brigade commerciale", "Autre administration"] },
+        { key: "liq_inspecteur",  label: "Nom de l'inspecteur",            type: "text",   placeholder: "Ex : M. ESSOMBA" },
+        { key: "liq_bureau",      label: "Bureau des douanes",             type: "text",   placeholder: "Ex : Douala Port, Kribi" },
+        { key: "liq_numero",      label: "N° de liquidation",              type: "text",   placeholder: "Ex : L-2026-004512" },
+        { key: "liq_date",        label: "Date de liquidation",            type: "date" },
+        { key: "liq_montant",     label: "Droits et taxes liquidés (XAF)", type: "number", placeholder: "0" },
+      ],
+    },
+  ],
   paiement: [
     {
       cle: "paiement_droits", label: "Paiement des droits et taxes",
@@ -555,7 +577,7 @@ const LIBELLES_META: Record<string, string> = {
   mode_paiement: "Mode de paiement", reference: "Référence", paiement_quittance: "N° de quittance",
   paiement_montant: "Montant payé", paiement_date: "Date de paiement",
   pvc_resultat: "Résultat RVC", pvc_motif: "Motif / observations",
-  immatriculation: "Immatriculation", gp_chauffeur: "Chauffeur", gp_telephone: "Téléphone du chauffeur", gp_destination: "Destination", gp_date_sortie: "Date de sortie", gp_heure_sortie: "Heure de sortie",
+  immatriculation: "Immatriculation", gp_chauffeur: "Chauffeur", gp_telephone: "Téléphone du chauffeur", gp_destination: "Destination", liq_responsable: "Responsable de la liquidation", liq_inspecteur: "Inspecteur", liq_bureau: "Bureau des douanes", liq_numero: "N° de liquidation", liq_date: "Date de liquidation", liq_montant: "Droits et taxes liquidés", gp_date_sortie: "Date de sortie", gp_heure_sortie: "Heure de sortie",
   gate_pass_numero: "N° gate pass", preuve_nom: "Preuve jointe",
   reglement_client: "Client", reglement_payeur: "Payé par", reglement_mode: "Mode de règlement", reglement_montant: "Montant reçu",
   reglement_date: "Date du règlement", reglement_reference: "Référence", reglement_banque: "Banque", reglement_echeance: "Échéance",
@@ -801,7 +823,7 @@ const StepInfoSection = ({
   const fields = config.fields ?? [];
   const [values, setValues] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
-    fields.forEach(f => { init[f.key] = (meta[f.key] as string) ?? ""; });
+    fields.forEach(f => { init[f.key] = (meta[f.key] as string) ?? f.defaut ?? ""; });
     return init;
   });
   const [dirty, setDirty] = useState(false);
@@ -832,6 +854,11 @@ const StepInfoSection = ({
             </Label>
             {f.type === "heure" ? (
               <ChoixHeure compact valeur={values[f.key] ?? ""} onChange={h => set(f.key, h)} libelle={f.label} />
+            ) : f.type === "select" ? (
+              <Select value={values[f.key] || undefined} onValueChange={v => set(f.key, v)}>
+                <SelectTrigger className="h-7 text-xs bg-card" aria-label={f.label}><SelectValue placeholder="Choisir…" /></SelectTrigger>
+                <SelectContent>{(f.options ?? []).map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}</SelectContent>
+              </Select>
             ) : f.type === "textarea" ? (
               <Textarea
                 value={values[f.key]}
@@ -1209,10 +1236,17 @@ const SousEtapeCard = ({
                   Votre étape
                 </span>
               )}
+              {config.responsableExterne && (
+                <span className="text-[10px] font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full flex items-center gap-1" title="Responsable externe">
+                  <Landmark className="w-2.5 h-2.5" />
+                  Responsable : {meta[config.responsableExterne.champ] || config.responsableExterne.defaut}
+                  {config.responsableExterne.detail && meta[config.responsableExterne.detail] ? ` (${meta[config.responsableExterne.detail]})` : ""}
+                </span>
+              )}
               {!isResponsable && data?.responsable && (
                 <span className="text-[10px] text-muted-foreground flex items-center gap-1">
                   <UserCheck className="w-2.5 h-2.5" />
-                  {data.responsable.nom}
+                  {config.responsableExterne ? `Suivi : ${data.responsable.nom}` : data.responsable.nom}
                 </span>
               )}
               {/* Compte à rebours en temps réel jusqu'à l'échéance (démarre dès que la tâche est reçue) */}

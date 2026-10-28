@@ -285,7 +285,7 @@ describe('Conteneurs, sous-étapes retirées et bon de compagnie sans montant', 
     assert.equal(r.body.tailleConteneur, '40\' HC')
     const t = (await api('delba', 'GET', `/api/dossiers/${r.body.id}/sous-etapes`)).body
     assert.ok(!t.some((x: any) => x.cle === 'regulation' || x.cle === 'validation_docs'))
-    assert.ok(!t.some((x: any) => x.etape === 'validation'), 'l\'étape Validation n\'a plus de tâche')
+    assert.deepEqual(t.filter((x: any) => x.etape === 'validation').map((x: any) => x.cle), ['liquidation'], 'Validation : liquidation par la douane')
 
     // Bon de la compagnie : numéro et date, aucun paiement créé
     await aSonTour(r.body.id, 'bon_compagnie', 'facturation_compagnie')
@@ -647,5 +647,28 @@ describe('Sauvegardes hebdomadaires', () => {
     expectStatus(await api(null, 'GET', '/api/sauvegardes/cron'), 401)
     const n = await api('delba', 'GET', '/api/notifications?limit=20')
     assert.ok(n.body.data.some((x: any) => x.titre === 'Sauvegarde manuelle effectuée'))
+  })
+})
+
+describe('Liquidation de la déclaration (douane)', () => {
+  it('sous-étape de la Validation : responsable la douane, montant liquidé repris sur le dossier', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CLIENT LIQ'), compagnie: 'MSC', conteneur: 'MSCU6060606', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })
+    const id = d.body.id
+    const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.find((x: any) => x.etape === 'validation' && x.cle === 'liquidation')
+    assert.ok(t, 'tâche de liquidation créée')
+    assert.equal(nom(t.responsableId), 'odette', 'suivie par la validation')
+    const sla = await api('delba', 'GET', '/api/parametres/sla-sous-etapes')
+    assert.equal(sla.body.find((x: any) => x.cle === 'validation.liquidation').heures, 72, '3 jours')
+    await aSonTour(id, 'validation', 'liquidation')
+    const r = await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/validation/liquidation`, {
+      statut: 'valide', metadata: { liq_responsable: 'Douane — Inspecteur vérificateur', liq_inspecteur: 'M. ESSOMBA', liq_numero: 'L-2026-0045', liq_montant: '1 840 000' },
+    })
+    expectStatus(r, 200)
+    const apres = await api('delba', 'GET', `/api/dossiers/${id}`)
+    assert.equal(Number(apres.body.montantTaxes), 1_840_000)
+    const audit = await api('delba', 'GET', `/api/dossiers/${id}/audit`)
+    assert.ok(JSON.stringify(audit.body).includes('inspecteur M. ESSOMBA'))
   })
 })
