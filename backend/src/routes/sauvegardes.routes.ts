@@ -2,14 +2,19 @@ import { timingSafeEqual } from 'crypto'
 import { FastifyInstance, FastifyPluginAsync, FastifyRequest } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../config/prisma'
+import { env } from '../config/env'
 import { authenticate } from '../middleware/authenticate'
-import { requireSupervisor } from '../middleware/authorize'
+import { requirePlateforme } from '../middleware/authorize'
 import { logActivity } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { envoyerContenu } from '../services/televersement'
 import { A_CONSERVER, creerSauvegarde } from '../services/sauvegarde'
 
-/** Appel du cron Vercel : jeton CRON_SECRET s'il est défini, sinon en-tête du planificateur Vercel. */
+/**
+ * Appel du cron Vercel : jeton CRON_SECRET (Vercel l'envoie en « Authorization: Bearer … »).
+ * En production, sans CRON_SECRET configuré, le cron est refusé : l'en-tête User-Agent se falsifie.
+ * Hors production uniquement, l'en-tête du planificateur Vercel est accepté.
+ */
 function appelCron(request: FastifyRequest) {
   const secret = process.env.CRON_SECRET
   const auth = request.headers.authorization ?? ''
@@ -17,12 +22,15 @@ function appelCron(request: FastifyRequest) {
     const a = Buffer.from(auth), b = Buffer.from(`Bearer ${secret}`)
     return a.length === b.length && timingSafeEqual(a, b)
   }
+  if (env.NODE_ENV === 'production') return false
   return String(request.headers['user-agent'] ?? '').startsWith('vercel-cron/')
 }
 
+// Les sauvegardes contiennent la base entière (toutes les organisations) : réservées à la plateforme
+
 const sauvegardesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  // GET /api/sauvegardes — historique (Direction)
-  fastify.get('/', { preHandler: [authenticate, requireSupervisor] }, async (_request, reply) => {
+  // GET /api/sauvegardes — historique (plateforme)
+  fastify.get('/', { preHandler: [authenticate, requirePlateforme] }, async (_request, reply) => {
     const liste = await prisma.sauvegarde.findMany({
       orderBy: { createdAt: 'desc' }, take: 30,
       select: { id: true, declencheur: true, statut: true, auteur: true, tailleOctets: true, lignes: true, message: true, dureeMs: true, createdAt: true },
@@ -32,18 +40,18 @@ const sauvegardesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   })
 
   // POST /api/sauvegardes — sauvegarde immédiate
-  fastify.post('/', { preHandler: [authenticate, requireSupervisor] }, async (request, reply) => {
+  fastify.post('/', { preHandler: [authenticate, requirePlateforme] }, async (request, reply) => {
     const s = await creerSauvegarde('manuelle', request.user.nom)
     await logActivity(request.user.id, 'SAUVEGARDE', 'sauvegarde', s.id, 'Sauvegarde manuelle de la base')
     return reply.code(201).send(s)
   })
 
   // GET /api/sauvegardes/:id/fichier — téléchargement (JSON compressé)
-  fastify.get('/:id/fichier', { preHandler: [authenticate, requireSupervisor] }, async (request, reply) => {
+  fastify.get('/:id/fichier', { preHandler: [authenticate, requirePlateforme] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const s = await prisma.sauvegarde.findUnique({ where: { id }, select: { contenu: true, createdAt: true } })
     if (!s?.contenu) throw new NotFoundError('Sauvegarde', id)
-    const nom = `sauvegarde-finitrans-${s.createdAt.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json.gz`
+    const nom = `sauvegarde-plateforme-${s.createdAt.toISOString().slice(0, 16).replace(/[:T]/g, '-')}.json.gz`
     return envoyerContenu(request, reply, s.contenu, { 'Content-Type': 'application/gzip', 'Content-Disposition': `attachment; filename="${nom}"` })
   })
 

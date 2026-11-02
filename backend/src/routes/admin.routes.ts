@@ -7,29 +7,14 @@ import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { subDays, startOfMonth } from 'date-fns'
 import { prisma } from '../config/prisma'
+import { ENTREPRISE_DEFAUT } from '../config/entreprise'
+import { organisationCourante, organisationDuContexte } from '../config/contexte'
+import { chargerOrganisation } from '../services/organisations'
 import { authenticate } from '../middleware/authenticate'
 import { requireModule } from '../middleware/authorize'
 import { logActivity } from '../utils/audit'
 
-export const ENTREPRISE_DEFAUT = {
-  raisonSociale: 'FINITRANS',
-  sigle: 'FINITRANS',
-  formeJuridique: 'SARL',
-  capital: 0,
-  rccm: '',
-  niu: '',
-  agrementCommissionnaire: '',
-  adresse: 'Douala, Cameroun',
-  telephone: '',
-  email: '',
-  siteWeb: '',
-  banquePrincipale: '',
-  rib: '',
-  devise: 'XAF',
-  tauxTVA: 19.25,
-  debutExercice: '01-01',
-  sites: ['Douala', 'Kribi'],
-}
+export { ENTREPRISE_DEFAUT }
 
 const entrepriseSchema = z.object({
   raisonSociale:           z.string().min(2).max(255),
@@ -51,9 +36,13 @@ const entrepriseSchema = z.object({
   sites:                   z.array(z.string()).optional(),
 })
 
+/** Fiche entreprise de l'organisation courante ; par défaut, son nom tel qu'enregistré à l'inscription. */
 export async function getEntreprise() {
-  const row = await prisma.parametre.findUnique({ where: { cle: 'entreprise' } })
-  return { ...ENTREPRISE_DEFAUT, ...((row?.valeur ?? {}) as Record<string, unknown>) }
+  const row = await prisma.parametre.findFirst({ where: { cle: 'entreprise' } })
+  const organisationId = organisationDuContexte()
+  const org = organisationId ? await chargerOrganisation(organisationId) : null
+  const defaut = { ...ENTREPRISE_DEFAUT, raisonSociale: org?.nom ?? '', sigle: org?.nom ?? '' }
+  return { ...defaut, ...((row?.valeur ?? {}) as Record<string, unknown>) }
 }
 
 const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
@@ -69,7 +58,7 @@ const adminRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const body = entrepriseSchema.parse(request.body)
     const valeur = { ...(await getEntreprise()), ...body }
     await prisma.parametre.upsert({
-      where:  { cle: 'entreprise' },
+      where:  { organisationId_cle: { organisationId: organisationCourante(), cle: 'entreprise' } },
       update: { valeur: valeur as Prisma.InputJsonValue, updatedBy: request.user.id },
       create: { cle: 'entreprise', valeur: valeur as Prisma.InputJsonValue, updatedBy: request.user.id, description: 'Fiche entreprise' },
     })

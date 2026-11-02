@@ -4,7 +4,7 @@
  */
 
 import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
+import { Prisma, PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 // Garde-fou : ce seed EFFACE toute la base. Interdit sur une base distante (prod Neon)
@@ -18,8 +18,23 @@ if (!/localhost|127\.0\.0\.1/.test(dbUrl) && process.env.ALLOW_DESTRUCTIVE_SEED 
 
 const prisma = new PrismaClient()
 
+/** Organisation de référence (FINITRANS), créée en tête du seed */
+let ORG = ''
+
 async function main() {
   console.log('🌱 Nettoyage de la base...')
+
+  // Organisation de référence : toutes les données de démo lui appartiennent
+  ORG = (await prisma.organisation.upsert({
+    where: { slug: 'finitrans' },
+    update: {},
+    create: { slug: 'finitrans', nom: 'FINITRANS' },
+  })).id
+  await prisma.abonnement.upsert({
+    where: { organisationId: ORG },
+    update: {},
+    create: { organisationId: ORG, plan: 'enterprise', statut: 'actif' },
+  })
 
   // Suppression dans l'ordre des dépendances FK
   await prisma.documentFavori.deleteMany()
@@ -615,15 +630,15 @@ async function main() {
   // ============================================================
 
   await Promise.all([
-    prisma.parametre.upsert({ where: { cle: 'nom_entreprise' }, update: { valeur: 'FINITRANS' }, create: { cle: 'nom_entreprise', valeur: 'FINITRANS', description: 'Nom de l\'entreprise' } }),
-    prisma.parametre.upsert({ where: { cle: 'devise' },         update: { valeur: 'FCFA' },      create: { cle: 'devise', valeur: 'FCFA', description: 'Devise utilisée' } }),
-    prisma.parametre.upsert({ where: { cle: 'sla_jours' },      update: { valeur: sla },         create: { cle: 'sla_jours', valeur: sla, description: 'SLA par étape (jours)' } }),
-    prisma.alerteConfig.upsert({ where: { type: 'retention_portuaire' }, update: {}, create: { type: 'retention_portuaire', label: 'Rétention portuaire',  seuil: 5,  unite: 'jours',  actif: true } }),
-    prisma.alerteConfig.upsert({ where: { type: 'delai_paiement'      }, update: {}, create: { type: 'delai_paiement',      label: 'Délai paiement DI',    seuil: 48, unite: 'heures', actif: true } }),
-    prisma.alerteConfig.upsert({ where: { type: 'blocage_douane'       }, update: {}, create: { type: 'blocage_douane',       label: 'Blocage douane',        seuil: 72, unite: 'heures', actif: true } }),
-    prisma.alerteConfig.upsert({ where: { type: 'document_manquant'   }, update: {}, create: { type: 'document_manquant',   label: 'Document manquant',     seuil: 24, unite: 'heures', actif: true } }),
-    prisma.alerteConfig.upsert({ where: { type: 'seuil_charges'       }, update: {}, create: { type: 'seuil_charges',       label: 'Seuil charges',         seuil: 85, unite: '%',      actif: true } }),
-    prisma.alerteConfig.upsert({ where: { type: 'seuil_di'            }, update: {}, create: { type: 'seuil_di',            label: 'Seuil solde DI',        seuil: 20, unite: '%',      actif: true } }),
+    prisma.parametre.upsert({ where: { organisationId_cle: { organisationId: ORG, cle: 'nom_entreprise' } }, update: { valeur: 'FINITRANS' }, create: { organisationId: ORG, cle: 'nom_entreprise', valeur: 'FINITRANS', description: 'Nom de l\'entreprise' } }),
+    prisma.parametre.upsert({ where: { organisationId_cle: { organisationId: ORG, cle: 'devise' } },         update: { valeur: 'FCFA' },      create: { organisationId: ORG, cle: 'devise', valeur: 'FCFA', description: 'Devise utilisée' } }),
+    prisma.parametre.upsert({ where: { organisationId_cle: { organisationId: ORG, cle: 'sla_jours' } },      update: { valeur: sla },         create: { organisationId: ORG, cle: 'sla_jours', valeur: sla, description: 'SLA par étape (jours)' } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'retention_portuaire' } }, update: {}, create: { organisationId: ORG, type: 'retention_portuaire', label: 'Rétention portuaire',  seuil: 5,  unite: 'jours',  actif: true } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'delai_paiement' } }, update: {}, create: { organisationId: ORG, type: 'delai_paiement',      label: 'Délai paiement DI',    seuil: 48, unite: 'heures', actif: true } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'blocage_douane' } }, update: {}, create: { organisationId: ORG, type: 'blocage_douane',       label: 'Blocage douane',        seuil: 72, unite: 'heures', actif: true } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'document_manquant' } }, update: {}, create: { organisationId: ORG, type: 'document_manquant',   label: 'Document manquant',     seuil: 24, unite: 'heures', actif: true } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'seuil_charges' } }, update: {}, create: { organisationId: ORG, type: 'seuil_charges',       label: 'Seuil charges',         seuil: 85, unite: '%',      actif: true } }),
+    prisma.alerteConfig.upsert({ where: { organisationId_type: { organisationId: ORG, type: 'seuil_di' } }, update: {}, create: { organisationId: ORG, type: 'seuil_di',            label: 'Seuil solde DI',        seuil: 20, unite: '%',      actif: true } }),
   ])
 
   console.log('')
@@ -649,6 +664,17 @@ async function main() {
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
 }
 
+/** Rattache à l'organisation de référence toutes les lignes créées sans organisation (données de démo). */
+async function rattacherOrganisation() {
+  const tables = Prisma.dmmf.datamodel.models
+    .filter(m => m.name !== 'Abonnement' && m.fields.some(c => c.name === 'organisationId'))
+    .map(m => m.dbName ?? m.name)
+  for (const table of tables) {
+    await prisma.$executeRawUnsafe(`UPDATE "${table}" SET organisation_id = $1::uuid WHERE organisation_id IS NULL`, ORG)
+  }
+}
+
 main()
+  .then(rattacherOrganisation)
   .catch(console.error)
   .finally(() => prisma.$disconnect())

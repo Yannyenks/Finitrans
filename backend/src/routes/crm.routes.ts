@@ -201,7 +201,7 @@ const crmRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   fastify.post('/clients', { preHandler }, async (request, reply) => {
     const body = clientSchema.parse(request.body)
     const cle = cleClient(body.nom)
-    const existant = await prisma.client.findUnique({ where: { cleNom: cle }, select: { id: true, nom: true } })
+    const existant = await prisma.client.findFirst({ where: { cleNom: cle }, select: { id: true, nom: true } })
     if (existant) return reply.code(409).send({ error: 'CLIENT_EXISTANT', message: `Ce client existe déjà : ${existant.nom}`, id: existant.id })
     const client = await prisma.client.create({ data: { ...body, cleNom: cle, createdById: request.user.id } })
     // Rattacher les dossiers existants portant ce nom

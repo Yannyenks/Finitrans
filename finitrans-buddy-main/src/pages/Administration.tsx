@@ -6,6 +6,7 @@ import {
   Pencil, Wallet, Plane, Activity, FileText,
 } from "lucide-react";
 import AppLayout from "@/components/AppLayout";
+import { useAuth } from "@/lib/permissions";
 import Sauvegardes from "@/components/Sauvegardes";
 import { DatabaseBackup } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -458,6 +459,7 @@ const Journal = () => {
 };
 
 const Administration = () => {
+  const plateformeAdmin = !!useAuth().user?.plateformeAdmin;
   const [params, setParams] = useSearchParams();
   const onglet = params.get("onglet") ?? "synthese";
   return (
@@ -470,7 +472,8 @@ const Administration = () => {
           <TabsTrigger value="attribution" className="gap-1.5"><Workflow className="w-3.5 h-3.5" /> Attribution des étapes</TabsTrigger>
           <TabsTrigger value="rh" className="gap-1.5"><Users className="w-3.5 h-3.5" /> Ressources humaines</TabsTrigger>
           <TabsTrigger value="journal" className="gap-1.5"><History className="w-3.5 h-3.5" /> Journal d'activité</TabsTrigger>
-          <TabsTrigger value="sauvegardes" className="gap-1.5"><DatabaseBackup className="w-3.5 h-3.5" /> Sauvegardes</TabsTrigger>
+          {/* Sauvegardes de la base entière (toutes les entreprises) : réservées à la plateforme */}
+          {plateformeAdmin && <TabsTrigger value="sauvegardes" className="gap-1.5"><DatabaseBackup className="w-3.5 h-3.5" /> Sauvegardes</TabsTrigger>}
         </TabsList>
         <TabsContent value="synthese"><Synthese /></TabsContent>
         <TabsContent value="entreprise"><Entreprise /></TabsContent>
@@ -478,7 +481,7 @@ const Administration = () => {
         <TabsContent value="attribution"><Attribution /></TabsContent>
         <TabsContent value="rh"><RH /></TabsContent>
         <TabsContent value="journal"><Journal /></TabsContent>
-        <TabsContent value="sauvegardes"><Sauvegardes /></TabsContent>
+        {plateformeAdmin && <TabsContent value="sauvegardes"><Sauvegardes /></TabsContent>}
       </Tabs>
     </AppLayout>
   );

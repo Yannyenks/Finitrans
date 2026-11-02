@@ -20,7 +20,7 @@ const facturationRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
     return reply.send(p)
   })
 
-  // GET /api/facturation/factures/:id/pdf?telecharger=1 — facture aux couleurs FINITRANS
+  // GET /api/facturation/factures/:id/pdf?telecharger=1 — facture à l'identité de l'organisation
   fastify.get('/factures/:id/pdf', { preHandler }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const { telecharger } = z.object({ telecharger: z.enum(['0', '1']).optional() }).parse(request.query)

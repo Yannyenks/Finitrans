@@ -4,6 +4,7 @@
  */
 import { z } from 'zod'
 import { prisma } from '../config/prisma'
+import { cacheParOrganisation } from '../utils/cacheOrganisation'
 
 export interface Compagnie { code: string; nom: string; actif: boolean }
 
@@ -23,18 +24,17 @@ export function codeCompagnie(nom: string): string {
 /** Valeur de compagnie acceptée par l'API (le contrôle d'existence se fait avec `compagnieConnue`). */
 export const zCompagnie = z.string().trim().min(2).max(80).transform(v => codeCompagnie(v) || v)
 
-let cache: { at: number; liste: Compagnie[] } | null = null
+const cache = cacheParOrganisation<Compagnie[]>(30_000)
 
 export async function loadCompagnies(): Promise<Compagnie[]> {
-  if (cache && Date.now() - cache.at < 30_000) return cache.liste
-  const row = await prisma.parametre.findUnique({ where: { cle: 'compagnies' } })
-  const enregistrees = Array.isArray(row?.valeur) ? (row!.valeur as unknown as Compagnie[]) : null
-  const liste = enregistrees?.length ? enregistrees : COMPAGNIES_DEFAUT
-  cache = { at: Date.now(), liste }
-  return liste
+  return cache.obtenir(async () => {
+    const row = await prisma.parametre.findFirst({ where: { cle: 'compagnies' } })
+    const enregistrees = Array.isArray(row?.valeur) ? (row!.valeur as unknown as Compagnie[]) : null
+    return enregistrees?.length ? enregistrees : COMPAGNIES_DEFAUT
+  })
 }
 
-export function invalidateCompagniesCache() { cache = null }
+export function invalidateCompagniesCache() { cache.invalider() }
 
 export async function compagnieConnue(code: string, actifSeulement = true): Promise<boolean> {
   return (await loadCompagnies()).some(c => c.code === code && (!actifSeulement || c.actif))

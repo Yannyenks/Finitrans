@@ -10,6 +10,8 @@ datasource db {
 
 model User {
   id                       String                    @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId           String?                   @map("organisation_id") @db.Uuid
   email                    String                    @unique @db.VarChar(255)
   passwordHash             String                    @map("password_hash") @db.VarChar(255)
   nom                      String                    @db.VarChar(255)
@@ -66,175 +68,215 @@ model User {
   affectationsRecues       AffectationEtape[]        @relation("AffectationResponsable")
   affectationsDonnees      AffectationEtape[]        @relation("AffectationAuteur")
 
+  @@index([organisationId])
   @@map("users")
 }
 
+/// Entreprise cliente du SaaS : toute donnée métier appartient à une seule organisation.
+/// `slug` sert d'identifiant lisible (ex. « finitrans »), jamais de frontière de sécurité à lui seul.
+model Organisation {
+  id         String      @id @default(uuid()) @db.Uuid
+  slug       String      @unique @db.VarChar(60)
+  nom        String      @db.VarChar(255)
+  actif      Boolean     @default(true)
+  createdAt  DateTime    @default(now()) @map("created_at")
+  /// Pays principal (ISO 3166-1 alpha-2), devise et fuseau par défaut de l'organisation
+  pays       String      @default("CM") @db.VarChar(2)
+  devise     String      @default("XAF") @db.VarChar(3)
+  fuseau     String      @default("Africa/Douala") @db.VarChar(64)
+  langue     String      @default("fr") @db.VarChar(5)
+  abonnement Abonnement?
+
+  @@map("organisations")
+}
+
 model Dossier {
-  id                 String                  @id @default(uuid()) @db.Uuid
-  numero             String                  @unique @db.VarChar(50)
-  client             String                  @db.VarChar(255)
+  id                   String                  @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId       String?                 @map("organisation_id") @db.Uuid
+  numero               String                  @db.VarChar(50)
+  client               String                  @db.VarChar(255)
   /// Fiche client du CRM (rattachée automatiquement par le nom)
-  clientId           String?                 @map("client_id") @db.Uuid
-  clientCrm          Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  reglementsClient   ReglementClient[]
-  compagnie          String @db.VarChar(80)
-  conteneur          String                  @db.VarChar(1000)
+  clientId             String?                 @map("client_id") @db.Uuid
+  clientCrm            Client?                 @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  reglementsClient     ReglementClient[]
+  compagnie            String                  @db.VarChar(80)
+  conteneur            String                  @db.VarChar(1000)
   /// Nombre de conteneurs du dossier et résumé des tailles (ex. « 2 × 40' HC · 1 × 20' Dry »)
-  nombreConteneurs   Int                     @default(1) @map("nombre_conteneurs")
-  tailleConteneur    String?                 @map("taille_conteneur") @db.VarChar(255)
+  nombreConteneurs     Int                     @default(1) @map("nombre_conteneurs")
+  tailleConteneur      String?                 @map("taille_conteneur") @db.VarChar(255)
   /// Détail des conteneurs : [{ numero, taille }] — chaque conteneur a sa propre taille
-  conteneurs         Json?
+  conteneurs           Json?
   /// Étape en cours démarrée (bouton « Démarrer ») ; false = en attente de démarrage
-  etapeDemarree        Boolean               @default(true) @map("etape_demarree")
+  etapeDemarree        Boolean                 @default(true) @map("etape_demarree")
   /// Depuis quand l'étape en cours attend son démarrage
-  etapeEnAttenteDepuis DateTime?             @map("etape_en_attente_depuis")
+  etapeEnAttenteDepuis DateTime?               @map("etape_en_attente_depuis")
   imprevus             Imprevu[]
   /// Dossier finalisé : facturation client terminée, dossier clos
-  finaliseLe         DateTime?               @map("finalise_le")
+  finaliseLe           DateTime?               @map("finalise_le")
   /// Lien de suivi partagé avec le client (jeton secret ; null = pas de lien actif)
-  suiviToken         String?                 @unique @map("suivi_token") @db.VarChar(64)
-  actualitesClient   ActualiteClient[]
-  marchandise        String
-  site               Site
-  status             DossierStatus           @default(reception)
-  responsableId      String                  @map("responsable_id") @db.Uuid
-  dateCreation       DateTime                @default(now()) @map("date_creation")
-  dateArrivee        DateTime                @map("date_arrivee")
-  montantTaxes       Decimal?                @map("montant_taxes") @db.Decimal(15, 2)
-  montantHonoraires  Decimal?                @map("montant_honoraires") @db.Decimal(15, 2)
-  montantRedevances  Decimal?                @map("montant_redevances") @db.Decimal(15, 2)
-  dateLimiteSortie   DateTime?               @map("date_limite_sortie")
-  priorite           Priorite                @default(moyenne)
-  numeroDI           String?                 @map("numero_di") @db.VarChar(50)
-  montantDI          Decimal?                @map("montant_di") @db.Decimal(15, 2)
-  fournisseur        String?                 @db.VarChar(255)
-  numeroBL           String?                 @map("numero_bl") @db.VarChar(100)
-  numDeclaration     String?                 @map("num_declaration") @db.VarChar(50)
-  regimeDouanier     String?                 @map("regime_douanier") @db.VarChar(10)
-  prSaisie           Boolean                 @default(false) @map("pr_saisie")
-  notes              String?
-  updatedAt          DateTime                @updatedAt @map("updated_at")
-  diId               String?                 @map("di_id") @db.Uuid
-  alertes            Alerte[]
-  auditEntries       AuditEntry[]
-  bonsKribi          BonKribi[]
-  bonsLivraison      BonLivraison[]
-  commentaires       Commentaire[]
-  conversations      Conversation[]
-  detentions         Detention[]
-  documents          Document[]
-  timings            DossierTiming[]
-  di                 DeclarationImportation? @relation("DossierDI", fields: [diId], references: [id])
-  responsable        User                    @relation("ResponsableDossier", fields: [responsableId], references: [id])
-  etatsCodeage       EtatCodage[]
-  factures           Facture[]
-  gatePasses         GatePass[]
-  interchanges       Interchange[]
-  mouvementsDI       MouvementDI[]           @relation("MouvementDIDossier")
-  notifications      Notification[]
-  paiementsCompagnie PaiementCompagnie[]
-  paiementsDouane    PaiementDouane[]
-  soumissionsSGS     SoumissionSGS[]
-  vehicules          Vehicule[]
-  virements          Virement[]
-  sousEtapes         SousEtapeDossier[]
-  ecritures          EcritureComptable[]
-  transports         Transport[]
-  affectations       AffectationEtape[]
+  suiviToken           String?                 @unique @map("suivi_token") @db.VarChar(64)
+  actualitesClient     ActualiteClient[]
+  marchandise          String
+  site                 Site
+  status               DossierStatus           @default(reception)
+  responsableId        String                  @map("responsable_id") @db.Uuid
+  dateCreation         DateTime                @default(now()) @map("date_creation")
+  dateArrivee          DateTime                @map("date_arrivee")
+  montantTaxes         Decimal?                @map("montant_taxes") @db.Decimal(15, 2)
+  montantHonoraires    Decimal?                @map("montant_honoraires") @db.Decimal(15, 2)
+  montantRedevances    Decimal?                @map("montant_redevances") @db.Decimal(15, 2)
+  dateLimiteSortie     DateTime?               @map("date_limite_sortie")
+  priorite             Priorite                @default(moyenne)
+  numeroDI             String?                 @map("numero_di") @db.VarChar(50)
+  montantDI            Decimal?                @map("montant_di") @db.Decimal(15, 2)
+  fournisseur          String?                 @db.VarChar(255)
+  numeroBL             String?                 @map("numero_bl") @db.VarChar(100)
+  numDeclaration       String?                 @map("num_declaration") @db.VarChar(50)
+  regimeDouanier       String?                 @map("regime_douanier") @db.VarChar(10)
+  prSaisie             Boolean                 @default(false) @map("pr_saisie")
+  notes                String?
+  updatedAt            DateTime                @updatedAt @map("updated_at")
+  diId                 String?                 @map("di_id") @db.Uuid
+  alertes              Alerte[]
+  auditEntries         AuditEntry[]
+  bonsKribi            BonKribi[]
+  bonsLivraison        BonLivraison[]
+  commentaires         Commentaire[]
+  conversations        Conversation[]
+  detentions           Detention[]
+  documents            Document[]
+  timings              DossierTiming[]
+  di                   DeclarationImportation? @relation("DossierDI", fields: [diId], references: [id])
+  responsable          User                    @relation("ResponsableDossier", fields: [responsableId], references: [id])
+  etatsCodeage         EtatCodage[]
+  factures             Facture[]
+  gatePasses           GatePass[]
+  interchanges         Interchange[]
+  mouvementsDI         MouvementDI[]           @relation("MouvementDIDossier")
+  notifications        Notification[]
+  paiementsCompagnie   PaiementCompagnie[]
+  paiementsDouane      PaiementDouane[]
+  soumissionsSGS       SoumissionSGS[]
+  vehicules            Vehicule[]
+  virements            Virement[]
+  sousEtapes           SousEtapeDossier[]
+  ecritures            EcritureComptable[]
+  transports           Transport[]
+  affectations         AffectationEtape[]
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("dossiers")
 }
 
 model Document {
-  id           String           @id @default(uuid()) @db.Uuid
+  id             String           @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?          @map("organisation_id") @db.Uuid
   /// Facultatif : les documents de l'entreprise (contrats, procédures, modèles…) ne sont liés à aucun dossier
-  dossierId    String?          @map("dossier_id") @db.Uuid
-  nom          String           @db.VarChar(255)
-  type         String           @db.VarChar(100)
-  taille       String           @db.VarChar(50)
-  tailleOctets Int?             @map("taille_octets")
-  url          String           @db.VarChar(500)
-  contenu      Bytes?
-  hashContenu  String?          @map("hash_contenu") @db.VarChar(64)
-  uploadePar   String           @map("uploade_par") @db.Uuid
-  etape        DossierStatus?
+  dossierId      String?          @map("dossier_id") @db.Uuid
+  nom            String           @db.VarChar(255)
+  type           String           @db.VarChar(100)
+  taille         String           @db.VarChar(50)
+  tailleOctets   Int?             @map("taille_octets")
+  url            String           @db.VarChar(500)
+  contenu        Bytes?
+  hashContenu    String?          @map("hash_contenu") @db.VarChar(64)
+  uploadePar     String           @map("uploade_par") @db.Uuid
+  etape          DossierStatus?
   /// preuve | compte_rendu | contrat | procedure | modele | rh | juridique | administratif | finance | autre
-  categorie    String           @default("preuve") @db.VarChar(30)
-  description  String?
-  tags         String[]         @default([])
+  categorie      String           @default("preuve") @db.VarChar(30)
+  description    String?
+  tags           String[]         @default([])
   /// Réservé à la Direction, au service administratif et à l'auteur
-  confidentiel Boolean          @default(false)
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @default(now()) @updatedAt @map("updated_at")
-  dossier      Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  uploader     User             @relation(fields: [uploadePar], references: [id])
-  favoris      DocumentFavori[]
+  confidentiel   Boolean          @default(false)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at")
+  dossier        Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  uploader       User             @relation(fields: [uploadePar], references: [id])
+  favoris        DocumentFavori[]
 
   @@index([categorie])
   @@index([dossierId])
+  @@index([organisationId])
   @@map("documents")
 }
 
 model DocumentFavori {
-  userId     String   @map("user_id") @db.Uuid
-  documentId String   @map("document_id") @db.Uuid
-  createdAt  DateTime @default(now()) @map("created_at")
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId         String   @map("user_id") @db.Uuid
+  documentId     String   @map("document_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at")
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document       Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
 
   @@id([userId, documentId])
+  @@index([organisationId])
   @@map("documents_favoris")
 }
 
 /// Responsable désigné à l'avance pour une étape du parcours d'un dossier
 model AffectationEtape {
-  id            String        @id @default(uuid()) @db.Uuid
-  dossierId     String        @map("dossier_id") @db.Uuid
-  etape         DossierStatus
-  responsableId String        @map("responsable_id") @db.Uuid
-  assigneParId  String        @map("assigne_par_id") @db.Uuid
-  note          String?
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
-  dossier       Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable   User          @relation("AffectationResponsable", fields: [responsableId], references: [id])
-  assignePar    User          @relation("AffectationAuteur", fields: [assigneParId], references: [id])
+  id             String        @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?       @map("organisation_id") @db.Uuid
+  dossierId      String        @map("dossier_id") @db.Uuid
+  etape          DossierStatus
+  responsableId  String        @map("responsable_id") @db.Uuid
+  assigneParId   String        @map("assigne_par_id") @db.Uuid
+  note           String?
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+  dossier        Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable    User          @relation("AffectationResponsable", fields: [responsableId], references: [id])
+  assignePar     User          @relation("AffectationAuteur", fields: [assigneParId], references: [id])
 
   @@unique([dossierId, etape])
+  @@index([organisationId])
   @@map("affectations_etapes")
 }
 
 model Commentaire {
-  id        String   @id @default(uuid()) @db.Uuid
-  dossierId String   @map("dossier_id") @db.Uuid
-  auteurId  String   @map("auteur_id") @db.Uuid
-  message   String
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-  auteur    User     @relation(fields: [auteurId], references: [id])
-  dossier   Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  dossierId      String   @map("dossier_id") @db.Uuid
+  auteurId       String   @map("auteur_id") @db.Uuid
+  message        String
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  auteur         User     @relation(fields: [auteurId], references: [id])
+  dossier        Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("commentaires")
 }
 
 model AuditEntry {
-  id        String   @id @default(uuid()) @db.Uuid
-  dossierId String   @map("dossier_id") @db.Uuid
-  auteurId  String   @map("auteur_id") @db.Uuid
-  action    String   @db.VarChar(255)
-  details   String?
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  auteur    User     @relation(fields: [auteurId], references: [id])
-  dossier   Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  dossierId      String   @map("dossier_id") @db.Uuid
+  auteurId       String   @map("auteur_id") @db.Uuid
+  action         String   @db.VarChar(255)
+  details        String?
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  auteur         User     @relation(fields: [auteurId], references: [id])
+  dossier        Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("audit_entries")
 }
 
 model Facture {
   id             String        @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?       @map("organisation_id") @db.Uuid
   dossierId      String        @map("dossier_id") @db.Uuid
-  numero         String        @unique @db.VarChar(50)
+  numero         String        @db.VarChar(50)
   type           StatutFacture @default(proforma)
   montant        Decimal       @db.Decimal(15, 2)
   compagnie      String        @db.VarChar(255)
@@ -250,43 +292,53 @@ model Facture {
   updatedAt      DateTime      @updatedAt @map("updated_at")
   dossier        Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("factures")
 }
 
 model Virement {
-  id           String         @id @default(uuid()) @db.Uuid
-  dossierId    String?        @map("dossier_id") @db.Uuid
-  motif        String?
-  type         String?        @db.VarChar(50)
-  montant      Decimal        @db.Decimal(15, 2)
-  source       String         @db.VarChar(255)
-  destination  String         @db.VarChar(255)
-  dateVirement DateTime       @map("date_virement")
-  reference    String         @unique @db.VarChar(100)
-  effectuePar  String         @map("effectue_par") @db.Uuid
-  statut       StatutVirement @default(en_attente)
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
-  dossier      Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable  User           @relation(fields: [effectuePar], references: [id])
+  id             String         @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?        @map("organisation_id") @db.Uuid
+  dossierId      String?        @map("dossier_id") @db.Uuid
+  motif          String?
+  type           String?        @db.VarChar(50)
+  montant        Decimal        @db.Decimal(15, 2)
+  source         String         @db.VarChar(255)
+  destination    String         @db.VarChar(255)
+  dateVirement   DateTime       @map("date_virement")
+  reference      String         @db.VarChar(100)
+  effectuePar    String         @map("effectue_par") @db.Uuid
+  statut         StatutVirement @default(en_attente)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  dossier        Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable    User           @relation(fields: [effectuePar], references: [id])
 
+  @@unique([organisationId, reference])
+  @@index([organisationId])
   @@map("virements")
 }
 
 model BonLivraison {
-  id           String       @id @default(uuid()) @db.Uuid
-  dossierId    String       @map("dossier_id") @db.Uuid
-  numero       String       @unique @db.VarChar(50)
-  description  String
-  montant      Decimal      @db.Decimal(15, 2)
-  dateEmission DateTime     @map("date_emission")
-  effectuePar  String       @map("effectue_par") @db.Uuid
-  statut       StatutBonLiv @default(en_attente)
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  dossier      Dossier      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable  User         @relation(fields: [effectuePar], references: [id])
+  id             String       @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?      @map("organisation_id") @db.Uuid
+  dossierId      String       @map("dossier_id") @db.Uuid
+  numero         String       @db.VarChar(50)
+  description    String
+  montant        Decimal      @db.Decimal(15, 2)
+  dateEmission   DateTime     @map("date_emission")
+  effectuePar    String       @map("effectue_par") @db.Uuid
+  statut         StatutBonLiv @default(en_attente)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  dossier        Dossier      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable    User         @relation(fields: [effectuePar], references: [id])
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("bons_livraison")
 }
 
@@ -309,58 +361,70 @@ model Sauvegarde {
 
 /// Imprévu ou démarrage inhabituel d'une étape (motif, commentaire) — communiqué au client si souhaité
 model Imprevu {
-  id            String   @id @default(uuid()) @db.Uuid
-  dossierId     String   @map("dossier_id") @db.Uuid
-  etape         String   @db.VarChar(50)
-  motif         String   @db.VarChar(40)
-  commentaire   String?
-  informeClient Boolean  @default(true) @map("informe_client")
-  auteurNom     String   @map("auteur_nom") @db.VarChar(255)
-  createdAt     DateTime @default(now()) @map("created_at")
-  dossier       Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  dossierId      String   @map("dossier_id") @db.Uuid
+  etape          String   @db.VarChar(50)
+  motif          String   @db.VarChar(40)
+  commentaire    String?
+  informeClient  Boolean  @default(true) @map("informe_client")
+  auteurNom      String   @map("auteur_nom") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at")
+  dossier        Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
   @@index([dossierId, createdAt])
+  @@index([organisationId])
   @@map("imprevus")
 }
 
 /// Actualité publiée pour le client sur sa page de suivi (message + illustration)
 model ActualiteClient {
-  id           String   @id @default(uuid()) @db.Uuid
-  dossierId    String   @map("dossier_id") @db.Uuid
-  message      String
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  dossierId      String   @map("dossier_id") @db.Uuid
+  message        String
   /// Illustration : navire, douane, document, paiement, camion, port, valide, info…
-  illustration String   @default("info") @db.VarChar(30)
-  auteurNom    String   @map("auteur_nom") @db.VarChar(255)
-  createdAt    DateTime @default(now()) @map("created_at")
-  dossier      Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  illustration   String   @default("info") @db.VarChar(30)
+  auteurNom      String   @map("auteur_nom") @db.VarChar(255)
+  createdAt      DateTime @default(now()) @map("created_at")
+  dossier        Dossier  @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
   @@index([dossierId, createdAt])
+  @@index([organisationId])
   @@map("actualites_client")
 }
 
 model GatePass {
-  id           String         @id @default(uuid()) @db.Uuid
-  dossierId    String         @map("dossier_id") @db.Uuid
-  numero       String         @unique @db.VarChar(50)
-  conteneur    String         @db.VarChar(100)
-  chauffeur    String         @db.VarChar(255)
-  telephone    String         @db.VarChar(50)
-  destination  String         @db.VarChar(255)
-  dateEmission DateTime       @map("date_emission")
+  id             String         @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?        @map("organisation_id") @db.Uuid
+  dossierId      String         @map("dossier_id") @db.Uuid
+  numero         String         @db.VarChar(50)
+  conteneur      String         @db.VarChar(100)
+  chauffeur      String         @db.VarChar(255)
+  telephone      String         @db.VarChar(50)
+  destination    String         @db.VarChar(255)
+  dateEmission   DateTime       @map("date_emission")
   /// Date et heure de sortie du véhicule (saisies sur le gate pass)
-  dateSortie   DateTime?      @map("date_sortie")
-  emetteurId   String         @map("emetteur_id") @db.Uuid
-  statut       StatutGatePass @default(emis)
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
-  dossier      Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  emetteur     User           @relation("EmetteurGatePass", fields: [emetteurId], references: [id])
+  dateSortie     DateTime?      @map("date_sortie")
+  emetteurId     String         @map("emetteur_id") @db.Uuid
+  statut         StatutGatePass @default(emis)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  dossier        Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  emetteur       User           @relation("EmetteurGatePass", fields: [emetteurId], references: [id])
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("gate_passes")
 }
 
 model DossierTiming {
   id               String        @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId   String?       @map("organisation_id") @db.Uuid
   dossierId        String        @map("dossier_id") @db.Uuid
   etape            DossierStatus
   dateDebut        DateTime      @default(now()) @map("date_debut")
@@ -371,39 +435,49 @@ model DossierTiming {
   dossier          Dossier       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   responsable      User?         @relation("TimingResponsable", fields: [responsableId], references: [id])
 
+  @@index([organisationId])
   @@map("dossier_timings")
 }
 
 model Alerte {
-  id        String         @id @default(uuid()) @db.Uuid
-  type      TypeAlerte
-  message   String
-  dossierId String?        @map("dossier_id") @db.Uuid
-  severity  SeveriteAlerte @default(warning)
-  lu        Boolean        @default(false)
-  luPar     String?        @map("lu_par") @db.Uuid
-  luAt      DateTime?      @map("lu_at")
-  createdAt DateTime       @default(now()) @map("created_at")
-  dossier   Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  reader    User?          @relation("AlerteLuePar", fields: [luPar], references: [id])
+  id             String         @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?        @map("organisation_id") @db.Uuid
+  type           TypeAlerte
+  message        String
+  dossierId      String?        @map("dossier_id") @db.Uuid
+  severity       SeveriteAlerte @default(warning)
+  lu             Boolean        @default(false)
+  luPar          String?        @map("lu_par") @db.Uuid
+  luAt           DateTime?      @map("lu_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  dossier        Dossier?       @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  reader         User?          @relation("AlerteLuePar", fields: [luPar], references: [id])
 
+  @@index([organisationId])
   @@map("alertes")
 }
 
 model AlerteConfig {
-  id        String   @id @default(uuid()) @db.Uuid
-  type      String   @unique @db.VarChar(100)
-  label     String   @db.VarChar(255)
-  seuil     Int
-  unite     String   @db.VarChar(50)
-  actif     Boolean  @default(true)
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  type           String   @db.VarChar(100)
+  label          String   @db.VarChar(255)
+  seuil          Int
+  unite          String   @db.VarChar(50)
+  actif          Boolean  @default(true)
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
+  @@unique([organisationId, type])
+  @@index([organisationId])
   @@map("alerte_configs")
 }
 
 model Conversation {
   id             String                    @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?                   @map("organisation_id") @db.Uuid
   titre          String                    @db.VarChar(255)
   dossierId      String?                   @map("dossier_id") @db.Uuid
   type           TypeConversation          @default(general)
@@ -416,6 +490,7 @@ model Conversation {
   dossier        Dossier?                  @relation(fields: [dossierId], references: [id])
   messages       Message[]
 
+  @@index([organisationId])
   @@map("conversations")
 }
 
@@ -425,13 +500,18 @@ model ConversationParticipant {
   joinedAt       DateTime     @default(now()) @map("joined_at")
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?      @map("organisation_id") @db.Uuid
 
   @@id([conversationId, userId])
+  @@index([organisationId])
   @@map("conversation_participants")
 }
 
 model Message {
   id             String       @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?      @map("organisation_id") @db.Uuid
   conversationId String       @map("conversation_id") @db.Uuid
   auteurId       String       @map("auteur_id") @db.Uuid
   contenu        String
@@ -442,55 +522,68 @@ model Message {
   auteur         User         @relation(fields: [auteurId], references: [id])
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("messages")
 }
 
 model BonKribi {
-  id            String         @id @default(uuid()) @db.Uuid
-  dossierId     String         @map("dossier_id") @db.Uuid
-  type          TypeBonKribi
-  numero        String         @unique @db.VarChar(50)
-  description   String
-  montant       Decimal?       @db.Decimal(15, 2)
-  dateEmission  DateTime       @default(now()) @map("date_emission")
-  responsableId String         @map("responsable_id") @db.Uuid
-  statut        StatutBonKribi @default(emis)
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
-  dossier       Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable   User           @relation(fields: [responsableId], references: [id])
+  id             String         @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?        @map("organisation_id") @db.Uuid
+  dossierId      String         @map("dossier_id") @db.Uuid
+  type           TypeBonKribi
+  numero         String         @db.VarChar(50)
+  description    String
+  montant        Decimal?       @db.Decimal(15, 2)
+  dateEmission   DateTime       @default(now()) @map("date_emission")
+  responsableId  String         @map("responsable_id") @db.Uuid
+  statut         StatutBonKribi @default(emis)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  dossier        Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable    User           @relation(fields: [responsableId], references: [id])
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("bons_kribi")
 }
 
 model PaiementDouane {
-  id           String             @id @default(uuid()) @db.Uuid
-  dossierId    String             @map("dossier_id") @db.Uuid
-  type         TypePaiementDouane
-  montant      Decimal            @db.Decimal(15, 2)
-  datePaiement DateTime           @map("date_paiement")
-  statut       StatutPaiement     @default(en_attente)
-  reference    String             @unique @db.VarChar(100)
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
-  dossier      Dossier            @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  id             String             @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?            @map("organisation_id") @db.Uuid
+  dossierId      String             @map("dossier_id") @db.Uuid
+  type           TypePaiementDouane
+  montant        Decimal            @db.Decimal(15, 2)
+  datePaiement   DateTime           @map("date_paiement")
+  statut         StatutPaiement     @default(en_attente)
+  reference      String             @db.VarChar(100)
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  dossier        Dossier            @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@unique([organisationId, reference])
+  @@index([organisationId])
   @@map("paiements_douane")
 }
 
 model PaiementCompagnie {
-  id           String                @id @default(uuid()) @db.Uuid
-  dossierId    String                @map("dossier_id") @db.Uuid
-  compagnie    String @db.VarChar(80)
-  type         TypePaiementCompagnie
-  montant      Decimal               @db.Decimal(15, 2)
-  datePaiement DateTime              @map("date_paiement")
-  statut       StatutPaiement        @default(en_attente)
-  reference    String                @unique @db.VarChar(100)
-  createdAt    DateTime              @default(now()) @map("created_at")
-  updatedAt    DateTime              @updatedAt @map("updated_at")
-  dossier      Dossier               @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  id             String                @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?               @map("organisation_id") @db.Uuid
+  dossierId      String                @map("dossier_id") @db.Uuid
+  compagnie      String                @db.VarChar(80)
+  type           TypePaiementCompagnie
+  montant        Decimal               @db.Decimal(15, 2)
+  datePaiement   DateTime              @map("date_paiement")
+  statut         StatutPaiement        @default(en_attente)
+  reference      String                @db.VarChar(100)
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+  dossier        Dossier               @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@unique([organisationId, reference])
+  @@index([organisationId])
   @@map("paiements_compagnie")
 }
 
@@ -507,20 +600,26 @@ model RefreshToken {
 }
 
 model Parametre {
-  id          String   @id @default(uuid()) @db.Uuid
-  cle         String   @unique @db.VarChar(100)
-  valeur      Json
-  description String?
-  updatedBy   String?  @map("updated_by") @db.Uuid
-  updatedAt   DateTime @updatedAt @map("updated_at")
-  editor      User?    @relation(fields: [updatedBy], references: [id])
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  cle            String   @db.VarChar(100)
+  valeur         Json
+  description    String?
+  updatedBy      String?  @map("updated_by") @db.Uuid
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  editor         User?    @relation(fields: [updatedBy], references: [id])
 
+  @@unique([organisationId, cle])
+  @@index([organisationId])
   @@map("parametres")
 }
 
 model DeclarationImportation {
   id             String        @id @default(uuid()) @db.Uuid
-  numero         String        @unique @db.VarChar(50)
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?       @map("organisation_id") @db.Uuid
+  numero         String        @db.VarChar(50)
   client         String        @db.VarChar(255)
   montant        Decimal       @db.Decimal(15, 2)
   soldeActuel    Decimal       @default(0) @map("solde_actuel") @db.Decimal(15, 2)
@@ -532,7 +631,7 @@ model DeclarationImportation {
   notes          String?
   createdAt      DateTime      @default(now()) @map("created_at")
   updatedAt      DateTime      @updatedAt @map("updated_at")
-  compagnie      String? @db.VarChar(80)
+  compagnie      String?       @db.VarChar(80)
   seuilAlerte1   Int           @default(20) @map("seuil_alerte_1")
   seuilAlerte2   Int           @default(10) @map("seuil_alerte_2")
   gestionnaire   User          @relation("GestionnaireDI", fields: [gestionnaireId], references: [id])
@@ -540,11 +639,15 @@ model DeclarationImportation {
   mouvements     MouvementDI[]
   documents      DIDocument[]
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("declarations_importation")
 }
 
 model MouvementDI {
   id               String                 @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId   String?                @map("organisation_id") @db.Uuid
   diId             String                 @map("di_id") @db.Uuid
   dossierId        String?                @map("dossier_id") @db.Uuid
   type             TypeMouvementDI
@@ -558,14 +661,17 @@ model MouvementDI {
   di               DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
   dossier          Dossier?               @relation("MouvementDIDossier", fields: [dossierId], references: [id])
 
+  @@index([organisationId])
   @@map("mouvements_di")
 }
 
 model Detention {
   id              String          @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId  String?         @map("organisation_id") @db.Uuid
   dossierId       String          @map("dossier_id") @db.Uuid
   conteneur       String          @db.VarChar(100)
-  compagnie       String @db.VarChar(80)
+  compagnie       String          @db.VarChar(80)
   dateDebut       DateTime        @map("date_debut")
   dateFin         DateTime?       @map("date_fin")
   joursDetention  Int             @default(0) @map("jours_detention")
@@ -577,11 +683,14 @@ model Detention {
   updatedAt       DateTime        @updatedAt @map("updated_at")
   dossier         Dossier         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("detentions")
 }
 
 model EtatCodage {
   id                    String           @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId        String?          @map("organisation_id") @db.Uuid
   dossierId             String           @map("dossier_id") @db.Uuid
   codeDouanier          String           @map("code_douanier") @db.VarChar(20)
   designation           String
@@ -602,11 +711,14 @@ model EtatCodage {
   soumisPar             User?            @relation("EtatCodageSoumis", fields: [soumisParId], references: [id])
   validePar             User?            @relation("EtatCodageValide", fields: [valideParId], references: [id])
 
+  @@index([organisationId])
   @@map("etats_codage")
 }
 
 model Vehicule {
   id              String         @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId  String?        @map("organisation_id") @db.Uuid
   dossierId       String         @map("dossier_id") @db.Uuid
   marque          String         @db.VarChar(100)
   modele          String         @db.VarChar(100)
@@ -624,49 +736,58 @@ model Vehicule {
   dossier         Dossier        @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   responsable     User           @relation("VehiculeResponsable", fields: [responsableId], references: [id])
 
+  @@index([organisationId])
   @@map("vehicules")
 }
 
 model Interchange {
-  id            String            @id @default(uuid()) @db.Uuid
-  dossierId     String            @map("dossier_id") @db.Uuid
-  conteneur     String            @db.VarChar(100)
-  compagnie     String @db.VarChar(80)
-  dateEmission  DateTime          @default(now()) @map("date_emission")
-  dateRetour    DateTime?         @map("date_retour")
-  dateLimite    DateTime          @map("date_limite")
-  statut        StatutInterchange @default(emis)
-  responsableId String            @map("responsable_id") @db.Uuid
-  notes         String?
-  createdAt     DateTime          @default(now()) @map("created_at")
-  updatedAt     DateTime          @updatedAt @map("updated_at")
-  dossier       Dossier           @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  responsable   User              @relation("InterchangeResponsable", fields: [responsableId], references: [id])
+  id             String            @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?           @map("organisation_id") @db.Uuid
+  dossierId      String            @map("dossier_id") @db.Uuid
+  conteneur      String            @db.VarChar(100)
+  compagnie      String            @db.VarChar(80)
+  dateEmission   DateTime          @default(now()) @map("date_emission")
+  dateRetour     DateTime?         @map("date_retour")
+  dateLimite     DateTime          @map("date_limite")
+  statut         StatutInterchange @default(emis)
+  responsableId  String            @map("responsable_id") @db.Uuid
+  notes          String?
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  dossier        Dossier           @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  responsable    User              @relation("InterchangeResponsable", fields: [responsableId], references: [id])
 
+  @@index([organisationId])
   @@map("interchanges")
 }
 
 model Notification {
-  id        String           @id @default(uuid()) @db.Uuid
-  userId    String           @map("user_id") @db.Uuid
-  type      TypeNotification
-  titre     String           @db.VarChar(255)
-  message   String
-  lu        Boolean          @default(false)
-  luAt      DateTime?        @map("lu_at")
-  dossierId String?          @map("dossier_id") @db.Uuid
-  actionUrl String?          @map("action_url") @db.VarChar(500)
+  id             String           @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?          @map("organisation_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  type           TypeNotification
+  titre          String           @db.VarChar(255)
+  message        String
+  lu             Boolean          @default(false)
+  luAt           DateTime?        @map("lu_at")
+  dossierId      String?          @map("dossier_id") @db.Uuid
+  actionUrl      String?          @map("action_url") @db.VarChar(500)
   /// Échéance de la tâche notifiée : le compte à rebours démarre dès la réception
-  echeance  DateTime?
-  createdAt DateTime         @default(now()) @map("created_at")
-  dossier   Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  echeance       DateTime?
+  createdAt      DateTime         @default(now()) @map("created_at")
+  dossier        Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("notifications")
 }
 
 model CompteRenduKribi {
   id              String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId  String?  @map("organisation_id") @db.Uuid
   date            DateTime
   site            Site
   auteurId        String   @map("auteur_id") @db.Uuid
@@ -679,13 +800,16 @@ model CompteRenduKribi {
   updatedAt       DateTime @updatedAt @map("updated_at")
   auteur          User     @relation("CompteRenduAuteur", fields: [auteurId], references: [id])
 
+  @@index([organisationId])
   @@map("comptes_rendus_kribi")
 }
 
 model SoumissionSGS {
   id               String              @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId   String?             @map("organisation_id") @db.Uuid
   dossierId        String              @map("dossier_id") @db.Uuid
-  reference        String              @unique @db.VarChar(100)
+  reference        String              @db.VarChar(100)
   typeVerification TypeVerificationSGS @map("type_verification")
   dateDepot        DateTime            @map("date_depot")
   datePrevueRetour DateTime?           @map("date_prevue_retour")
@@ -702,6 +826,8 @@ model SoumissionSGS {
   dossier          Dossier             @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   soumisPar        User                @relation("SGSSoumisPar", fields: [soumisParId], references: [id])
 
+  @@unique([organisationId, reference])
+  @@index([organisationId])
   @@map("soumissions_sgs")
 }
 
@@ -734,7 +860,6 @@ enum Site {
 
   @@map("site_enum")
 }
-
 
 enum Profil {
   dg
@@ -941,19 +1066,21 @@ enum SousEtapeStatut {
 }
 
 model SousEtapeDossier {
-  id            String          @id @default(uuid()) @db.Uuid
-  dossierId     String          @map("dossier_id") @db.Uuid
-  etape         String          @db.VarChar(50)
-  cle           String          @db.VarChar(50)
-  statut        SousEtapeStatut @default(todo)
-  responsableId String?         @map("responsable_id") @db.Uuid
-  deadline      DateTime?
+  id             String          @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?         @map("organisation_id") @db.Uuid
+  dossierId      String          @map("dossier_id") @db.Uuid
+  etape          String          @db.VarChar(50)
+  cle            String          @db.VarChar(50)
+  statut         SousEtapeStatut @default(todo)
+  responsableId  String?         @map("responsable_id") @db.Uuid
+  deadline       DateTime?
   /// Début effectif du traitement (prise en charge, démarrage ou entrée du dossier dans l'étape)
-  startedAt     DateTime?       @map("started_at")
-  completedAt   DateTime?       @map("completed_at")
-  completedById String?         @map("completed_by_id") @db.Uuid
-  metadata      Json?
-  notes         String?         @db.Text
+  startedAt      DateTime?       @map("started_at")
+  completedAt    DateTime?       @map("completed_at")
+  completedById  String?         @map("completed_by_id") @db.Uuid
+  metadata       Json?
+  notes          String?         @db.Text
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -963,6 +1090,7 @@ model SousEtapeDossier {
   completedBy User?   @relation("SousEtapeCompletedBy", fields: [completedById], references: [id])
 
   @@unique([dossierId, etape, cle])
+  @@index([organisationId])
   @@map("sous_etapes_dossier")
 }
 
@@ -993,20 +1121,23 @@ enum CategorieMouvementDI {
 // ════════════════════════════════════════════════════════════════════════════
 
 model DIDocument {
-  id          String                 @id @default(uuid()) @db.Uuid
-  diId        String                 @map("di_id") @db.Uuid
-  nom         String                 @db.VarChar(255)
-  type        String                 @db.VarChar(100)
-  taille      String                 @db.VarChar(50)
-  contenu     Bytes?
-  hashContenu String?                @map("hash_contenu") @db.VarChar(64)
-  categorie   String?                @db.VarChar(50)
-  motif       String?
-  uploadePar  String                 @map("uploade_par") @db.Uuid
-  createdAt   DateTime               @default(now()) @map("created_at")
-  di          DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
-  uploader    User                   @relation(fields: [uploadePar], references: [id])
+  id             String                 @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?                @map("organisation_id") @db.Uuid
+  diId           String                 @map("di_id") @db.Uuid
+  nom            String                 @db.VarChar(255)
+  type           String                 @db.VarChar(100)
+  taille         String                 @db.VarChar(50)
+  contenu        Bytes?
+  hashContenu    String?                @map("hash_contenu") @db.VarChar(64)
+  categorie      String?                @db.VarChar(50)
+  motif          String?
+  uploadePar     String                 @map("uploade_par") @db.Uuid
+  createdAt      DateTime               @default(now()) @map("created_at")
+  di             DeclarationImportation @relation(fields: [diId], references: [id], onDelete: Cascade)
+  uploader       User                   @relation(fields: [uploadePar], references: [id])
 
+  @@index([organisationId])
   @@map("di_documents")
 }
 
@@ -1015,17 +1146,20 @@ model DIDocument {
 // ════════════════════════════════════════════════════════════════════════════
 
 model ActivityLog {
-  id        String   @id @default(uuid()) @db.Uuid
-  userId    String?  @map("user_id") @db.Uuid
-  action    String   @db.VarChar(100)
-  entite    String   @db.VarChar(50)
-  entiteId  String?  @map("entite_id") @db.VarChar(64)
-  details   String?
-  metadata  Json?
-  createdAt DateTime @default(now()) @map("created_at")
-  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  id             String   @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?  @map("organisation_id") @db.Uuid
+  userId         String?  @map("user_id") @db.Uuid
+  action         String   @db.VarChar(100)
+  entite         String   @db.VarChar(50)
+  entiteId       String?  @map("entite_id") @db.VarChar(64)
+  details        String?
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  user           User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
+  @@index([organisationId])
   @@map("activity_logs")
 }
 
@@ -1045,6 +1179,8 @@ enum TypeContrat {
 
 model FicheRH {
   id             String      @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?     @map("organisation_id") @db.Uuid
   userId         String      @unique @map("user_id") @db.Uuid
   matricule      String?     @db.VarChar(50)
   poste          String?     @db.VarChar(255)
@@ -1065,6 +1201,7 @@ model FicheRH {
   updatedAt      DateTime    @updatedAt @map("updated_at")
   user           User        @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([organisationId])
   @@map("fiches_rh")
 }
 
@@ -1090,6 +1227,8 @@ enum StatutConge {
 
 model Conge {
   id                  String      @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId      String?     @map("organisation_id") @db.Uuid
   userId              String      @map("user_id") @db.Uuid
   type                TypeConge   @default(annuel)
   dateDebut           DateTime    @map("date_debut")
@@ -1105,6 +1244,7 @@ model Conge {
   user                User        @relation("CongeEmploye", fields: [userId], references: [id], onDelete: Cascade)
   decidePar           User?       @relation("CongeDecideur", fields: [decideParId], references: [id])
 
+  @@index([organisationId])
   @@map("conges")
 }
 
@@ -1123,16 +1263,20 @@ enum TypeCompte {
 }
 
 model CompteComptable {
-  id        String          @id @default(uuid()) @db.Uuid
-  numero    String          @unique @db.VarChar(20)
-  libelle   String          @db.VarChar(255)
-  classe    Int
-  type      TypeCompte
-  actif     Boolean         @default(true)
-  systeme   Boolean         @default(false)
-  createdAt DateTime        @default(now()) @map("created_at")
-  lignes    LigneEcriture[]
+  id             String          @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?         @map("organisation_id") @db.Uuid
+  numero         String          @db.VarChar(20)
+  libelle        String          @db.VarChar(255)
+  classe         Int
+  type           TypeCompte
+  actif          Boolean         @default(true)
+  systeme        Boolean         @default(false)
+  createdAt      DateTime        @default(now()) @map("created_at")
+  lignes         LigneEcriture[]
 
+  @@unique([organisationId, numero])
+  @@index([organisationId])
   @@map("comptes_comptables")
 }
 
@@ -1148,13 +1292,17 @@ enum TypeJournal {
 }
 
 model JournalComptable {
-  id        String              @id @default(uuid()) @db.Uuid
-  code      String              @unique @db.VarChar(10)
-  libelle   String              @db.VarChar(255)
-  type      TypeJournal
-  actif     Boolean             @default(true)
-  ecritures EcritureComptable[]
+  id             String              @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?             @map("organisation_id") @db.Uuid
+  code           String              @db.VarChar(10)
+  libelle        String              @db.VarChar(255)
+  type           TypeJournal
+  actif          Boolean             @default(true)
+  ecritures      EcritureComptable[]
 
+  @@unique([organisationId, code])
+  @@index([organisationId])
   @@map("journaux_comptables")
 }
 
@@ -1166,17 +1314,21 @@ enum StatutExercice {
 }
 
 model ExerciceComptable {
-  id           String              @id @default(uuid()) @db.Uuid
-  code         String              @unique @db.VarChar(20)
-  dateDebut    DateTime            @map("date_debut")
-  dateFin      DateTime            @map("date_fin")
-  statut       StatutExercice      @default(ouvert)
-  resultat     Decimal?            @db.Decimal(15, 2)
-  clotureAt    DateTime?           @map("cloture_at")
-  clotureParId String?             @map("cloture_par_id") @db.Uuid
-  createdAt    DateTime            @default(now()) @map("created_at")
-  ecritures    EcritureComptable[]
+  id             String              @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?             @map("organisation_id") @db.Uuid
+  code           String              @db.VarChar(20)
+  dateDebut      DateTime            @map("date_debut")
+  dateFin        DateTime            @map("date_fin")
+  statut         StatutExercice      @default(ouvert)
+  resultat       Decimal?            @db.Decimal(15, 2)
+  clotureAt      DateTime?           @map("cloture_at")
+  clotureParId   String?             @map("cloture_par_id") @db.Uuid
+  createdAt      DateTime            @default(now()) @map("created_at")
+  ecritures      EcritureComptable[]
 
+  @@unique([organisationId, code])
+  @@index([organisationId])
   @@map("exercices_comptables")
 }
 
@@ -1189,7 +1341,9 @@ enum StatutEcriture {
 
 model EcritureComptable {
   id               String            @id @default(uuid()) @db.Uuid
-  numero           String            @unique @db.VarChar(40)
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId   String?           @map("organisation_id") @db.Uuid
+  numero           String            @db.VarChar(40)
   journalId        String            @map("journal_id") @db.Uuid
   exerciceId       String            @map("exercice_id") @db.Uuid
   date             DateTime
@@ -1213,23 +1367,28 @@ model EcritureComptable {
   lignes           LigneEcriture[]
 
   @@unique([sourceType, sourceId])
+  @@unique([organisationId, numero])
   @@index([date])
+  @@index([organisationId])
   @@map("ecritures_comptables")
 }
 
 model LigneEcriture {
-  id         String            @id @default(uuid()) @db.Uuid
-  ecritureId String            @map("ecriture_id") @db.Uuid
-  compteId   String            @map("compte_id") @db.Uuid
-  libelle    String?           @db.VarChar(255)
-  debit      Decimal           @default(0) @db.Decimal(15, 2)
-  credit     Decimal           @default(0) @db.Decimal(15, 2)
-  tiers      String?           @db.VarChar(255)
-  ordre      Int               @default(0)
-  ecriture   EcritureComptable @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
-  compte     CompteComptable   @relation(fields: [compteId], references: [id])
+  id             String            @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?           @map("organisation_id") @db.Uuid
+  ecritureId     String            @map("ecriture_id") @db.Uuid
+  compteId       String            @map("compte_id") @db.Uuid
+  libelle        String?           @db.VarChar(255)
+  debit          Decimal           @default(0) @db.Decimal(15, 2)
+  credit         Decimal           @default(0) @db.Decimal(15, 2)
+  tiers          String?           @db.VarChar(255)
+  ordre          Int               @default(0)
+  ecriture       EcritureComptable @relation(fields: [ecritureId], references: [id], onDelete: Cascade)
+  compte         CompteComptable   @relation(fields: [compteId], references: [id])
 
   @@index([compteId])
+  @@index([organisationId])
   @@map("lignes_ecriture")
 }
 
@@ -1238,24 +1397,29 @@ model LigneEcriture {
 // ════════════════════════════════════════════════════════════════════════════
 
 model Chauffeur {
-  id           String      @id @default(uuid()) @db.Uuid
-  nom          String      @db.VarChar(255)
-  telephone    String      @db.VarChar(50)
-  numeroPermis String?     @map("numero_permis") @db.VarChar(50)
-  cni          String?     @db.VarChar(50)
-  transporteur String?     @db.VarChar(255)
-  actif        Boolean     @default(true)
-  notes        String?
-  createdAt    DateTime    @default(now()) @map("created_at")
-  updatedAt    DateTime    @updatedAt @map("updated_at")
-  transports   Transport[]
+  id             String      @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?     @map("organisation_id") @db.Uuid
+  nom            String      @db.VarChar(255)
+  telephone      String      @db.VarChar(50)
+  numeroPermis   String?     @map("numero_permis") @db.VarChar(50)
+  cni            String?     @db.VarChar(50)
+  transporteur   String?     @db.VarChar(255)
+  actif          Boolean     @default(true)
+  notes          String?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  transports     Transport[]
 
+  @@index([organisationId])
   @@map("chauffeurs")
 }
 
 model Camion {
   id              String      @id @default(uuid()) @db.Uuid
-  immatriculation String      @unique @db.VarChar(50)
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId  String?     @map("organisation_id") @db.Uuid
+  immatriculation String      @db.VarChar(50)
   marque          String?     @db.VarChar(100)
   typeVehicule    String      @default("porte_conteneur") @map("type_vehicule") @db.VarChar(50)
   capacite        String?     @db.VarChar(20)
@@ -1266,6 +1430,8 @@ model Camion {
   updatedAt       DateTime    @updatedAt @map("updated_at")
   transports      Transport[]
 
+  @@unique([organisationId, immatriculation])
+  @@index([organisationId])
   @@map("camions")
 }
 
@@ -1280,31 +1446,34 @@ enum StatutTransport {
 }
 
 model Transport {
-  id             String          @id @default(uuid()) @db.Uuid
-  dossierId      String?         @map("dossier_id") @db.Uuid
-  conteneur      String          @db.VarChar(100)
-  camionId       String?         @map("camion_id") @db.Uuid
-  chauffeurId    String?         @map("chauffeur_id") @db.Uuid
-  dateEnlevement DateTime        @map("date_enlevement")
-  dateLivraison  DateTime?       @map("date_livraison")
-  origine        String?         @db.VarChar(255)
-  destination    String          @db.VarChar(255)
+  id                      String          @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId          String?         @map("organisation_id") @db.Uuid
+  dossierId               String?         @map("dossier_id") @db.Uuid
+  conteneur               String          @db.VarChar(100)
+  camionId                String?         @map("camion_id") @db.Uuid
+  chauffeurId             String?         @map("chauffeur_id") @db.Uuid
+  dateEnlevement          DateTime        @map("date_enlevement")
+  dateLivraison           DateTime?       @map("date_livraison")
+  origine                 String?         @db.VarChar(255)
+  destination             String          @db.VarChar(255)
   /// Trajet aller-retour (départ ⇄ destination)
-  allerRetour    Boolean         @default(false) @map("aller_retour")
-  statut         StatutTransport @default(planifie)
-  notes          String?
+  allerRetour             Boolean         @default(false) @map("aller_retour")
+  statut                  StatutTransport @default(planifie)
+  notes                   String?
   /// Justification obligatoire quand le TC est retourné vide
-  justificationRetourVide String? @map("justification_retour_vide")
-  dateRetourVide DateTime?       @map("date_retour_vide")
-  createdById    String          @map("created_by_id") @db.Uuid
-  createdAt      DateTime        @default(now()) @map("created_at")
-  updatedAt      DateTime        @updatedAt @map("updated_at")
-  dossier        Dossier?        @relation(fields: [dossierId], references: [id], onDelete: SetNull)
-  camion         Camion?         @relation(fields: [camionId], references: [id])
-  chauffeur      Chauffeur?      @relation(fields: [chauffeurId], references: [id])
-  createdBy      User            @relation("TransportCreateur", fields: [createdById], references: [id])
+  justificationRetourVide String?         @map("justification_retour_vide")
+  dateRetourVide          DateTime?       @map("date_retour_vide")
+  createdById             String          @map("created_by_id") @db.Uuid
+  createdAt               DateTime        @default(now()) @map("created_at")
+  updatedAt               DateTime        @updatedAt @map("updated_at")
+  dossier                 Dossier?        @relation(fields: [dossierId], references: [id], onDelete: SetNull)
+  camion                  Camion?         @relation(fields: [camionId], references: [id])
+  chauffeur               Chauffeur?      @relation(fields: [chauffeurId], references: [id])
+  createdBy               User            @relation("TransportCreateur", fields: [createdById], references: [id])
 
   @@index([dateEnlevement])
+  @@index([organisationId])
   @@map("transports")
 }
 
@@ -1325,23 +1494,26 @@ enum TypeContact {
 }
 
 model Contact {
-  id          String      @id @default(uuid()) @db.Uuid
-  type        TypeContact @default(client)
-  nom         String      @db.VarChar(255)
-  societe     String?     @db.VarChar(255)
-  fonction    String?     @db.VarChar(255)
-  telephone   String?     @db.VarChar(50)
-  telephone2  String?     @db.VarChar(50)
-  email       String?     @db.VarChar(255)
-  adresse     String?
-  niu         String?     @db.VarChar(50)
-  notes       String?
-  createdById String      @map("created_by_id") @db.Uuid
-  createdAt   DateTime    @default(now()) @map("created_at")
-  updatedAt   DateTime    @updatedAt @map("updated_at")
-  createdBy   User        @relation("ContactCreateur", fields: [createdById], references: [id])
+  id             String      @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?     @map("organisation_id") @db.Uuid
+  type           TypeContact @default(client)
+  nom            String      @db.VarChar(255)
+  societe        String?     @db.VarChar(255)
+  fonction       String?     @db.VarChar(255)
+  telephone      String?     @db.VarChar(50)
+  telephone2     String?     @db.VarChar(50)
+  email          String?     @db.VarChar(255)
+  adresse        String?
+  niu            String?     @db.VarChar(50)
+  notes          String?
+  createdById    String      @map("created_by_id") @db.Uuid
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  createdBy      User        @relation("ContactCreateur", fields: [createdById], references: [id])
 
   @@index([type])
+  @@index([organisationId])
   @@map("contacts")
 }
 
@@ -1397,9 +1569,11 @@ enum TypeInteraction {
 /// Fiche client (CRM) : centralise dossiers, règlements et échanges
 model Client {
   id                   String              @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId       String?             @map("organisation_id") @db.Uuid
   nom                  String              @db.VarChar(255)
   /// Nom normalisé (majuscules, sans accents ni ponctuation) pour rattacher les dossiers
-  cleNom               String              @unique @map("cle_nom") @db.VarChar(255)
+  cleNom               String              @map("cle_nom") @db.VarChar(255)
   statut               StatutClient        @default(actif)
   segment              SegmentClient       @default(standard)
   secteur              String?             @db.VarChar(120)
@@ -1430,41 +1604,48 @@ model Client {
   reglements           ReglementClient[]
   interactions         InteractionClient[]
 
+  @@unique([organisationId, cleNom])
   @@index([statut])
+  @@index([organisationId])
   @@map("clients")
 }
 
 /// Règlement reçu d'un client (paiement par le client à la réception, ou ultérieur)
 model ReglementClient {
-  id            String        @id @default(uuid()) @db.Uuid
-  clientId      String?       @map("client_id") @db.Uuid
-  dossierId     String?       @map("dossier_id") @db.Uuid
+  id             String        @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId String?       @map("organisation_id") @db.Uuid
+  clientId       String?       @map("client_id") @db.Uuid
+  dossierId      String?       @map("dossier_id") @db.Uuid
   /// Nom du client tel que saisi
-  clientNom     String        @map("client_nom") @db.VarChar(255)
+  clientNom      String        @map("client_nom") @db.VarChar(255)
   /// Personne ou société qui a effectivement payé (si différente du client)
-  payeur        String?       @db.VarChar(255)
-  mode          ModeReglement
-  montant       Decimal       @db.Decimal(15, 2)
-  dateReglement DateTime      @map("date_reglement")
+  payeur         String?       @db.VarChar(255)
+  mode           ModeReglement
+  montant        Decimal       @db.Decimal(15, 2)
+  dateReglement  DateTime      @map("date_reglement")
   /// N° de virement, de chèque, de traite ou de reçu
-  reference     String?       @db.VarChar(100)
-  banque        String?       @db.VarChar(120)
+  reference      String?       @db.VarChar(100)
+  banque         String?       @db.VarChar(120)
   /// Échéance (traite, chèque post-daté)
-  dateEcheance  DateTime?     @map("date_echeance")
-  observations  String?
-  saisiParId    String        @map("saisi_par_id") @db.Uuid
-  createdAt     DateTime      @default(now()) @map("created_at")
-  client        Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
-  dossier       Dossier?      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
+  dateEcheance   DateTime?     @map("date_echeance")
+  observations   String?
+  saisiParId     String        @map("saisi_par_id") @db.Uuid
+  createdAt      DateTime      @default(now()) @map("created_at")
+  client         Client?       @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  dossier        Dossier?      @relation(fields: [dossierId], references: [id], onDelete: Cascade)
 
   @@index([clientId])
   @@index([dossierId])
+  @@index([organisationId])
   @@map("reglements_clients")
 }
 
 /// Échange avec un client : appel, réunion, relance, réclamation…
 model InteractionClient {
   id                  String          @id @default(uuid()) @db.Uuid
+  /// Organisation propriétaire (isolation multi-entreprises, remplie et filtrée automatiquement)
+  organisationId      String?         @map("organisation_id") @db.Uuid
   clientId            String          @map("client_id") @db.Uuid
   type                TypeInteraction
   sujet               String          @db.VarChar(255)
@@ -1481,5 +1662,66 @@ model InteractionClient {
 
   @@index([clientId])
   @@index([dateProchaineAction])
+  @@index([organisationId])
   @@map("interactions_clients")
+}
+
+enum PlanAbonnement {
+  starter
+  business
+  enterprise
+}
+
+enum StatutAbonnement {
+  essai
+  actif
+  impaye
+  suspendu
+  annule
+}
+
+/// Abonnement SaaS d'une organisation. Modifié uniquement par la plateforme (jamais par le navigateur).
+model Abonnement {
+  id              String           @id @default(uuid()) @db.Uuid
+  organisationId  String           @unique @map("organisation_id") @db.Uuid
+  organisation    Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  plan            PlanAbonnement   @default(business)
+  statut          StatutAbonnement @default(essai)
+  finEssai        DateTime?        @map("fin_essai")
+  /// Fin de la période payée en cours (renouvellement) ; null = pas de période payée
+  finPeriode      DateTime?        @map("fin_periode")
+  /// Limite d'utilisateurs actifs ; null = celle du plan
+  maxUtilisateurs Int?             @map("max_utilisateurs")
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  @@map("abonnements")
+}
+
+/// Demande de démonstration reçue depuis le site public (table de plateforme, hors organisation).
+model DemandeDemo {
+  id         String   @id @default(uuid()) @db.Uuid
+  nom        String   @db.VarChar(120)
+  entreprise String   @db.VarChar(160)
+  email      String   @db.VarChar(255)
+  telephone  String?  @db.VarChar(40)
+  pays       String?  @db.VarChar(80)
+  taille     String?  @db.VarChar(40)
+  message    String?  @db.VarChar(2000)
+  langue     String   @default("fr") @db.VarChar(5)
+  traitee    Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("demandes_demo")
+}
+
+/// Journal des migrations SQL versionnées (backend/migrations), tenu par src/scripts/appliquer-migrations.ts.
+/// Déclaré ici pour que `prisma db push` ne le supprime jamais.
+model MigrationSql {
+  nom        String   @id
+  empreinte  String
+  appliqueLe DateTime @default(now()) @map("applique_le") @db.Timestamptz(6)
+
+  @@map("_migrations_sql")
 }

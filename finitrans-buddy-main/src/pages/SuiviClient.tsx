@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { CalendarDays, Check, Clock, Container, Loader2, Mail, MapPin, MessageCircle, Package, Phone, RefreshCw, Ship, ShieldCheck, Sparkles } from "lucide-react";
 import FinitransLogo from "@/components/FinitransLogo";
+import PlateformeLogo from "@/components/marque/PlateformeLogo";
 import { Illustration } from "@/components/suivi/Illustration";
 
 type Etape = { etape: string; phase: string; titre: string; texte: string; illustration: string; etat: "fait" | "courant" | "preparation" | "avenir"; debut: string | null; fin: string | null };
@@ -13,7 +14,7 @@ type Suivi = {
   statut: string; etapeCourante: string; termine: boolean; progression: number; etapes: Etape[];
   enPreparation: boolean; phases: PhaseClient[];
   actualites: { id: string; message: string; illustration: string; auteur: string; date: string }[];
-  entreprise: { nom: string; telephone: string | null; email: string | null; adresse: string | null; siteWeb: string | null };
+  entreprise: { nom: string | null; telephone: string | null; email: string | null; adresse: string | null; siteWeb: string | null; logoHistorique?: boolean };
   misAJour: string;
 };
 
@@ -95,7 +96,7 @@ export default function SuiviClient() {
     return (
       <div className="min-h-[100dvh] flex items-center justify-center bg-gradient-to-b from-[#0F2440] to-[#1B3A66] p-6">
         <div className="max-w-sm w-full rounded-3xl bg-white p-8 text-center shadow-2xl">
-          <FinitransLogo variant="full" iconSize={44} />
+          <PlateformeLogo taille={30} />
           <p className="mt-6 font-display font-bold text-lg text-[#0F2440]">Lien de suivi indisponible</p>
           <p className="mt-2 text-sm text-slate-500">{(error as Error)?.message}</p>
         </div>
@@ -115,7 +116,7 @@ export default function SuiviClient() {
         <div className="absolute top-20 -left-24 w-72 h-72 rounded-full bg-sky-400/20 blur-3xl" />
         <div className="relative max-w-2xl mx-auto px-5 pt-[max(1.25rem,env(safe-area-inset-top))]">
           <div className="flex items-center justify-between">
-            <div className="rounded-xl bg-white px-2.5 py-1.5 shadow-lg"><FinitransLogo variant="full" iconSize={28} /></div>
+            <div className="rounded-xl bg-white px-2.5 py-1.5 shadow-lg">{data.entreprise.logoHistorique ? <FinitransLogo variant="full" iconSize={28} /> : <span className="block px-1 py-0.5 font-display text-[15px] font-bold text-[#0F2440]">{data.entreprise.nom ?? "Votre transitaire"}</span>}</div>
             <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-white/10 backdrop-blur border border-white/15">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-300" /> Suivi sécurisé
             </span>
@@ -248,7 +249,7 @@ export default function SuiviClient() {
         {/* ── Actualités ── */}
         <motion.section initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }}
           className="rounded-3xl bg-white shadow-[0_10px_40px_-18px_rgba(15,36,64,0.35)] p-5">
-          <h2 className="font-display font-bold text-[#0F2440] flex items-center gap-2"><MessageCircle className="w-4 h-4 text-[#F07B37]" /> Messages de votre équipe FINITRANS</h2>
+          <h2 className="font-display font-bold text-[#0F2440] flex items-center gap-2"><MessageCircle className="w-4 h-4 text-[#F07B37]" /> Messages de votre équipe {data.entreprise.nom ?? ""}</h2>
           {data.actualites.length === 0 ? (
             <p className="mt-4 text-sm text-slate-400">Vous recevrez ici les informations importantes sur votre dossier.</p>
           ) : (

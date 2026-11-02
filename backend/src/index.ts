@@ -11,7 +11,7 @@ async function main() {
     app.log.info('✅ Base de données PostgreSQL connectée')
 
     await app.listen({ port: env.PORT, host: env.HOST })
-    app.log.info(`🚀 FINITRANS API démarrée sur http://${env.HOST}:${env.PORT}`)
+    app.log.info(`🚀 API démarrée sur http://${env.HOST}:${env.PORT}`)
   } catch (err) {
     app.log.error(err)
     process.exit(1)

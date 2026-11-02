@@ -10,6 +10,7 @@
  */
 import { PermissionNiveau, Profil } from '@prisma/client'
 import { prisma } from './prisma'
+import { cacheParOrganisation } from '../utils/cacheOrganisation'
 
 export const PERMISSION_KEYS = [
   'permDossier', 'permValidation', 'permFinancier', 'permRapports', 'permAdministration',
@@ -135,18 +136,16 @@ const MODULES_RECENTS: ModuleKey[] = ['crm']
 // ── Surcharges éditables par le DG (paramètre roles_config) ─────────────────
 
 type RoleOverride = Partial<Pick<RoleTemplate, 'label' | 'description' | 'modules' | 'permissions'>>
-const CACHE_TTL_MS = 30_000
-let cache: { at: number; value: Record<string, RoleOverride> } | null = null
+const cache = cacheParOrganisation<Record<string, RoleOverride>>(30_000)
 
 export async function loadRoleOverrides(): Promise<Record<string, RoleOverride>> {
-  if (cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.value
-  const row = await prisma.parametre.findUnique({ where: { cle: 'roles_config' } })
-  const value = (row?.valeur ?? {}) as Record<string, RoleOverride>
-  cache = { at: Date.now(), value }
-  return value
+  return cache.obtenir(async () => {
+    const row = await prisma.parametre.findFirst({ where: { cle: 'roles_config' } })
+    return (row?.valeur ?? {}) as Record<string, RoleOverride>
+  })
 }
 
-export function invalidateRoleCache() { cache = null }
+export function invalidateRoleCache() { cache.invalider() }
 
 export async function getRoleTemplates(): Promise<Record<Profil, RoleTemplate>> {
   const overrides = await loadRoleOverrides()

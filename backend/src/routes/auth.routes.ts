@@ -7,7 +7,9 @@ import { env } from '../config/env'
 import { authenticate } from '../middleware/authenticate'
 import { UnauthorizedError } from '../utils/errors'
 import { logActivity } from '../utils/audit'
-import { buildSessionUser, createUser, createUserSchema } from '../services/users'
+import { buildSessionUser, createUser, createUserSchema, estCompteArchive } from '../services/users'
+import { definirOrganisation } from '../config/contexte'
+import { chargerOrganisation, creerEspace, etatAcces } from '../services/organisations'
 import { addDays } from 'date-fns'
 
 const loginSchema = z.object({
@@ -22,6 +24,31 @@ const changePasswordSchema = z.object({
 
 const ACCESS_EXPIRES  = env.JWT_ACCESS_EXPIRES
 const REFRESH_DAYS    = 30
+
+const inscriptionSchema = z.object({
+  entreprise:  z.string().trim().min(2, 'Nom de l\'entreprise trop court').max(160),
+  nom:         z.string().trim().min(2, 'Indiquez votre nom').max(120),
+  email:       z.string().trim().toLowerCase().email('Adresse email invalide').max(255),
+  password:    z.string().min(10, 'Le mot de passe doit contenir au moins 10 caractères').max(200)
+    .regex(/[A-Za-z]/, 'Le mot de passe doit contenir au moins une lettre')
+    .regex(/[0-9]/, 'Le mot de passe doit contenir au moins un chiffre'),
+  pays:        z.string().trim().length(2).regex(/^[A-Za-z]{2}$/).transform(p => p.toUpperCase()).default('CM'),
+  telephone:   z.string().trim().max(40).optional(),
+  langue:      z.enum(['fr', 'en']).default('fr'),
+  accepteConditions: z.literal(true, { errorMap: () => ({ message: 'Acceptez les conditions d\'utilisation' }) }),
+})
+
+/**
+ * Accès à l'espace de l'organisation : null si autorisé, sinon le refus à renvoyer.
+ * Inscrit aussi l'organisation dans le contexte de la requête (les requêtes suivantes y sont bornées).
+ */
+async function accesOrganisationRefuse(organisationId: string | null) {
+  if (!organisationId) return { statut: 403, code: 'FORBIDDEN', message: 'Compte non rattaché à une organisation' }
+  const acces = etatAcces(await chargerOrganisation(organisationId))
+  if (!acces.ok) return { statut: 402, code: acces.code, message: acces.message }
+  definirOrganisation(organisationId)
+  return null
+}
 
 const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
@@ -51,10 +78,35 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       throw new UnauthorizedError('Identifiants incorrects')
     }
 
+    // L'email suffit à retrouver l'espace de l'entreprise : on vérifie qu'il est accessible
+    const refus = await accesOrganisationRefuse(user.organisationId)
+    if (refus) return reply.code(refus.statut).send({ error: refus.code, message: refus.message })
+
     const tokens = await issueTokens(user.id)
     const sessionUser = await buildSessionUser(user.id)
     await logActivity(user.id, 'CONNEXION', 'user', user.id)
     return reply.code(200).send({ ...tokens, user: sessionUser })
+  })
+
+  // POST /api/auth/inscription — création en libre-service de l'espace d'une entreprise (essai gratuit)
+  fastify.post('/inscription', {
+    config: { rateLimit: { max: env.NODE_ENV === 'test' ? 1000 : 5, timeWindow: '1 hour' } },
+  }, async (request, reply) => {
+    const body = inscriptionSchema.parse(request.body)
+    if (estCompteArchive(body.email)) return reply.code(422).send({ error: 'EMAIL_RESERVE', message: 'Cette adresse est réservée' })
+
+    // L'email identifie l'espace : un même email ne peut pas ouvrir deux espaces
+    const existant = await prisma.user.findUnique({ where: { email: body.email }, select: { id: true } })
+    if (existant) {
+      return reply.code(409).send({ error: 'EMAIL_UTILISE', message: 'Un compte existe déjà avec cet email. Connectez-vous pour retrouver votre espace.' })
+    }
+
+    const { organisation, user } = await creerEspace({ ...body, plan: 'business', statut: 'essai' })
+
+    definirOrganisation(organisation.id)
+    const tokens = await issueTokens(user.id)
+    await logActivity(user.id, 'INSCRIPTION', 'organisation', organisation.id, organisation.nom)
+    return reply.code(201).send({ ...tokens, user: await buildSessionUser(user.id) })
   })
 
   // POST /api/auth/refresh
@@ -77,6 +129,8 @@ const authRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (!user || !user.actif) {
       throw new UnauthorizedError('Compte introuvable ou désactivé')
     }
+    const refus = await accesOrganisationRefuse(user.organisationId)
+    if (refus) return reply.code(refus.statut).send({ error: refus.code, message: refus.message })
 
     // Révoquer l'ancien token (rotation)
     await prisma.refreshToken.update({

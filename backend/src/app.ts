@@ -11,6 +11,7 @@ import { env } from './config/env'
 import { authenticate } from './middleware/authenticate'
 import { AppError } from './utils/errors'
 import { crochetNotifications, ouvrirContexteNotifications } from './services/evenements'
+import { ouvrirContexte } from './config/contexte'
 
 import authRoutes          from './routes/auth.routes'
 import dossiersRoutes      from './routes/dossiers.routes'
@@ -46,6 +47,7 @@ import compagniesRoutes    from './routes/compagnies.routes'
 import facturationRoutes   from './routes/facturation.routes'
 import suiviClientRoutes, { suiviPublicRoutes } from './routes/suivi-client.routes'
 import sauvegardesRoutes from './routes/sauvegardes.routes'
+import { plateformeRoutes, sitePublicRoutes } from './routes/plateforme.routes'
 
 export async function buildApp(opts: { serverless?: boolean } = {}): Promise<FastifyInstance> {
   const fastify = Fastify({
@@ -88,12 +90,13 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
     max: env.NODE_ENV === 'test' ? 100_000 : 600,
     timeWindow: '1 minute',
     keyGenerator: (request) => {
+      // Le jeton est VÉRIFIÉ (signature) avant de servir de clé : un identifiant forgé ne crée pas de nouveau quota
       const auth = request.headers.authorization
       if (auth?.startsWith('Bearer ')) {
         try {
-          const payload = JSON.parse(Buffer.from(auth.split('.')[1] ?? '', 'base64url').toString('utf8'))
+          const payload = fastify.jwt.verify<{ sub?: string }>(auth.slice(7))
           if (typeof payload.sub === 'string') return `${request.ip}:${payload.sub}`
-        } catch { /* jeton illisible : quota par IP */ }
+        } catch { /* jeton invalide ou expiré : quota par IP */ }
       }
       return request.ip
     },
@@ -137,6 +140,8 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
 
   // ─── Routes API ───────────────────────────────────────────
 
+  // Contexte de requête : l'organisation y est inscrite à l'authentification (isolation multi-entreprises)
+  fastify.addHook('onRequest', ouvrirContexte)
   // Chaque action réussie est notifiée aux personnes concernées (voir services/evenements.ts)
   fastify.addHook('onRequest', ouvrirContexteNotifications)
   fastify.addHook('onSend', crochetNotifications)
@@ -176,6 +181,8 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
   fastify.register(suiviClientRoutes,   { prefix: '/api/dossiers' })
   fastify.register(suiviPublicRoutes,   { prefix: '/api/public' })
   fastify.register(sauvegardesRoutes,   { prefix: '/api/sauvegardes' })
+  fastify.register(plateformeRoutes,    { prefix: '/api/plateforme' })
+  fastify.register(sitePublicRoutes,    { prefix: '/api/public' })
 
   // ─── Gestion d'erreurs globale ────────────────────────────
 

@@ -193,7 +193,7 @@ const financeRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return prisma.virement.create({
         data: {
           dossierId: body.dossierId, montant: body.montant, motif: body.motif, type: body.type,
-          source: body.source ?? 'Compte FINITRANS', destination, reference,
+          source: body.source ?? "Compte de l'entreprise", destination, reference,
           dateVirement: new Date(body.dateVirement), statut: body.statut, effectuePar: request.user.id,
         },
         include: { dossier: { select: { numero: true, client: true } }, responsable: { select: { nom: true } } },

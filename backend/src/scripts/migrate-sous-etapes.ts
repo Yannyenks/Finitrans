@@ -9,6 +9,7 @@
  */
 import 'dotenv/config'
 import { prisma } from '../config/prisma'
+import { pourChaqueOrganisation } from '../services/organisations'
 import { finaliserDossier } from '../services/finalisation'
 import { STATUS_ORDER, SOUS_ETAPES_CONFIG, assignStage, demarrerEtape, initSousEtapes, nextStage } from '../services/workflow'
 
@@ -17,7 +18,7 @@ async function main() {
   const horsParcours = await prisma.dossier.findMany({
     where: { status: { notIn: STATUS_ORDER } }, select: { id: true, numero: true, status: true, site: true, compagnie: true, responsableId: true },
   })
-  const slaJours = ((await prisma.parametre.findUnique({ where: { cle: 'sla_jours' } }))?.valeur ?? {}) as Record<string, number>
+  const slaJours = ((await prisma.parametre.findFirst({ where: { cle: 'sla_jours' } }))?.valeur ?? {}) as Record<string, number>
   for (const d of horsParcours) {
     const suivante = nextStage(d.status, d.site)
     if (!suivante) continue
@@ -55,7 +56,8 @@ async function main() {
   console.log(`✅ Démarrage automatique : ${apres - avant} tâche(s) démarrée(s) sur ${ouverts.length} dossier(s) ouvert(s)`)
 }
 
-main()
+// Une passe par organisation : chacune avec sa propre configuration (SLA, attribution, rôles)
+pourChaqueOrganisation(() => main())
   .catch(err => {
     // Ne jamais bloquer un déploiement pour cette migration
     console.error('⚠️  Migration des sous-étapes non appliquée :', err instanceof Error ? err.message : err)

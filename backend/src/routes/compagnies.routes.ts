@@ -5,6 +5,7 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
+import { organisationCourante } from '../config/contexte'
 import { authenticate } from '../middleware/authenticate'
 import { requireSupervisor } from '../middleware/authorize'
 import { logActivity } from '../utils/audit'
@@ -12,7 +13,7 @@ import { codeCompagnie, invalidateCompagniesCache, loadCompagnies, type Compagni
 
 async function enregistrer(liste: Compagnie[], userId: string) {
   await prisma.parametre.upsert({
-    where:  { cle: 'compagnies' },
+    where:  { organisationId_cle: { organisationId: organisationCourante(), cle: 'compagnies' } },
     update: { valeur: liste as unknown as Prisma.InputJsonValue, updatedBy: userId },
     create: { cle: 'compagnies', valeur: liste as unknown as Prisma.InputJsonValue, updatedBy: userId, description: 'Compagnies maritimes' },
   })

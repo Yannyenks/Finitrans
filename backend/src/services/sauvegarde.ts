@@ -1,14 +1,14 @@
 /**
  * Sauvegardes de la base : export complet (toutes les tables, JSON compressé gzip) conservé en base,
  * déclenché chaque semaine par le cron Vercel et à la demande par la Direction.
- * Les 8 dernières sauvegardes réussies sont gardées (2 mois). Tout échec est signalé à la Direction.
+ * Les 8 dernières sauvegardes réussies sont gardées (2 mois). Tout échec est signalé aux administrateurs de la plateforme.
  */
 import { gzipSync, gunzipSync } from 'zlib'
 import { prisma } from '../config/prisma'
-import { notifierDirection } from './workflow'
+import { notifierPlateforme } from './organisations'
 
 /** Tables non sauvegardées : sessions, morceaux de téléversement temporaires, sauvegardes elles-mêmes. */
-const EXCLUES = new Set(['_prisma_migrations', 'refresh_tokens', 'televersements_morceaux', 'sauvegardes'])
+const EXCLUES = new Set(['_prisma_migrations', '_migrations_sql', 'refresh_tokens', 'televersements_morceaux', 'sauvegardes'])
 export const A_CONSERVER = 8
 
 async function tablesASauvegarder(): Promise<string[]> {
@@ -38,7 +38,7 @@ export async function creerSauvegarde(declencheur: 'hebdomadaire' | 'manuelle', 
     const anciennes = await prisma.sauvegarde.findMany({ where: { statut: 'ok' }, orderBy: { createdAt: 'desc' }, skip: A_CONSERVER, select: { id: true } })
     if (anciennes.length) await prisma.sauvegarde.deleteMany({ where: { id: { in: anciennes.map(a => a.id) } } })
     const total = Object.values(lignes).reduce((a, b) => a + b, 0)
-    await notifierDirection({
+    await notifierPlateforme({
       titre: `Sauvegarde ${declencheur} effectuée`,
       message: `${total.toLocaleString('fr-FR')} enregistrements sauvegardés (${Math.max(1, Math.round(contenu.length / 1024)).toLocaleString('fr-FR')} Ko).`,
       actionUrl: '/administration?onglet=sauvegardes',
@@ -47,9 +47,9 @@ export async function creerSauvegarde(declencheur: 'hebdomadaire' | 'manuelle', 
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     await prisma.sauvegarde.create({ data: { declencheur, statut: 'echec', auteur, message: message.slice(0, 2000), dureeMs: Date.now() - debut } }).catch(() => null)
-    // Problème signalé : alerte critique + notification de la Direction
+    // Problème signalé : alerte critique + notification des administrateurs de la plateforme
     await prisma.alerte.create({ data: { type: 'systeme', severity: 'critical', message: `🔴 Échec de la sauvegarde ${declencheur} : ${message.slice(0, 300)}` } }).catch(() => null)
-    await notifierDirection({
+    await notifierPlateforme({
       titre: `⚠️ Échec de la sauvegarde ${declencheur}`,
       message: `La sauvegarde n'a pas pu être réalisée : ${message.slice(0, 300)}. Relancez-la depuis Administration → Sauvegardes.`,
       actionUrl: '/administration?onglet=sauvegardes',

@@ -72,7 +72,7 @@ const STEP_CONFIG: Record<string, {
   operations_douala: { icon: Ship,        description: "Opérations au terminal de Douala : redevance portuaire et bon à délivrer",                     iconBg: "bg-cyan-100",   iconText: "text-cyan-700",   iconRing: "ring-cyan-300",   borderActive: "border-cyan-200/60",   bgActive: "from-cyan-50/60"   },
   operations_kribi: { icon: MapPin,        description: "Opérations de dédouanement et de livraison au port de Kribi",                               iconBg: "bg-teal-100",   iconText: "text-teal-700",   iconRing: "ring-teal-300",   borderActive: "border-teal-200/60",   bgActive: "from-teal-50/60"   },
   cloture:          { icon: CheckCircle2,  description: "Dossier clôturé — marchandise livrée au client, opérations terminées",                      iconBg: "bg-gray-100",   iconText: "text-gray-600",   iconRing: "ring-gray-300",   borderActive: "border-gray-200/60",   bgActive: "from-gray-50/60"   },
-  facturation:      { icon: Receipt,       description: "Facturation du dossier au client — facture aux couleurs FINITRANS et remise au client",              iconBg: "bg-violet-100", iconText: "text-violet-700", iconRing: "ring-violet-300", borderActive: "border-violet-200/60", bgActive: "from-violet-50/60" },
+  facturation:      { icon: Receipt,       description: "Facturation du dossier au client — facture à l’identité de votre entreprise et remise au client",              iconBg: "bg-violet-100", iconText: "text-violet-700", iconRing: "ring-violet-300", borderActive: "border-violet-200/60", bgActive: "from-violet-50/60" },
 };
 
 // ── SLA par étape (en heures) ─────────────────────────────────────────────────

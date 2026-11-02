@@ -12,11 +12,11 @@ async function session(browser: Browser, compte: string): Promise<Page> {
   contextes.push(ctx);
   const page = await ctx.newPage();
   page.on("pageerror", err => { throw new Error(`[JS ${compte}] ${err.message}`); });
-  await page.goto("/");
+  await page.goto("/connexion");
   await page.locator('input[type="email"]').fill(`${compte}@finitrans.cm`);
   await page.locator('input[type="password"]').fill(PASSWORD);
   await page.locator('button[type="submit"]').click();
-  await page.waitForURL(u => u.pathname !== "/", { timeout: 30_000 });
+  await page.waitForURL(u => !u.pathname.startsWith("/connexion"), { timeout: 30_000 });
   return page;
 }
 

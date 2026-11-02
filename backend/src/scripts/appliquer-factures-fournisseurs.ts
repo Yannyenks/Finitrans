@@ -7,6 +7,7 @@
  */
 import 'dotenv/config'
 import { prisma } from '../config/prisma'
+import { pourChaqueOrganisation } from '../services/organisations'
 import { appliquerFactureFournisseur } from '../services/di'
 
 async function main() {
@@ -36,7 +37,8 @@ async function main() {
   console.log(`✅ Factures fournisseurs : ${appliquees} débit(s) DI rattrapé(s)`)
 }
 
-main()
+// Une passe par organisation : chacune avec sa propre configuration (SLA, attribution, rôles)
+pourChaqueOrganisation(() => main())
   .catch(err => {
     // Ne jamais bloquer un déploiement pour ce rattrapage
     console.error('⚠️  Rattrapage des factures fournisseurs non appliqué :', err instanceof Error ? err.message : err)

@@ -37,6 +37,13 @@ export async function requireSupervisor(request: FastifyRequest, reply: FastifyR
   }
 }
 
+/** Réservé aux administrateurs de la plateforme SaaS (liste PLATFORM_ADMIN_EMAILS côté serveur). */
+export async function requirePlateforme(request: FastifyRequest, reply: FastifyReply) {
+  if (!request.user?.plateformeAdmin) {
+    return reply.code(403).send({ error: 'FORBIDDEN', message: 'Réservé à l\'administration de la plateforme' })
+  }
+}
+
 // Raccourci: seul le DG peut accéder
 export async function requireDG(request: FastifyRequest, reply: FastifyReply) {
   if (request.user?.profil !== 'dg') {

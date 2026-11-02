@@ -1,3 +1,4 @@
+import { NOM_PLATEFORME } from '../config/marque'
 import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../config/prisma'
@@ -31,7 +32,7 @@ function buildGatePassText(gp: any): string {
   const em = gp.emetteur
   return [
     '═══════════════════════════════════════════════',
-    '           FINITRANS BUDDY — GATE PASS          ',
+    `  ${NOM_PLATEFORME.toUpperCase()} — GATE PASS`,
     '═══════════════════════════════════════════════',
     `Numéro       : ${gp.numero}`,
     `Date émission: ${format(new Date(gp.dateEmission), 'dd/MM/yyyy HH:mm', { locale: fr })}`,

@@ -4,6 +4,7 @@ import { createHash } from 'crypto'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
+import { dossierDeOrganisation } from '../middleware/organisation'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
 import { recevoirFichier } from '../services/televersement'
@@ -53,7 +54,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   }
 
   // GET /api/dossiers/:id/sous-etapes
-  fastify.get('/:id/sous-etapes', { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.get('/:id/sous-etapes', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true, status: true } })
     if (!dossier) throw new NotFoundError('Dossier', id)
@@ -70,7 +71,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   })
 
   // PUT /api/dossiers/:id/sous-etapes/:etape/:cle
-  fastify.put('/:id/sous-etapes/:etape/:cle', { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.put('/:id/sous-etapes/:etape/:cle', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
     const { id, etape, cle, dossier, existing } = await loadContext(request.params)
     const actor = request.user
     const body  = updateSchema.parse(request.body)
@@ -256,7 +257,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   })
 
   // POST /api/dossiers/:id/sous-etapes/:etape/:cle/prendre — se positionner sur une tâche non attribuée
-  fastify.post('/:id/sous-etapes/:etape/:cle/prendre', { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.post('/:id/sous-etapes/:etape/:cle/prendre', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
     const { id, etape, cle, dossier, existing } = await loadContext(request.params)
     const actor = request.user
 
@@ -291,7 +292,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   })
 
   // POST /api/dossiers/:id/sous-etapes/:etape/:cle/preuve — justificatif stocké en base
-  fastify.post('/:id/sous-etapes/:etape/:cle/preuve', { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.post('/:id/sous-etapes/:etape/:cle/preuve', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
     const { id, etape, cle, existing } = await loadContext(request.params)
     const actor = request.user
     const isOwnStep = !!existing?.responsableId && existing.responsableId === actor.id
@@ -335,7 +336,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   })
 
   // GET /api/dossiers/:id/sous-etapes/check?etape=… — toutes les sous-étapes d'une étape sont-elles validées ?
-  fastify.get('/:id/sous-etapes/check', { preHandler: [authenticate] }, async (request, reply) => {
+  fastify.get('/:id/sous-etapes/check', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
     const { id }    = z.object({ id: z.string().uuid() }).parse(request.params)
     const { etape } = z.object({ etape: z.string() }).parse(request.query)
     if (!isStatus(etape)) return reply.code(400).send({ error: 'BAD_REQUEST', message: 'Étape inconnue' })
