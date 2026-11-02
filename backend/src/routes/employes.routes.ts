@@ -9,7 +9,7 @@ import { buildPagination, paginate } from '../utils/pagination'
 import { logActivity } from '../utils/audit'
 import {
   SAFE_USER_SELECT, assertCanGrantProfil, assertNotLastDG, compagnieEnum, createUser, createUserSchema,
-  permissionEnum, profilEnum, supprimerCompte, SUFFIXE_COMPTE_ARCHIVE, verifierLimiteUtilisateurs,
+  permissionEnum, profilEnum, supprimerCompte, EMAIL_COMPTE_ARCHIVE,
 } from '../services/users'
 
 const updateEmployeSchema = z.object({
@@ -45,7 +45,7 @@ const employesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       actif: z.enum(['true', 'false']).optional(),
     }).parse(request.query)
 
-    const where: Record<string, unknown> = { NOT: { email: { endsWith: SUFFIXE_COMPTE_ARCHIVE } } }
+    const where: Record<string, unknown> = { email: { not: EMAIL_COMPTE_ARCHIVE } }
     if (q.site)   where.site  = q.site
     if (q.profil) where.profil = q.profil
     if (q.actif !== undefined) where.actif = q.actif === 'true'
@@ -94,7 +94,6 @@ const employesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         return reply.code(422).send({ error: 'AUTO_MODIFICATION', message: 'Vous ne pouvez pas modifier votre propre rôle ni désactiver votre compte' })
       }
       if ((body.profil && body.profil !== 'dg') || body.actif === false) await assertNotLastDG(id)
-      if (body.actif === true && !existing.actif) await verifierLimiteUtilisateurs(actor.organisationId)
     }
 
     const updated = await prisma.user.update({ where: { id }, data: body, select: SAFE_USER_SELECT })
@@ -145,7 +144,6 @@ const employesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const target = await prisma.user.findUnique({ where: { id } })
     if (!target) throw new NotFoundError('Employé', id)
-    if (!target.actif) await verifierLimiteUtilisateurs(request.user.organisationId)
     const updated = await prisma.user.update({ where: { id }, data: { actif: true }, select: SAFE_USER_SELECT })
     await logActivity(request.user.id, 'COMPTE_REACTIVE', 'user', id, target.nom)
     return reply.send(updated)

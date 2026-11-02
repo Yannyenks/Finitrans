@@ -9,7 +9,6 @@
 import 'dotenv/config'
 import { PermissionNiveau } from '@prisma/client'
 import { prisma } from '../config/prisma'
-import { pourChaqueOrganisation } from '../services/organisations'
 import { PERMISSION_KEYS, getRoleTemplates } from '../config/roles'
 import { PERMISSION_RANK } from '../types'
 
@@ -33,8 +32,7 @@ async function main() {
   console.log(`✅ Migration des rôles : ${modifies} compte(s) mis à niveau sur ${users.length}`)
 }
 
-// Une passe par organisation : chacune avec sa propre configuration (SLA, attribution, rôles)
-pourChaqueOrganisation(() => main())
+main()
   .catch(err => {
     // Ne jamais bloquer un déploiement pour cette migration
     console.error('⚠️  Migration des rôles non appliquée :', err instanceof Error ? err.message : err)

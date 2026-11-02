@@ -152,7 +152,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   validation: [
     {
       cle: "liquidation", label: "Liquidation de la déclaration (douane)",
-      description: "L'inspecteur des douanes liquide les droits et taxes de la déclaration. Étape dépendant de la douane : elle peut prendre 2 à 3 jours. Votre équipe enregistre la liquidation dès qu'elle est obtenue.",
+      description: "L'inspecteur des douanes liquide les droits et taxes de la déclaration. Étape dépendant de la douane : elle peut prendre 2 à 3 jours. Le suivi FINITRANS enregistre la liquidation dès qu'elle est obtenue.",
       responsableExterne: { champ: "liq_responsable", defaut: "Douane — Inspecteur vérificateur", detail: "liq_inspecteur" },
       outputLabel: "Bulletin de liquidation",
       fields: [

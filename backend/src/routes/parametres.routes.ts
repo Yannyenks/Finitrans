@@ -2,7 +2,6 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
-import { organisationCourante } from '../config/contexte'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
 import { logActivity } from '../utils/audit'
@@ -42,14 +41,14 @@ const parametresRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // GET /api/parametres/:cle
   fastify.get('/:cle', { preHandler: [authenticate] }, async (request, reply) => {
     const { cle } = z.object({ cle: z.string() }).parse(request.params)
-    const param = await prisma.parametre.findFirst({ where: { cle } })
+    const param = await prisma.parametre.findUnique({ where: { cle } })
     if (!param) return reply.code(404).send({ error: 'NOT_FOUND', message: `Paramètre ${cle} introuvable` })
     return reply.send(param)
   })
 
   async function upsert(cle: string, valeur: Prisma.InputJsonValue, userId: string) {
     const param = await prisma.parametre.upsert({
-      where:  { organisationId_cle: { organisationId: organisationCourante(), cle: cle } },
+      where:  { cle },
       update: { valeur, updatedBy: userId },
       create: { cle, valeur, updatedBy: userId },
     })

@@ -5,14 +5,14 @@ import {
   MapPin, ChevronLeft, ChevronRight, LogOut, Settings,
   ClipboardList, MessageSquare, BarChart3, Banknote,
   CheckSquare, PackageOpen, Truck, BookOpen, Trophy,
-  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library, Gem, Menu, ShieldCheck,
+  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library, Gem, Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { api, logout } from "@/lib/api";
 import { Module, PROFIL_LABELS, useAuth } from "@/lib/permissions";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import MarqueEspace from "./marque/MarqueEspace";
+import FinitransLogo from "./FinitransLogo";
 import { SelecteurDevise } from "@/lib/devise";
 
 type NavItem = {
@@ -130,7 +130,7 @@ function Pastille({ n, type }: { n: number; type?: "alertes" | "taches" }) {
 
 /** Liste des menus (barre latérale de bureau et tiroir mobile). */
 function ListeNavigation({ collapsed = false, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
-  const { user, groupes, hasModule, badges, estActif, location } = useNavigation();
+  const { groupes, hasModule, badges, estActif, location } = useNavigation();
   return (
     <>
       <nav className="flex-1 p-3 overflow-y-auto overscroll-contain" aria-label="Navigation principale">
@@ -166,17 +166,6 @@ function ListeNavigation({ collapsed = false, onNavigate }: { collapsed?: boolea
         })}
       </nav>
       <div className="p-3 space-y-1 border-t border-sidebar-border">
-        {user?.plateformeAdmin && (
-          <NavLink
-            to="/plateforme"
-            onClick={onNavigate}
-            className={cn("sidebar-item", location.pathname === "/plateforme" ? "sidebar-item-active" : "sidebar-item-inactive")}
-            title={collapsed ? "Plateforme" : undefined}
-          >
-            <ShieldCheck className="w-5 h-5 flex-shrink-0" />
-            {!collapsed && <span>Plateforme</span>}
-          </NavLink>
-        )}
         {hasModule("parametres") && (
           <NavLink
             to="/parametres"
@@ -228,7 +217,7 @@ const AppSidebar = () => {
       )}
     >
       <div className="px-3 py-3 flex items-center border-b border-sidebar-border min-h-[68px]">
-        {collapsed ? <MarqueEspace variant="icon" iconSize={42} /> : <MarqueEspace variant="full" darkBg iconSize={46} />}
+        {collapsed ? <FinitransLogo variant="icon" iconSize={42} /> : <FinitransLogo variant="full" darkBg iconSize={46} />}
       </div>
       {!collapsed && <EnteteUtilisateur />}
       <ListeNavigation collapsed={collapsed} />
@@ -249,7 +238,7 @@ export function MenuMobile({ ouvert, onOuvert }: { ouvert: boolean; onOuvert: (v
       <SheetContent side="left" className="w-[86vw] max-w-[320px] p-0 bg-sidebar border-sidebar-border flex flex-col gap-0 [&>button]:text-sidebar-foreground">
         <SheetTitle className="sr-only">Menu de navigation</SheetTitle>
         <div className="px-3 py-3 flex items-center border-b border-sidebar-border min-h-[64px] pt-[max(0.75rem,env(safe-area-inset-top))]">
-          <MarqueEspace variant="full" darkBg iconSize={42} />
+          <FinitransLogo variant="full" darkBg iconSize={42} />
         </div>
         <EnteteUtilisateur />
         <div className="px-4 py-2.5 border-b border-sidebar-border flex items-center justify-between">

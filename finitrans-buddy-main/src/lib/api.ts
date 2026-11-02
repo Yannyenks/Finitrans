@@ -55,17 +55,8 @@ function refreshOnce() {
 
 function sessionExpired(): never {
   clearTokens()
-  window.location.href = '/connexion'
+  window.location.href = '/'
   throw new Error('SESSION_EXPIRED')
-}
-
-/** Refus liés à l'espace de l'entreprise (abonnement, suspension) : la session ne peut pas continuer. */
-const BLOCAGES_ESPACE = new Set(['ESSAI_TERMINE', 'ORGANISATION_SUSPENDUE', 'ABONNEMENT_INACTIF', 'ORGANISATION_INTROUVABLE'])
-
-function espaceBloque(code: string): never {
-  clearTokens()
-  window.location.href = `/connexion?motif=${encodeURIComponent(code)}`
-  throw new Error(code)
 }
 
 const MESSAGE_RESEAU = 'Connexion au serveur interrompue — vérifiez votre connexion internet puis réessayez.'
@@ -123,7 +114,6 @@ async function parseResponse<T>(res: Response): Promise<T> {
     return text as unknown as T
   }
 
-  if (res.status === 402 && BLOCAGES_ESPACE.has(data?.error) && getAccessToken()) espaceBloque(data.error)
   if (!res.ok) throw new ApiError(data?.message ?? `Erreur ${res.status}`, res.status, data?.error)
   return data
 }
@@ -180,21 +170,6 @@ export interface AuthUser {
   compagniesAssignees: string[]
   superviseur?:        boolean
   modules?:            string[]
-  /** Espace de l'entreprise de l'utilisateur */
-  organisation?:       OrganisationSession | null
-  /** Administrateur de la plateforme SaaS */
-  plateformeAdmin?:    boolean
-}
-
-export interface OrganisationSession {
-  id: string
-  slug: string
-  nom: string
-  pays: string
-  devise: string
-  fuseau: string
-  langue: string
-  abonnement: { plan: 'starter' | 'business' | 'enterprise'; libelle: string; statut: string; finEssai: string | null; maxUtilisateurs: number | null }
 }
 
 const USER_EVENT = 'ft-user-updated'
@@ -210,8 +185,7 @@ export function onUserChange(cb: () => void) {
 }
 
 export async function login(email: string, password: string): Promise<AuthUser> {
-  // Appel public : un refus (identifiants, abonnement) est affiché tel quel, sans redirection
-  const data = await apiPublic.post<LoginResponse>('/api/auth/login', { email, password })
+  const data = await api.post<LoginResponse>('/api/auth/login', { email, password })
   setTokens(data.accessToken, data.refreshToken)
   storeUser(data.user)
   return data.user
@@ -233,7 +207,7 @@ export async function logout() {
   const refreshToken = localStorage.getItem('ft_refresh_token') ?? undefined
   try { await api.post('/api/auth/logout', { refreshToken }) } catch { /* ignore */ }
   clearTokens()
-  window.location.href = '/connexion'
+  window.location.href = '/'
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -330,42 +304,4 @@ export async function downloadFile(path: string, filename: string) {
   a.click()
   a.remove()
   setTimeout(() => URL.revokeObjectURL(url), 10_000)
-}
-
-// ── Routes publiques (site vitrine, inscription) ─────────────
-
-/** Appels sans session : aucune redirection de connexion, erreurs renvoyées telles quelles. */
-async function fetchPublic<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers: Record<string, string> = { ...(init.headers as Record<string, string>) }
-  if (init.body !== undefined) headers['Content-Type'] = 'application/json'
-  const res = await fetchReseau(path, { ...init, headers })
-  const text = await res.text()
-  let data: any = undefined
-  try { data = text ? JSON.parse(text) : undefined } catch { /* réponse non JSON */ }
-  if (!res.ok) throw new ApiError(data?.message ?? `Erreur ${res.status}`, res.status, data?.error)
-  return data as T
-}
-
-export const apiPublic = {
-  get:  <T>(path: string) => fetchPublic<T>(path),
-  post: <T>(path: string, body?: unknown) => fetchPublic<T>(path, { method: 'POST', body: JSON.stringify(body ?? {}) }),
-}
-
-export interface DonneesInscription {
-  entreprise: string
-  nom: string
-  email: string
-  password: string
-  pays: string
-  telephone?: string
-  langue: 'fr' | 'en'
-  accepteConditions: boolean
-}
-
-/** Crée l'espace de l'entreprise et ouvre directement la session de son dirigeant. */
-export async function inscrire(donnees: DonneesInscription): Promise<AuthUser> {
-  const data = await apiPublic.post<LoginResponse>('/api/auth/inscription', donnees)
-  setTokens(data.accessToken, data.refreshToken)
-  storeUser(data.user)
-  return data.user
 }

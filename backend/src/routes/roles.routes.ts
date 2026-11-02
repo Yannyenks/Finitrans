@@ -8,7 +8,6 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { DossierStatus, Prisma, Profil } from '@prisma/client'
 import { prisma } from '../config/prisma'
-import { organisationCourante } from '../config/contexte'
 import { authenticate } from '../middleware/authenticate'
 import { requireDG, requireSupervisor } from '../middleware/authorize'
 import {
@@ -63,7 +62,7 @@ const rolesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { appliquerAuxComptes, ...patch } = body
     overrides[profil] = { ...(overrides[profil] ?? {}), ...patch } as never
     await prisma.parametre.upsert({
-      where:  { organisationId_cle: { organisationId: organisationCourante(), cle: 'roles_config' } },
+      where:  { cle: 'roles_config' },
       update: { valeur: overrides as Prisma.InputJsonValue, updatedBy: request.user.id },
       create: { cle: 'roles_config', valeur: overrides as Prisma.InputJsonValue, updatedBy: request.user.id, description: 'Modèles de rôles personnalisés' },
     })
@@ -86,7 +85,7 @@ const rolesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const overrides = { ...(await loadRoleOverrides()) }
     delete overrides[profil]
     await prisma.parametre.upsert({
-      where:  { organisationId_cle: { organisationId: organisationCourante(), cle: 'roles_config' } },
+      where:  { cle: 'roles_config' },
       update: { valeur: overrides as Prisma.InputJsonValue, updatedBy: request.user.id },
       create: { cle: 'roles_config', valeur: overrides as Prisma.InputJsonValue, updatedBy: request.user.id },
     })
@@ -193,7 +192,7 @@ const rolesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       }
     }
 
-    const existing = await prisma.parametre.findFirst({ where: { cle: 'attribution_etapes' } })
+    const existing = await prisma.parametre.findUnique({ where: { cle: 'attribution_etapes' } })
     const merged = { ...((existing?.valeur ?? {}) as Record<string, { owner?: Profil; sousEtapes?: Record<string, Profil> }>) }
     for (const [etape, cfg] of Object.entries(body)) {
       merged[etape] = {
@@ -202,7 +201,7 @@ const rolesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       }
     }
     await prisma.parametre.upsert({
-      where:  { organisationId_cle: { organisationId: organisationCourante(), cle: 'attribution_etapes' } },
+      where:  { cle: 'attribution_etapes' },
       update: { valeur: merged as Prisma.InputJsonValue, updatedBy: request.user.id },
       create: { cle: 'attribution_etapes', valeur: merged as Prisma.InputJsonValue, updatedBy: request.user.id, description: 'Attribution des étapes du workflow aux profils' },
     })

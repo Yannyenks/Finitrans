@@ -1,2 +1,0 @@
-# Migrations SQL : fins de ligne fixes (leur empreinte est contrôlée au déploiement)
-*.sql text eol=lf

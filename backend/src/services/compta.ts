@@ -4,8 +4,7 @@
  * automatique des opérations de transit, états financiers.
  */
 import { Prisma, TypeCompte, TypeJournal } from '@prisma/client'
-import { prisma, type ClientTransaction } from '../config/prisma'
-import { organisationCourante } from '../config/contexte'
+import { prisma } from '../config/prisma'
 import { AppError } from '../utils/errors'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 
@@ -109,14 +108,14 @@ export function resetReferentielCache() { referentielPret = false }
 // ── Exercices ───────────────────────────────────────────────────────────────
 
 /** Exercice ouvert contenant la date (créé automatiquement sur l'année civile si absent). */
-export async function exercicePourDate(date: Date, tx: ClientTransaction = prisma) {
+export async function exercicePourDate(date: Date, tx: Prisma.TransactionClient = prisma) {
   let exercice = await tx.exerciceComptable.findFirst({
     where: { dateDebut: { lte: date }, dateFin: { gte: date } },
   })
   if (!exercice) {
     const annee = date.getUTCFullYear()
     exercice = await tx.exerciceComptable.upsert({
-      where: { organisationId_code: { organisationId: organisationCourante(), code: String(annee) } },
+      where: { code: String(annee) },
       update: {},
       create: {
         code: String(annee),
@@ -177,7 +176,7 @@ export async function creerEcriture(input: EcritureInput, userId: string) {
   await ensureReferentiel()
   const { actives } = verifierEquilibre(input.lignes)
 
-  const journal = await prisma.journalComptable.findFirst({ where: { code: input.journal } })
+  const journal = await prisma.journalComptable.findUnique({ where: { code: input.journal } })
   if (!journal || !journal.actif) throw new AppError(422, 'JOURNAL_INCONNU', `Journal ${input.journal} introuvable ou inactif`)
 
   const numeros = [...new Set(actives.map(l => l.compte))]
@@ -407,7 +406,7 @@ export async function balance(f: FiltreEtat) {
 }
 
 export async function grandLivre(compteNumero: string, f: FiltreEtat) {
-  const compte = await prisma.compteComptable.findFirst({ where: { numero: compteNumero } })
+  const compte = await prisma.compteComptable.findUnique({ where: { numero: compteNumero } })
   if (!compte) throw new AppError(404, 'NOT_FOUND', `Compte ${compteNumero} introuvable`)
 
   const ouverture = f.from

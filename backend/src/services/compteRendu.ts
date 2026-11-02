@@ -14,9 +14,6 @@ import { SOUS_ETAPES_CONFIG, STATUS_LABELS, stagesForSite } from './workflow'
 import { nomCompagnie } from './compagnies'
 import { LIBELLES_ACTION } from '../utils/audit'
 import type { DossierStatus } from '@prisma/client'
-import { organisationDuContexte } from '../config/contexte'
-import { NOM_PLATEFORME } from '../config/marque'
-import { chargerOrganisation } from './organisations'
 
 /** « 3 TC : 2 × 40' HC · 1 × 20' Dry » ou « 2 x 40' HC » */
 function resumeTC(d: { conteneurs?: unknown; nombreConteneurs: number; tailleConteneur: string | null }) {
@@ -63,28 +60,15 @@ function logo(): Buffer | null {
   return logoCache
 }
 
-/** Identité visuelle des documents d'une organisation : logo s'il en a un, sinon sa raison sociale. */
-export interface Marque { logo: Buffer | null; nom: string }
-
-/**
- * Le logo fourni avec l'application est celui de FINITRANS : il n'est utilisé que pour FINITRANS.
- * Les autres organisations voient leur raison sociale (logo personnalisé : évolution prévue).
- */
-export async function marqueDocuments(raisonSociale: string): Promise<Marque> {
-  const organisationId = organisationDuContexte()
-  const org = organisationId ? await chargerOrganisation(organisationId) : null
-  const estFinitrans = !organisationId || org?.slug === 'finitrans'
-  return { logo: estFinitrans ? logo() : null, nom: raisonSociale }
-}
-
-/** Dessine le logo recadré sur son contenu (ou le nom de l'entreprise) ; renvoie la hauteur utilisée. */
-export function dessinerLogo(doc: PDFKit.PDFDocument, x: number, y: number, largeur: number, marque: Marque): number {
-  const img = marque.logo
+/** Dessine le logo recadré sur son contenu ; renvoie la hauteur utilisée. */
+export function dessinerLogo(doc: PDFKit.PDFDocument, x: number, y: number, largeur: number): number {
+  const img = logo()
   const echelle = largeur / LOGO_BOITE.w
   const hauteur = LOGO_BOITE.h * echelle
   if (!img) {
-    doc.font('Helvetica-Bold').fontSize(largeur / 9).fillColor(C.marine).text(txt(marque.nom), x, y, { width: largeur * 2.2, lineBreak: false })
-    return largeur / 9 + 4
+    doc.font('Helvetica-Bold').fontSize(largeur / 7).fillColor(C.marine).text('FINI', x, y, { continued: true })
+      .font('Helvetica').fillColor(C.marine).text('TRANS')
+    return largeur / 7 + 4
   }
   doc.save()
   doc.rect(x, y, largeur, hauteur).clip()
@@ -354,14 +338,13 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   const fin = cloture ? (timingCloture?.dateDebut ?? maintenant) : maintenant
   const debut = dossier.dateCreation
   const reference = createHash('sha256').update(`${dossier.id}:${dossier.updatedAt.toISOString()}:${maintenant.toISOString()}`).digest('hex').slice(0, 12).toUpperCase()
-  const raison = txt(String(entreprise.raisonSociale || ''))
-  const marque = await marqueDocuments(raison)
+  const raison = txt(entreprise.raisonSociale ?? 'FINITRANS')
 
   const doc = new PDFDocument({
     size: 'A4', margins: { top: MARGE, bottom: 30, left: MARGE, right: MARGE }, bufferPages: true,
     info: {
       Title: `Compte rendu du parcours — dossier ${dossier.numero}`, Author: raison,
-      Subject: `Parcours complet du dossier ${dossier.numero} — ${dossier.client}`, Creator: NOM_PLATEFORME,
+      Subject: `Parcours complet du dossier ${dossier.numero} — ${dossier.client}`, Creator: 'Plateforme FINITRANS',
     },
   })
   const morceaux: Buffer[] = []
@@ -371,7 +354,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
 
   // En-tête courant des pages suivantes : logo, dossier, filet aux couleurs du logo
   doc.on('pageAdded', () => {
-    dessinerLogo(doc, MARGE, 20, 92, marque)
+    dessinerLogo(doc, MARGE, 20, 92)
     doc.font('Helvetica-Bold').fontSize(8).fillColor(C.marine).text(txt(`Dossier ${dossier.numero}`), MARGE + LARGEUR - 220, 24, { width: 220, align: 'right' })
     doc.font('Helvetica').fontSize(7).fillColor(C.gris).text(txt(dossier.client), MARGE + LARGEUR - 220, 35, { width: 220, align: 'right', lineBreak: false, ellipsis: true })
     doc.save().rect(MARGE, 58, LARGEUR * 0.7, 1.4).fill(C.orange).restore()
@@ -381,7 +364,7 @@ export async function genererCompteRendu(dossierId: string, generePar?: { nom: s
   })
 
   // ── Page de garde : bandeau logo + carte d'identité du dossier ─────────────
-  dessinerLogo(doc, MARGE, 30, 168, marque)
+  dessinerLogo(doc, MARGE, 30, 168)
   doc.font('Helvetica').fontSize(7.2).fillColor(C.gris)
     .text(txt([entreprise.formeJuridique, entreprise.agrementCommissionnaire ? `Agrément ${entreprise.agrementCommissionnaire}` : null].filter(Boolean).join(' · ') || 'Commissionnaire agréé en douane'), MARGE, 108, { width: 300 })
     .text(txt([entreprise.adresse, entreprise.telephone, entreprise.email].filter(Boolean).join(' · ')), MARGE, 118, { width: 300 })

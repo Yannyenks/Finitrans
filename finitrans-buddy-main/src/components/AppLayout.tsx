@@ -6,7 +6,7 @@ import { Search, LogOut, Menu, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import NotificationPanel from "./NotificationPanel";
 import DIAlarme from "./DIAlarme";
-import MarqueEspace, { BandeauAbonnement } from "./marque/MarqueEspace";
+import FinitransLogo from "./FinitransLogo";
 import { api, logout } from "@/lib/api";
 import { SelecteurDevise, definirTaux } from "@/lib/devise";
 import { PROFIL_LABELS, useAuth } from "@/lib/permissions";
@@ -42,14 +42,13 @@ const AppLayout = ({ children, title, subtitle }: AppLayoutProps) => {
       <AppSidebar />
       <MenuMobile ouvert={menuOuvert} onOuvert={setMenuOuvert} />
       <div className="flex-1 min-w-0 flex flex-col min-h-screen overflow-x-hidden">
-        <BandeauAbonnement />
         <header className="sticky top-0 z-30 bg-background/85 backdrop-blur-md border-b border-border px-3 sm:px-6 py-2.5 sm:py-4 pt-[max(0.625rem,env(safe-area-inset-top))]">
           <div className="flex items-center justify-between gap-2 sm:gap-4">
             <button type="button" onClick={() => setMenuOuvert(true)} aria-label="Ouvrir le menu"
               className="lg:hidden -ml-1 w-10 h-10 shrink-0 rounded-xl flex items-center justify-center text-foreground hover:bg-muted active:bg-muted">
               <Menu className="w-5 h-5" />
             </button>
-            <div className="lg:hidden shrink-0"><MarqueEspace variant="icon" iconSize={30} /></div>
+            <div className="lg:hidden shrink-0"><FinitransLogo variant="icon" iconSize={30} /></div>
             <div className="min-w-0 flex-1">
               <h1 className="text-base sm:text-xl font-display font-bold text-foreground truncate leading-tight">{title}</h1>
               {subtitle && <p className="text-[11px] sm:text-sm text-muted-foreground truncate">{subtitle}</p>}

@@ -56,7 +56,7 @@ export default function FactureClientDialog({ dossierId, loading, onConfirm, onC
             <div>
               <p className="text-[10px] uppercase tracking-[0.2em] text-secondary font-semibold">Facturation client</p>
               <h3 className="font-display text-lg font-bold">Facture — {prop?.client?.nom ?? "…"}</h3>
-              <p className="text-xs text-primary-foreground/70">La facture est numérotée, enregistrée en Finance et générée en PDF à l’identité de votre entreprise.</p>
+              <p className="text-xs text-primary-foreground/70">La facture est numérotée, enregistrée en Finance et générée en PDF aux couleurs FINITRANS.</p>
             </div>
           </div>
         </div>

@@ -3,9 +3,8 @@
  * des tâches aux comptes selon leur profil (et leurs compagnies / site).
  */
 import { DossierStatus, Profil, Site, Prisma } from '@prisma/client'
-import { prisma, type ClientTransaction } from '../config/prisma'
+import { prisma } from '../config/prisma'
 import { marquerNotifies } from './evenements'
-import { cacheParOrganisation } from '../utils/cacheOrganisation'
 
 export const STATUS_ORDER: DossierStatus[] = [
   'reception', 'soumission_sgs', 'codage', 'validation',
@@ -134,14 +133,11 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
   facturation: { owner: 'comptabilite', sousEtapes: { facture_client: 'comptabilite', remise_facture: 'comptabilite' } },
 }
 
-const attrCache = cacheParOrganisation<AttributionConfig>(30_000)
+let attrCache: { at: number; value: AttributionConfig } | null = null
 
 export async function loadAttribution(): Promise<AttributionConfig> {
-  return attrCache.obtenir(chargerAttribution)
-}
-
-async function chargerAttribution(): Promise<AttributionConfig> {
-  const row = await prisma.parametre.findFirst({ where: { cle: 'attribution_etapes' } })
+  if (attrCache && Date.now() - attrCache.at < 30_000) return attrCache.value
+  const row = await prisma.parametre.findUnique({ where: { cle: 'attribution_etapes' } })
   const overrides = (row?.valeur ?? {}) as Partial<Record<DossierStatus, Partial<StageAttribution>>>
   const value = {} as AttributionConfig
   for (const etape of STATUS_ORDER) {
@@ -149,10 +145,11 @@ async function chargerAttribution(): Promise<AttributionConfig> {
     const o = overrides[etape] ?? {}
     value[etape] = { owner: o.owner ?? base.owner, sousEtapes: { ...base.sousEtapes, ...(o.sousEtapes ?? {}) } }
   }
+  attrCache = { at: Date.now(), value }
   return value
 }
 
-export function invalidateAttributionCache() { attrCache.invalider() }
+export function invalidateAttributionCache() { attrCache = null }
 
 /** Profils dont le périmètre dépend des compagnies maritimes assignées. */
 const SCOPED_BY_COMPAGNIE: Profil[] = ['gestion_sorties', 'terrain_kribi']
@@ -165,7 +162,7 @@ const SCOPED_BY_COMPAGNIE: Profil[] = ['gestion_sorties', 'terrain_kribi']
 export async function resolveAssignee(
   profil: Profil,
   dossier: { compagnie: string; site: Site },
-  tx: ClientTransaction = prisma,
+  tx: Prisma.TransactionClient = prisma,
 ): Promise<string | null> {
   let candidates = await tx.user.findMany({
     where: { profil, actif: true },
@@ -193,7 +190,7 @@ export async function resolveAssignee(
 }
 
 /** Crée les sous-étapes applicables d'un dossier et les attribue automatiquement. */
-export async function initSousEtapes(dossierId: string, tx: ClientTransaction = prisma) {
+export async function initSousEtapes(dossierId: string, tx: Prisma.TransactionClient = prisma) {
   const dossier = await tx.dossier.findUnique({ where: { id: dossierId }, select: { id: true, compagnie: true, site: true, status: true } })
   if (!dossier) return
   const parcours = stagesForSite(dossier.site)
@@ -299,7 +296,7 @@ export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
 }
 
 export async function loadSlaSousEtapes(): Promise<Record<string, number>> {
-  const row = await prisma.parametre.findFirst({ where: { cle: 'sla_sous_etapes' } })
+  const row = await prisma.parametre.findUnique({ where: { cle: 'sla_sous_etapes' } })
   return { ...DEFAULT_SLA_SOUS_ETAPES, ...((row?.valeur ?? {}) as Record<string, number>) }
 }
 

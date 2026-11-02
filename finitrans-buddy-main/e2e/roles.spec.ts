@@ -15,11 +15,11 @@ const PAGES: [string, string][] = [
 const COMPTES = ["delba", "soudi", "yaya", "odette", "wandala", "rasoul", "yasmine", "honore", "aliou", "raphael"];
 
 async function connexion(page: Page, compte: string) {
-  await page.goto("/connexion");
+  await page.goto("/");
   await page.locator('input[type="email"], input[name="email"], input[placeholder*="mail" i]').first().fill(`${compte}@finitrans.cm`);
   await page.locator('input[type="password"]').first().fill(PASSWORD);
   await page.locator('button[type="submit"]').first().click();
-  await page.waitForURL(url => !url.pathname.startsWith("/connexion"), { timeout: 30_000 });
+  await page.waitForURL(url => !url.pathname.endsWith("/") || url.pathname.length > 1, { timeout: 30_000 });
   await page.waitForLoadState("networkidle");
 }
 

@@ -6,11 +6,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ApiError, refreshSessionUser } from "@/lib/api";
 import RequireModule from "@/components/RequireModule";
-// Site public et connexion chargés à la demande : un visiteur ne télécharge que la page qu'il ouvre
-const Landing = lazy(() => import("./pages/Landing"));
-const Login = lazy(() => import("./pages/Login"));
-const Inscription = lazy(() => import("./pages/Inscription"));
-const Plateforme = lazy(() => import("./pages/Plateforme"));
+import Login from "./pages/Login";
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Dossiers = lazy(() => import("./pages/Dossiers"));
 const DossierDetail = lazy(() => import("./pages/DossierDetail"));
@@ -124,10 +120,7 @@ const App = () => (
       <BrowserRouter>
         <AffichageDevise>
         <Routes>
-          <Route path="/" element={<Suspense fallback={<Chargement />}><Landing /></Suspense>} />
-          <Route path="/connexion" element={<Suspense fallback={<Chargement />}><Login /></Suspense>} />
-          <Route path="/inscription" element={<Suspense fallback={<Chargement />}><Inscription /></Suspense>} />
-          <Route path="/plateforme"           element={R(undefined, <Plateforme />)} />
+          <Route path="/" element={<Login />} />
           <Route path="/suivi/:token" element={<Suspense fallback={<Chargement />}><SuiviClient /></Suspense>} />
           <Route path="/dashboard"            element={R("dashboard", <Dashboard />)} />
           <Route path="/mon-espace"           element={R("mon_espace", <MonEspace />)} />

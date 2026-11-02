@@ -16,8 +16,6 @@ export interface AuthUser {
   nom: string
   profil: Profil
   site: Site
-  /** Organisation de rattachement (toujours renseignée : un compte sans organisation est refusé) */
-  organisationId: string
   compagniesAssignees: string[]
   permDossier: PermissionNiveau
   permValidation: PermissionNiveau
@@ -27,8 +25,6 @@ export interface AuthUser {
   /** DG / Exploitation : contrôle total, supervision */
   superviseur: boolean
   modules: ModuleKey[]
-  /** Administrateur de la plateforme SaaS (liste PLATFORM_ADMIN_EMAILS côté serveur) */
-  plateformeAdmin: boolean
 }
 
 // Hiérarchie des niveaux de permission

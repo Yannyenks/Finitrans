@@ -97,7 +97,7 @@ export async function enregistrerDepuisSousEtape(
     const montant = nombre(meta.paiement_montant)
     if (!montant) return null
     const base = texte(meta.paiement_quittance) ?? texte(meta.reference) ?? `QIT-${dossier.numero}`
-    const reference = await referenceLibre(base, async r => !!(await prisma.paiementDouane.findFirst({ where: { reference: r } })))
+    const reference = await referenceLibre(base, async r => !!(await prisma.paiementDouane.findUnique({ where: { reference: r } })))
     const p = await prisma.paiementDouane.create({
       data: { dossierId, type: 'droits', montant, statut: 'paye', reference, datePaiement: date(meta.paiement_date) },
     })
@@ -117,7 +117,7 @@ export async function enregistrerDepuisSousEtape(
     const montant = nombre(meta[cfg.montant])
     if (!montant) return null
     const base = texte(meta[cfg.numero]) ?? `${cfg.type === 'terminal' ? 'TERM' : 'CIE'}-${dossier.numero}`
-    const reference = await referenceLibre(base, async r => !!(await prisma.paiementCompagnie.findFirst({ where: { reference: r } })))
+    const reference = await referenceLibre(base, async r => !!(await prisma.paiementCompagnie.findUnique({ where: { reference: r } })))
     const p = await prisma.paiementCompagnie.create({
       data: { dossierId, compagnie: dossier.compagnie, type: cfg.type, montant, statut: 'paye', reference, datePaiement: date(meta[cfg.date]) },
     })

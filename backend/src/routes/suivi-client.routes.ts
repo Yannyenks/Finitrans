@@ -7,9 +7,6 @@ import { FastifyInstance, FastifyPluginAsync } from 'fastify'
 import { z } from 'zod'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
-import { dossierDeOrganisation } from '../middleware/organisation'
-import { definirOrganisation } from '../config/contexte'
-import { chargerOrganisation } from '../services/organisations'
 import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 import { logAudit } from '../utils/audit'
 import { AppError, NotFoundError } from '../utils/errors'
@@ -51,7 +48,7 @@ const suiviClientRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   }
 
   // GET /api/dossiers/:id/suivi-client — état du lien et actualités publiées
-  fastify.get('/:id/suivi-client', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
+  fastify.get('/:id/suivi-client', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const d = await charger(id, request.user)
     const actualites = await prisma.actualiteClient.findMany({ where: { dossierId: id }, orderBy: { createdAt: 'desc' } })
@@ -59,7 +56,7 @@ const suiviClientRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   })
 
   // POST /api/dossiers/:id/suivi-client — créer (ou renouveler) le lien de suivi
-  fastify.post('/:id/suivi-client', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
+  fastify.post('/:id/suivi-client', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const { renouveler } = z.object({ renouveler: z.boolean().optional() }).parse(request.body ?? {})
     const d = await charger(id, request.user)
@@ -71,7 +68,7 @@ const suiviClientRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   })
 
   // DELETE /api/dossiers/:id/suivi-client — désactiver le lien
-  fastify.delete('/:id/suivi-client', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
+  fastify.delete('/:id/suivi-client', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     await charger(id, request.user)
     await prisma.dossier.update({ where: { id }, data: { suiviToken: null } })
@@ -80,7 +77,7 @@ const suiviClientRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   })
 
   // POST /api/dossiers/:id/suivi-client/actualites — message pour le client
-  fastify.post('/:id/suivi-client/actualites', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
+  fastify.post('/:id/suivi-client/actualites', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
       message: z.string().trim().min(2).max(1500),
@@ -93,7 +90,7 @@ const suiviClientRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =
   })
 
   // DELETE /api/dossiers/:id/suivi-client/actualites/:aid
-  fastify.delete('/:id/suivi-client/actualites/:aid', { preHandler: [authenticate, dossierDeOrganisation] }, async (request, reply) => {
+  fastify.delete('/:id/suivi-client/actualites/:aid', { preHandler: [authenticate] }, async (request, reply) => {
     const { id, aid } = z.object({ id: z.string().uuid(), aid: z.string().uuid() }).parse(request.params)
     await charger(id, request.user)
     await prisma.actualiteClient.deleteMany({ where: { id: aid, dossierId: id } })
@@ -112,9 +109,7 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
         actualitesClient: { orderBy: { createdAt: 'desc' }, take: 50 },
       },
     })
-    if (!d) return reply.code(404).send({ error: 'LIEN_INVALIDE', message: 'Ce lien de suivi n\'est plus valide. Contactez votre transitaire pour en obtenir un nouveau.' })
-    // Le lien désigne un dossier : la suite (fiche entreprise, compagnies) est bornée à son organisation
-    if (d.organisationId) definirOrganisation(d.organisationId)
+    if (!d) return reply.code(404).send({ error: 'LIEN_INVALIDE', message: 'Ce lien de suivi n\'est plus valide. Contactez FINITRANS pour en obtenir un nouveau.' })
 
     const parcoursSite = stagesForSite(d.site)
     const parcours = parcoursSite.filter((e, i) => e !== 'operations_douala' || i >= parcoursSite.indexOf(d.status) || d.timings.some(t => t.etape === e))
@@ -129,7 +124,6 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
     })
     const progression = termine ? 100 : Math.round((Math.max(0, iCourant) / Math.max(1, parcours.length - 1)) * 100)
     const entreprise = await getEntreprise() as Record<string, unknown>
-    const organisation = d.organisationId ? await chargerOrganisation(d.organisationId) : null
     const conteneurs = Array.isArray(d.conteneurs) && d.conteneurs.length
       ? (d.conteneurs as { numero?: string; taille?: string }[]).map(c => ({ numero: String(c.numero ?? ''), taille: String(c.taille ?? '') }))
       : d.conteneur.split(/[,;\s]+/).filter(Boolean).map(numero => ({ numero, taille: d.tailleConteneur ?? '' }))
@@ -145,10 +139,8 @@ export const suiviPublicRoutes: FastifyPluginAsync = async (fastify: FastifyInst
       etapes,
       actualites: d.actualitesClient.map(a => ({ id: a.id, message: a.message, illustration: a.illustration, auteur: a.auteurNom, date: a.createdAt })),
       entreprise: {
-        nom: entreprise.raisonSociale || null, telephone: entreprise.telephone || null, email: entreprise.email || null,
+        nom: entreprise.raisonSociale ?? 'FINITRANS', telephone: entreprise.telephone || null, email: entreprise.email || null,
         adresse: entreprise.adresse || null, siteWeb: entreprise.siteWeb || null,
-        // Le logo fourni avec l'application n'est affiché que pour l'organisation historique
-        logoHistorique: organisation?.slug === 'finitrans',
       },
       misAJour: d.updatedAt,
     })

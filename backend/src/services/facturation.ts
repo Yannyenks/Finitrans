@@ -1,6 +1,6 @@
 /**
  * Facturation du dossier au client (étape « Facturation client », après la clôture) :
- * proposition pré-remplie depuis le dossier, création de la facture et facture PDF à l'identité de l'organisation.
+ * proposition pré-remplie depuis le dossier, création de la facture et facture PDF aux couleurs FINITRANS.
  */
 import { createHash } from 'crypto'
 import PDFDocument from 'pdfkit'
@@ -8,8 +8,7 @@ import { prisma } from '../config/prisma'
 import { getEntreprise } from '../routes/admin.routes'
 import { nextSequence, withUniqueRetry } from '../utils/sequence'
 import { AppError } from '../utils/errors'
-import { C, dessinerLogo, marqueDocuments, txt } from './compteRendu'
-import { NOM_PLATEFORME } from '../config/marque'
+import { C, dessinerLogo, txt } from './compteRendu'
 import { nomCompagnie } from './compagnies'
 
 export type NatureLigne = 'honoraires' | 'debours'
@@ -126,7 +125,7 @@ export async function enregistrerFacturePhysique(dossierId: string, meta: Record
   const numero = String(meta.fc_numero ?? '').trim().toUpperCase()
   const montant = Math.round(Number(String(meta.fc_montant ?? '').replace(/\s/g, '').replace(',', '.')))
   if (!numero || !(montant > 0)) throw new AppError(422, 'FACTURE_INCOMPLETE', 'Indiquez le n° et le montant TTC de la facture établie.')
-  const doublon = await prisma.facture.findFirst({ where: { numero }, select: { dossier: { select: { numero: true } } } })
+  const doublon = await prisma.facture.findUnique({ where: { numero }, select: { dossier: { select: { numero: true } } } })
   if (doublon) throw new AppError(409, 'FACTURE_DUPLIQUEE', `La facture n° ${numero} est déjà enregistrée (dossier ${doublon.dossier.numero}).`)
   const date = typeof meta.fc_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(meta.fc_date) ? new Date(`${meta.fc_date}T12:00:00`) : new Date()
   return prisma.facture.create({
@@ -146,8 +145,7 @@ export async function genererFacturePdf(factureId: string): Promise<{ buffer: Bu
   if (!f) return null
   const d = f.dossier
   const entreprise = await getEntreprise() as Record<string, any>
-  const raison = txt(String(entreprise.raisonSociale || ''))
-  const marque = await marqueDocuments(raison)
+  const raison = txt(entreprise.raisonSociale ?? 'FINITRANS')
   const brutes = Array.isArray(f.lignes) ? (f.lignes as unknown as LigneFacture[]) : []
   const lignes: LigneFacture[] = brutes.length ? brutes : [{ libelle: f.description, montant: Number(f.montant) - Number(f.montantTVA ?? 0) - Number(f.montantDebours ?? 0), nature: 'honoraires' }]
   const honoraires = lignes.filter(l => l.nature === 'honoraires').reduce((s, l) => s + Number(l.montant), 0)
@@ -158,14 +156,14 @@ export async function genererFacturePdf(factureId: string): Promise<{ buffer: Bu
   const compagnie = await nomCompagnie(d.compagnie)
   const empreinte = createHash('sha256').update(`${f.id}:${f.numero}:${ttc}`).digest('hex').slice(0, 10).toUpperCase()
 
-  const doc = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 30, left: 42, right: 42 }, info: { Title: `Facture ${f.numero}`, Author: raison, Creator: NOM_PLATEFORME } })
+  const doc = new PDFDocument({ size: 'A4', margins: { top: 40, bottom: 30, left: 42, right: 42 }, info: { Title: `Facture ${f.numero}`, Author: raison, Creator: 'Plateforme FINITRANS' } })
   const morceaux: Buffer[] = []
   doc.on('data', (c: Buffer) => morceaux.push(c))
   const fin = new Promise<Buffer>(r => doc.on('end', () => r(Buffer.concat(morceaux))))
   const M = 42, L = 595.28 - 84
 
   // En-tête : logo + coordonnées / titre FACTURE
-  dessinerLogo(doc, M, 34, 170, marque)
+  dessinerLogo(doc, M, 34, 170)
   // Coordonnées de l'entreprise : seules les lignes renseignées sont imprimées
   const coordonnees = [
     [entreprise.formeJuridique, entreprise.capital ? `Capital ${nombre(entreprise.capital)} FCFA` : null],

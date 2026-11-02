@@ -8,7 +8,7 @@ import { Button } from "./ui/button";
 
 /** Page d'accueil selon le rôle : la Direction pilote, les autres employés arrivent sur leurs Alertes. */
 export function homeFor(user: AuthUser | null): string {
-  if (!user) return "/connexion";
+  if (!user) return "/";
   if (user.profil === "dg") return "/dashboard";
   if (isSupervisor(user)) return "/supervision";
   return hasModule(user, "alertes") ? "/alertes" : "/dashboard";
@@ -39,7 +39,7 @@ const AccesRefuse = ({ module }: { module: Module }) => {
 /** Route protégée : authentification + module attribué au rôle. */
 const RequireModule = ({ module, children }: { module?: Module; children: ReactNode }) => {
   const { user } = useAuth();
-  if (!isAuthenticated()) return <Navigate to="/connexion" replace />;
+  if (!isAuthenticated()) return <Navigate to="/" replace />;
   if (module && !hasModule(user, module)) return <AccesRefuse module={module} />;
   return <>{children}</>;
 };

@@ -1,32 +1,17 @@
 {
-  "name": "Transit Intelligence OS",
-  "short_name": "Transit OS",
-  "description": "Le système d'exploitation des entreprises de transit et de commission en douane",
+  "name": "FINITRANS — Transit & Dédouanement",
+  "short_name": "FINITRANS",
+  "description": "Gestion des dossiers de transit et de dédouanement — Douala & Kribi",
   "lang": "fr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#FFFFFF",
-  "theme_color": "#0B1A2E",
+  "theme_color": "#0F2440",
   "icons": [
-    {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "/icon-maskable-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

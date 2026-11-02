@@ -71,7 +71,7 @@ function memoriserVues(userId: string, set: Set<string>) {
   try { sessionStorage.setItem(`ft_notifs_vues_${userId}`, JSON.stringify([...set].slice(-200))); } catch { /* stockage indisponible */ }
 }
 
-const TITRE_PAGE = typeof document !== "undefined" ? document.title.replace(/^\(\d+\)\s*/, "") : "Transit Intelligence OS";
+const TITRE_PAGE = typeof document !== "undefined" ? document.title.replace(/^\(\d+\)\s*/, "") : "FINITRANS";
 
 /**
  * Notifications personnelles en direct : interrogées toutes les 10 s.

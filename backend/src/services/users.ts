@@ -2,8 +2,6 @@ import bcrypt from 'bcryptjs'
 import { z } from 'zod'
 import { Profil } from '@prisma/client'
 import { prisma } from '../config/prisma'
-import { organisationCourante, sansIsolation } from '../config/contexte'
-import { chargerOrganisation, estAdminPlateforme, maxUtilisateurs, modulesDuPlan, resumeOrganisation } from './organisations'
 import { ALL_PROFILS, getRoleTemplate, getRoleTemplates, isSupervisor } from '../config/roles'
 import { AuthUser } from '../types'
 import { AppError, ConflictError, ForbiddenError } from '../utils/errors'
@@ -45,30 +43,15 @@ export function assertCanGrantProfil(actor: AuthUser, profil: Profil) {
   if (profil === 'dg' && actor.profil !== 'dg') throw new ForbiddenError('Seul le Directeur Général peut attribuer le profil DG')
 }
 
-/** Refuse un compte actif de plus si l'offre de l'organisation est à sa limite. */
-export async function verifierLimiteUtilisateurs(organisationId: string) {
-  const organisation = await chargerOrganisation(organisationId)
-  const limite = organisation ? maxUtilisateurs(organisation) : null
-  if (limite !== null && (await prisma.user.count({ where: { actif: true } })) >= limite) {
-    throw new AppError(402, 'LIMITE_UTILISATEURS', `Votre offre est limitée à ${limite} utilisateurs actifs. Passez à l'offre supérieure pour en ajouter.`)
-  }
-}
-
 export async function createUser(actor: AuthUser, input: z.infer<typeof createUserSchema>) {
   assertCanGrantProfil(actor, input.profil)
-  if (estCompteArchive(input.email)) throw new AppError(422, 'EMAIL_RESERVE', 'Cette adresse est réservée')
-  // L'email identifie l'espace de l'entreprise : il est unique sur toute la plateforme
-  const exists = await sansIsolation(() => prisma.user.findUnique({ where: { email: input.email }, select: { id: true } }))
+  const exists = await prisma.user.findUnique({ where: { email: input.email } })
   if (exists) throw new ConflictError('Cet email est déjà utilisé')
-
-  // Limite d'utilisateurs actifs de l'offre (appliquée côté serveur)
-  await verifierLimiteUtilisateurs(actor.organisationId)
 
   const template = await getRoleTemplate(input.profil)
   const passwordHash = await bcrypt.hash(input.password, 12)
   return prisma.user.create({
     data: {
-      organisationId: actor.organisationId,
       email: input.email,
       passwordHash,
       nom: input.nom,
@@ -97,10 +80,8 @@ export async function assertNotLastDG(userId: string) {
 
 /** Profil public enrichi (modules, libellé du rôle) renvoyé au frontend. */
 export async function buildSessionUser(userId: string) {
-  const user = await prisma.user.findUnique({ where: { id: userId }, select: { ...SAFE_USER_SELECT, organisationId: true } })
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: SAFE_USER_SELECT })
   if (!user) return null
-  const organisation = user.organisationId ? await chargerOrganisation(user.organisationId) : null
-  const modulesPlan = organisation ? modulesDuPlan(organisation) : []
   const templates = await getRoleTemplates()
   const template = templates[user.profil]
   const superviseur = isSupervisor(user.profil)
@@ -111,29 +92,22 @@ export async function buildSessionUser(userId: string) {
     ...user,
     ...perms,
     superviseur,
-    modules: template.modules.filter(m => modulesPlan.includes(m)),
+    modules: template.modules,
     profilLabel: template.label,
-    organisation: organisation ? resumeOrganisation(organisation) : null,
-    plateformeAdmin: estAdminPlateforme(user.email),
   }
 }
 
 // ── Suppression définitive d'un compte ───────────────────────────────────────
 
-/**
- * Compte d'archive (inactif, invisible) qui porte l'historique des comptes supprimés.
- * Un par organisation : l'historique d'une entreprise n'est jamais rattaché au compte d'une autre.
- * Les adresses en « .archive » sont réservées à ces comptes.
- */
-export const SUFFIXE_COMPTE_ARCHIVE = '.archive'
-export const estCompteArchive = (email: string) => email.toLowerCase().endsWith(SUFFIXE_COMPTE_ARCHIVE)
+/** Compte d'archive (inactif, invisible) qui porte l'historique des comptes supprimés. */
+export const EMAIL_COMPTE_ARCHIVE = 'compte-supprime@finitrans.archive'
 
 async function compteArchive(): Promise<string> {
-  const existant = await prisma.user.findFirst({ where: { role: 'Archive', actif: false, email: { endsWith: SUFFIXE_COMPTE_ARCHIVE } }, select: { id: true } })
+  const existant = await prisma.user.findUnique({ where: { email: EMAIL_COMPTE_ARCHIVE }, select: { id: true } })
   if (existant) return existant.id
   const cree = await prisma.user.create({
     data: {
-      email: `compte-supprime.${organisationCourante()}@plateforme${SUFFIXE_COMPTE_ARCHIVE}`, nom: 'Compte supprimé', role: 'Archive', site: 'Douala', profil: 'administration', actif: false,
+      email: EMAIL_COMPTE_ARCHIVE, nom: 'Compte supprimé', role: 'Archive', site: 'Douala', profil: 'administration', actif: false,
       passwordHash: await bcrypt.hash(crypto.randomUUID() + crypto.randomUUID(), 10),
     },
     select: { id: true },
@@ -186,7 +160,7 @@ export async function supprimerCompte(id: string, successeurId: string) {
     prisma.user.findUnique({ where: { id: successeurId }, select: { id: true, nom: true, actif: true } }),
   ])
   if (!cible) throw new AppError(404, 'NOT_FOUND', 'Compte introuvable')
-  if (estCompteArchive(cible.email)) throw new AppError(422, 'COMPTE_ARCHIVE', 'Le compte d\'archive ne peut pas être supprimé')
+  if (cible.email === EMAIL_COMPTE_ARCHIVE) throw new AppError(422, 'COMPTE_ARCHIVE', 'Le compte d\'archive ne peut pas être supprimé')
   if (!successeur?.actif || successeur.id === id) throw new AppError(422, 'SUCCESSEUR_INVALIDE', 'Choisissez un compte actif pour reprendre les dossiers en cours')
   const archive = await compteArchive()
 

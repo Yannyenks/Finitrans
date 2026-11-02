@@ -3,7 +3,6 @@
  * (« Sté Alpha S.A. » et « STE ALPHA SA » désignent le même client).
  */
 import { prisma } from '../config/prisma'
-import { organisationCourante } from '../config/contexte'
 
 export function cleClient(nom: string): string {
   return nom
@@ -20,7 +19,7 @@ export async function clientParNom(nom: string, createdById: string) {
   const cle = cleClient(nomPropre)
   if (!cle) return null
   return prisma.client.upsert({
-    where:  { organisationId_cleNom: { organisationId: organisationCourante(), cleNom: cle } },
+    where:  { cleNom: cle },
     update: {},
     create: { nom: nomPropre, cleNom: cle, createdById },
   })

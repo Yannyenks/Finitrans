@@ -5,7 +5,6 @@ import { DossierStatus, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { authenticate } from '../middleware/authenticate'
 import { authorize } from '../middleware/authorize'
-import { dossierDeOrganisation } from '../middleware/organisation'
 import { buildPagination, paginate } from '../utils/pagination'
 import { logAudit } from '../utils/audit'
 import { NotFoundError } from '../utils/errors'
@@ -112,7 +111,7 @@ async function enregistrerImprevu(dossierId: string, etape: string, motif: strin
 }
 
 const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
-  const preHandler = [authenticate, dossierDeOrganisation, authorize('permDossier', 'lecture')]
+  const preHandler = [authenticate, authorize('permDossier', 'lecture')]
 
   // GET /api/dossiers
   fastify.get('/', { preHandler }, async (request, reply) => {
@@ -120,10 +119,8 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const { skip, take, page, limit } = buildPagination(q.page, q.limit)
     const actor = request.user
     const canSeeAll = actor.superviseur || VOIT_TOUS_LES_DOSSIERS.includes(actor.profil)
-    if (!actor.organisationId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Compte non rattaché à une organisation' })
 
-    // Périmètre de l'organisation : jamais de dossier d'une autre entreprise, quel que soit le filtre demandé
-    const and: Prisma.DossierWhereInput[] = [{ organisationId: actor.organisationId }]
+    const and: Prisma.DossierWhereInput[] = []
     const where: Prisma.DossierWhereInput = { AND: and }
     if (q.status) {
       // Plusieurs étapes possibles : ?status=paiement,bon_compagnie
@@ -180,21 +177,14 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
     }
     const user = request.user
-    if (!user.organisationId) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Compte non rattaché à une organisation' })
-    const organisationId = user.organisationId
 
-    // Le responsable doit appartenir à la même organisation que le dossier
     let responsableId = body.responsableId
     if (responsableId) {
-      const resp = await prisma.user.findFirst({ where: { id: responsableId, organisationId, actif: true }, select: { id: true } })
-      if (!resp) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
+      const resp = await prisma.user.findUnique({ where: { id: responsableId }, select: { actif: true } })
+      if (!resp?.actif) return reply.code(422).send({ error: 'INVALID_USER', message: 'Responsable introuvable ou inactif' })
     } else {
       const attribution = await loadAttribution()
-      const candidat = await resolveAssignee(attribution.reception.owner, body)
-      const valide = candidat
-        ? await prisma.user.findFirst({ where: { id: candidat, organisationId, actif: true }, select: { id: true } })
-        : null
-      responsableId = valide?.id ?? user.id
+      responsableId = (await resolveAssignee(attribution.reception.owner, body)) ?? user.id
     }
 
     const year = new Date().getFullYear()
@@ -204,7 +194,6 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return prisma.dossier.create({
         data: {
           ...body,
-          organisationId,
           conteneur: body.conteneur!,
           responsableId: responsableId!,
           numero,
@@ -509,7 +498,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   })
 
   // PATCH /api/dossiers/:id
-  fastify.patch('/:id', { preHandler: [authenticate, dossierDeOrganisation, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  fastify.patch('/:id', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id }  = z.object({ id: z.string().uuid() }).parse(request.params)
     const body    = normaliserConteneurs(updateDossierSchema.parse(request.body))
     if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
@@ -544,7 +533,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
   })
 
   // DELETE /api/dossiers/:id
-  fastify.delete('/:id', { preHandler: [authenticate, dossierDeOrganisation, authorize('permDossier', 'complet')] }, async (request, reply) => {
+  fastify.delete('/:id', { preHandler: [authenticate, authorize('permDossier', 'complet')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const existing = await prisma.dossier.findUnique({ where: { id } })
     if (!existing) throw new NotFoundError('Dossier', id)
@@ -663,7 +652,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     })
 
     // Démarrer le timing de la nouvelle étape
-    const slaParam = await prisma.parametre.findFirst({ where: { cle: 'sla_jours' } })
+    const slaParam = await prisma.parametre.findUnique({ where: { cle: 'sla_jours' } })
     const sla = (slaParam?.valeur as Record<string, number>) ?? {}
     await prisma.dossierTiming.create({
       data: {
@@ -812,7 +801,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(docs)
   })
 
-  fastify.delete('/:id/documents/:docId', { preHandler: [authenticate, dossierDeOrganisation, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  fastify.delete('/:id/documents/:docId', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id, docId } = z.object({ id: z.string().uuid(), docId: z.string().uuid() }).parse(request.params)
     const doc = await prisma.document.findFirst({ where: { id: docId, dossierId: id } })
     if (!doc) throw new NotFoundError('Document', docId)
@@ -865,12 +854,12 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // ─── Factures ─────────────────────────────────────────────
 
-  fastify.get('/:id/factures', { preHandler: [authenticate, dossierDeOrganisation, authorize('permFinancier', 'lecture')] }, async (request, reply) => {
+  fastify.get('/:id/factures', { preHandler: [authenticate, authorize('permFinancier', 'lecture')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     return reply.send(await prisma.facture.findMany({ where: { dossierId: id }, orderBy: { dateFacture: 'desc' } }))
   })
 
-  fastify.post('/:id/factures', { preHandler: [authenticate, dossierDeOrganisation, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/factures', { preHandler: [authenticate, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
       numero: z.string().min(1), type: z.enum(['proforma', 'validee', 'reglee']),
@@ -898,7 +887,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // ─── Virements ────────────────────────────────────────────
 
-  fastify.get('/:id/virements', { preHandler: [authenticate, dossierDeOrganisation, authorize('permFinancier', 'lecture')] }, async (request, reply) => {
+  fastify.get('/:id/virements', { preHandler: [authenticate, authorize('permFinancier', 'lecture')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     return reply.send(
       await prisma.virement.findMany({
@@ -909,7 +898,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     )
   })
 
-  fastify.post('/:id/virements', { preHandler: [authenticate, dossierDeOrganisation, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/virements', { preHandler: [authenticate, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
       montant: z.number().positive(), source: z.string(), destination: z.string(),
@@ -930,7 +919,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     return reply.send(await prisma.bonLivraison.findMany({ where: { dossierId: id }, orderBy: { dateEmission: 'desc' } }))
   })
 
-  fastify.post('/:id/bons-livraison', { preHandler: [authenticate, dossierDeOrganisation, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/bons-livraison', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
       numero: z.string(), description: z.string(), montant: z.number().positive(), dateEmission: z.string().datetime(),
@@ -956,7 +945,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     )
   })
 
-  fastify.post('/:id/gate-passes', { preHandler: [authenticate, dossierDeOrganisation, authorize('permDossier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/gate-passes', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const body = z.object({
       numero: z.string(), conteneur: z.string(), chauffeur: z.string(),
@@ -972,7 +961,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // ─── Pénalités (surestaries / pénalités de retard) ───────
 
-  fastify.post('/:id/penalites', { preHandler: [authenticate, dossierDeOrganisation, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
+  fastify.post('/:id/penalites', { preHandler: [authenticate, authorize('permFinancier', 'partiel')] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const parsed = z.object({
       montant:      z.number().positive(),
