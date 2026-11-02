@@ -41,6 +41,3 @@ test-results/
 playwright-report/
 finitrans-buddy-main/test-results/
 finitrans-buddy-main/playwright-report/
-
-.vercel
-.env*
