@@ -155,12 +155,20 @@ const messagerieRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
         data: mentionnes.map(m => ({ conversationId: id, userId: m.id })),
         skipDuplicates: true,
       })
-      const conv = await prisma.conversation.findUnique({ where: { id }, select: { titre: true, dossierId: true } })
+    }
+
+    // Chaque message reçu est notifié à tous les participants (hors auteur) ; les personnes mentionnées en priorité
+    const conv = await prisma.conversation.findUnique({
+      where: { id }, select: { titre: true, dossierId: true, participants: { select: { userId: true } } },
+    })
+    const mentionneIds = new Set(mentionnes.map(m => m.id))
+    const destinataires = [...new Set((conv?.participants ?? []).map(p => p.userId))].filter(u => u !== userId)
+    if (destinataires.length > 0) {
       await prisma.notification.createMany({
-        data: mentionnes.map(m => ({
-          userId: m.id,
+        data: destinataires.map(u => ({
+          userId: u,
           type: 'message' as const,
-          titre: `${request.user.nom} vous a mentionné`,
+          titre: mentionneIds.has(u) ? `${request.user.nom} vous a mentionné` : `Nouveau message de ${request.user.nom}`,
           message: `« ${contenu.slice(0, 140)} » — ${conv?.titre ?? 'conversation'}`,
           dossierId: conv?.dossierId ?? undefined,
           actionUrl: `/messagerie?conversation=${id}`,

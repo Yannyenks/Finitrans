@@ -75,6 +75,14 @@ const Messagerie = () => {
   });
   const messages: any[] = msgsData?.data ?? [];
 
+  // Conversation ouverte : ses notifications de message sont lues (fin des rappels sonores)
+  useEffect(() => {
+    if (!selectedConv) return;
+    api.patch("/api/notifications/messages-lus", { conversationId: selectedConv })
+      .then((r: any) => { if (r?.lues) qc.invalidateQueries({ queryKey: ["mes-notifications"] }); })
+      .catch(() => { /* sans conséquence */ });
+  }, [selectedConv, messages.length, qc]);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);

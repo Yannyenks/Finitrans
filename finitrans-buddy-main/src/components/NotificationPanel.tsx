@@ -36,7 +36,7 @@ function styleDe(n: Notif): { icon: any; couleur: string; fond: string; son: Sou
   if (t.includes("tâche") || t.includes("confi") || t.includes("attribu") || t.includes("assign"))
     return { icon: UserPlus, couleur: "text-secondary", fond: "bg-secondary", son: "assign", libelle: "Nouvelle assignation" };
   if (n.type === "message")
-    return { icon: MessageSquare, couleur: "text-blue-600", fond: "bg-blue-600", son: "info", libelle: "Message" };
+    return { icon: MessageSquare, couleur: "text-blue-600", fond: "bg-blue-600", son: "message", libelle: "Nouveau message" };
   // Action posée par un collègue sur un dossier ou dans un module
   if (n.type === "dossier" && !t.includes("passé à l'étape"))
     return { icon: Activity, couleur: "text-accent", fond: "bg-accent", son: "info", libelle: "Nouvelle action" };
@@ -121,6 +121,26 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
     document.title = n > 0 ? `(${n}) ${TITRE_PAGE}` : TITRE_PAGE;
   }, [query.data?.nonLues]);
 
+  // Messages non lus : titre clignotant + rappel sonore toutes les 45 s (hors messagerie)
+  const messagesNonLus = (query.data?.data ?? []).filter(n => n.type === "message" && !n.lu);
+  const nbMessages = messagesNonLus.length;
+  const dernierAuteur = messagesNonLus[0]?.titre ?? "";
+  useEffect(() => {
+    if (nbMessages === 0) return;
+    let bascule = false;
+    const clignote = setInterval(() => {
+      bascule = !bascule;
+      if (document.hidden || !document.hasFocus()) document.title = bascule ? `💬 (${nbMessages}) ${dernierAuteur}` : `(${query.data?.nonLues ?? nbMessages}) ${TITRE_PAGE}`;
+    }, 1000);
+    const rappel = setInterval(() => {
+      if (window.location.pathname.startsWith("/messagerie") && !document.hidden) return;
+      playSound("message");
+      try { navigator.vibrate?.([200, 100, 200]); } catch { /* pas de vibreur */ }
+    }, 45_000);
+    return () => { clearInterval(clignote); clearInterval(rappel); document.title = `(${query.data?.nonLues ?? 0}) ${TITRE_PAGE}`; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nbMessages, dernierAuteur]);
+
   function afficher(n: Notif, avecSon = true) {
     const st = styleDe(n);
     // Un seul son par arrivée de notifications (évite la cacophonie quand plusieurs arrivent ensemble)
@@ -155,12 +175,20 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
           </button>
         </div>
       </div>
-    ), { duration: n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000, position: window.matchMedia?.("(max-width: 1023px)").matches ? "bottom-center" : "top-right" });
+    ), {
+      // Un message reste affiché tant qu'il n'est pas ouvert ou fermé
+      duration: n.type === "message" ? Infinity : n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000,
+      position: window.matchMedia?.("(max-width: 1023px)").matches ? "bottom-center" : "top-right",
+    });
 
-    // Onglet en arrière-plan : notification du système
-    if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+    const estMessage = n.type === "message";
+    if (estMessage) {
+      try { navigator.vibrate?.([250, 120, 250, 120, 400]); } catch { /* pas de vibreur */ }
+    }
+    // Notification du système : onglet en arrière-plan, ou toujours pour un message
+    if ((document.hidden || estMessage) && "Notification" in window && Notification.permission === "granted") {
       try {
-        const sys = new Notification(n.titre, { body: n.message, tag: n.id, icon: "/favicon.svg" });
+        const sys = new Notification(n.titre, { body: n.message, tag: n.id, icon: "/icon-192.png", requireInteraction: estMessage } as NotificationOptions);
         sys.onclick = () => { window.focus(); onOuvrir(n); sys.close(); };
       } catch { /* navigateur sans support */ }
     }
@@ -175,6 +203,20 @@ const NotificationPanel = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [permission, setPermission] = useState(() => ("Notification" in window ? Notification.permission : "denied"));
+
+  // Invitation (une fois par session) à autoriser les notifications du système : messages même onglet fermé
+  useEffect(() => {
+    if (permission !== "default") return;
+    try { if (sessionStorage.getItem("ft_invite_notifs")) return; sessionStorage.setItem("ft_invite_notifs", "1"); } catch { /* stockage indisponible */ }
+    const t = setTimeout(() => {
+      toast("Activez les notifications", {
+        description: "Pour être alerté de chaque message et de chaque tâche, même quand la plateforme est en arrière-plan.",
+        duration: 30_000,
+        action: { label: "Activer", onClick: () => Notification.requestPermission().then(setPermission) },
+      });
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [permission]);
 
   const lire = useMutation({
     mutationFn: (id: string) => api.patch(`/api/notifications/${id}/lire`),

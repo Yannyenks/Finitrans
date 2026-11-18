@@ -40,6 +40,7 @@ export type SoundType =
   | 'retard'    // délai dépassé — urgent
   | 'error'     // erreur / rejet
   | 'alarme'    // alarme répétée (solde DI sous le seuil)
+  | 'message'   // message reçu — sonnerie insistante
 
 const SOUNDS: Record<SoundType, (ac: AudioContext) => void> = {
   // Accord ascendant C5-E5-G5 — validation réussie
@@ -83,6 +84,15 @@ const SOUNDS: Record<SoundType, (ac: AudioContext) => void> = {
     note(ac, 392, 0,    0.09, 'square', 0.18)
     note(ac, 392, 0.16, 0.09, 'square', 0.18)
     note(ac, 330, 0.32, 0.22, 'square', 0.18)
+  },
+
+  // Message reçu : carillon montant répété deux fois, bien audible
+  message: ac => {
+    for (const t of [0, 0.75]) {
+      note(ac, 988,  t,        0.16, 'triangle', 0.32)
+      note(ac, 1319, t + 0.14, 0.16, 'triangle', 0.32)
+      note(ac, 1568, t + 0.28, 0.30, 'triangle', 0.34)
+    }
   },
 
   // Sonnerie d'alarme : deux séries de bips alternés, bien audible

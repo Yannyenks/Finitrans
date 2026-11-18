@@ -60,6 +60,17 @@ const notificationsRoutes: FastifyPluginAsync = async (fastify: FastifyInstance)
     return reply.send({ message: `${count} notification(s) marquée(s) comme lue(s)` })
   })
 
+  // PATCH /api/notifications/messages-lus — conversation ouverte : ses notifications de message sont lues
+  fastify.patch('/messages-lus', { preHandler: [authenticate] }, async (request, reply) => {
+    const userId = (request.user as any).id
+    const { conversationId } = z.object({ conversationId: z.string().uuid() }).parse(request.body)
+    const { count } = await prisma.notification.updateMany({
+      where: { userId, lu: false, type: 'message', actionUrl: `/messagerie?conversation=${conversationId}` },
+      data:  { lu: true, luAt: new Date() },
+    })
+    return reply.send({ lues: count })
+  })
+
   // DELETE /api/notifications/:id
   fastify.delete('/:id', { preHandler: [authenticate] }, async (request, reply) => {
     const { id }   = z.object({ id: z.string().uuid() }).parse(request.params)

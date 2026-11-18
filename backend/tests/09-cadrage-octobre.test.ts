@@ -672,3 +672,20 @@ describe('Liquidation de la déclaration (douane)', () => {
     assert.ok(JSON.stringify(audit.body).includes('inspecteur M. ESSOMBA'))
   })
 })
+
+describe('Messagerie : chaque message reçu est notifié', () => {
+  it('tous les participants sont notifiés ; ouvrir la conversation marque les messages lus', async () => {
+    const c = await api('yasmine', 'POST', '/api/messagerie/conversations', { titre: unique('Conv'), type: 'general', participantIds: [ids.odette, ids.honore] })
+    expectStatus(c, [200, 201])
+    const conv = c.body.id
+    expectStatus(await api('yasmine', 'POST', `/api/messagerie/conversations/${conv}/messages`, { contenu: 'Bonjour, le BL est arrivé' }), [200, 201])
+    for (const who of ['odette', 'honore'] as const) {
+      const n = await api(who, 'GET', '/api/notifications?limit=10')
+      assert.ok(n.body.data.some((x: any) => x.type === 'message' && !x.lu && x.titre.startsWith('Nouveau message de')), `${who} notifié`)
+    }
+    const y = await api('yasmine', 'GET', '/api/notifications?limit=10')
+    assert.ok(!y.body.data.some((x: any) => x.type === 'message' && x.actionUrl?.includes(conv)), 'pas de notification pour l\'auteur')
+    const l = await api('odette', 'PATCH', '/api/notifications/messages-lus', { conversationId: conv })
+    assert.equal(l.body.lues, 1)
+  })
+})
