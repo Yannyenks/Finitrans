@@ -37,7 +37,7 @@ const CATEGORIES: Record<string, { label: string; icon: typeof File; teinte: str
 const CATEGORIES_DEPOT = Object.keys(CATEGORIES).filter(c => c !== "compte_rendu");
 
 const ETAPES: Record<string, string> = {
-  reception: "Réception", soumission_sgs: "Soumission SGS", codage: "Codage", validation: "Validation", paiement: "Paiement",
+  reception: "Réception", soumission_sgs: "Soumission SGS", codage: "Codage", validation: "Validation", paiement: "Paiement des droits et taxes",
   bon_compagnie: "Bon compagnie (Douala)", operations_douala: "Douala", operations_kribi: "Kribi", cloture: "Clôture", facturation: "Facturation client",
 };
 

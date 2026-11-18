@@ -11,7 +11,7 @@ export const STATUS_LABELS: Record<DossierStatus, string> = {
   reception: "Réception & Enregistrement",
   codage: "Codage & Déclaration",
   validation: "Validation Douanière",
-  paiement: "Paiement Droits & Taxes",
+  paiement: "Paiement des droits et taxes",
   bon_compagnie: "Bon compagnie (Douala)",
   operations_kribi: "Opérations Kribi",
   cloture: "Contrôle & Clôture",

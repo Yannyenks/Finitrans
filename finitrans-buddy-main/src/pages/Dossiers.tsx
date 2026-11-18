@@ -16,7 +16,7 @@ const STATUS_LABELS: Record<string, string> = {
   soumission_sgs:   "Soumission SGS",
   codage:           "Codage",
   validation:       "Validation",
-  paiement:         "Paiement",
+  paiement:         "Paiement des droits et taxes",
   bon_compagnie:    "Bon compagnie (Douala)",
   operations_douala: "Ops Douala", operations_kribi: "Ops Kribi",
   cloture:          "Clôturé", facturation: "Facturation",

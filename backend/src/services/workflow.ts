@@ -19,7 +19,7 @@ const ORDRE_COMPLET: DossierStatus[] = [
 
 export const STATUS_LABELS: Record<DossierStatus, string> = {
   reception: 'Réception', soumission_sgs: 'Soumission SGS', codage: 'Codage',
-  validation: 'Validation', paiement: 'Paiement', bon_compagnie: 'Bon compagnie (Douala)',
+  validation: 'Validation', paiement: 'Paiement des droits et taxes', bon_compagnie: 'Bon compagnie (Douala)',
   operations_douala: 'Opérations Douala', operations_kribi: 'Opérations Kribi', cloture: 'Clôture', facturation: 'Facturation client',
 }
 
