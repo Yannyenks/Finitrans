@@ -668,42 +668,112 @@ describe('Messagerie : chaque message reçu est notifié', () => {
 })
 
 describe('Gestion des DI : dossiers rattachés', () => {
-  it('la liste et le détail montrent les dossiers ; rattacher, dissocier, intégrité des débits', async () => {
+  it('rattacher un dossier débite sa facture sur le solde restant ; intégrité des débits', async () => {
     const di = await api('honore', 'POST', '/api/di', { numero: unique('DI-LIEN'), client: 'CLIENT LIEN', montant: 2_000_000, dateEmission: new Date().toISOString() })
     expectStatus(di, 201)
-    const mk = async (n: string) => (await api('yasmine', 'POST', '/api/dossiers', {
-      client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
-    })).body
-    const mkSur = async (n: string) => (await api('yasmine', 'POST', '/api/dossiers', {
-      client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    const { prisma } = await import('../src/config/prisma')
+    const solde = async () => Number((await prisma.declarationImportation.findUnique({ where: { id: di.body.id } }))!.soldeActuel)
+    // Ancien dossier (créé avant la règle) : sans DI ni mouvement
+    const ancien = async (n: string) => {
+      const d = (await api('yasmine', 'POST', '/api/dossiers', {
+        client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+      })).body
+      await prisma.mouvementDI.deleteMany({ where: { dossierId: d.id } })
+      return prisma.dossier.update({ where: { id: d.id }, data: { diId: null } })
+    }
+    const a = (await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CL-A'), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
       diId: di.body.id, montantFacture: 100_000,
     })).body
-    const a = await mkSur('CL-A')
-    // Ancien dossier sans DI (créé avant la règle) : rattachable puis dissociable
-    const { prisma } = await import('../src/config/prisma')
-    const b = await prisma.dossier.update({ where: { id: (await mk('CL-B')).id }, data: { diId: null } })
-    await prisma.mouvementDI.deleteMany({ where: { dossierId: b.id } })
-    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id }), 200)
+    assert.equal(await solde(), 1_900_000, 'dossier créé sur la DI : facture débitée')
 
+    // Rattachement sans montant : refusé, rien ne change
+    const b = await ancien('CL-B')
+    const sansMontant = await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id })
+    expectStatus(sansMontant, 422)
+    assert.equal(sansMontant.body.error, 'MONTANT_REQUIS')
+    assert.equal((await prisma.dossier.findUnique({ where: { id: b.id } }))!.diId, null)
+    // Avec le montant : débité sur ce qui reste de la DI
+    const lie = await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id, montantFacture: 300_000, referenceFacture: 'FF-LIEN-B' })
+    expectStatus(lie, 200)
+    assert.equal(lie.body.montantDebite, 300_000)
+    assert.equal(lie.body.soldeRestant, 1_600_000)
+    assert.equal(await solde(), 1_600_000)
+    const mvB = await prisma.mouvementDI.findMany({ where: { dossierId: b.id } })
+    assert.equal(mvB.length, 1)
+    assert.equal(mvB[0].diId, di.body.id, 'débit uniquement sur sa DI')
+    // Rattacher à nouveau : aucun second débit
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id, montantFacture: 300_000 }), 200)
+    assert.equal(await solde(), 1_600_000)
+
+    // Facture fournisseur déjà saisie sur le dossier : débitée automatiquement, une seule fois
+    const c = await ancien('CL-C')
+    const ff = await prisma.sousEtapeDossier.upsert({
+      where: { dossierId_etape_cle: { dossierId: c.id, etape: 'soumission_sgs', cle: 'ff_soumission' } },
+      create: { dossierId: c.id, etape: 'soumission_sgs', cle: 'ff_soumission', metadata: { ff_montant_facture: '250 000', ff_reference_facture: 'PI-C-1' } },
+      update: { metadata: { ff_montant_facture: '250 000', ff_reference_facture: 'PI-C-1' } },
+    })
+    const auto = await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: c.id })
+    expectStatus(auto, 200)
+    assert.equal(auto.body.montantDebite, 250_000)
+    assert.equal(await solde(), 1_350_000)
+    const metaFF = (await prisma.sousEtapeDossier.findUnique({ where: { id: ff.id } }))!.metadata as any
+    assert.equal(metaFF.ff_montant_debite, 250_000, 'la facture est marquée débitée')
+    const { appliquerFactureFournisseur } = await import('../src/services/di')
+    assert.equal(await appliquerFactureFournisseur(ff.id, (await prisma.user.findFirst({ where: { email: { contains: 'honore' } } }))!.id), null, 'pas de second débit')
+    assert.equal(await solde(), 1_350_000)
+
+    // Solde insuffisant : refus, le dossier n'est pas rattaché
+    const d = await ancien('CL-D')
+    const trop = await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: d.id, montantFacture: 5_000_000 })
+    expectStatus(trop, 422)
+    assert.equal(trop.body.error, 'SOLDE_DI_INSUFFISANT')
+    assert.equal((await prisma.dossier.findUnique({ where: { id: d.id } }))!.diId, null)
+    assert.equal(await solde(), 1_350_000)
+
+    const repli = await api('honore', 'POST', '/api/di', { numero: unique('DI-REPLI'), client: 'CLIENT REPLI', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    const autre0 = () => repli.body.id as string
     const liste = await api('honore', 'GET', '/api/di?limit=50')
     const ligne = liste.body.data.find((x: any) => x.id === di.body.id)
-    assert.deepEqual(ligne.dossiers.map((d: any) => d.numero).sort(), [a.numero, b.numero].sort(), 'la liste renvoie les dossiers rattachés')
-    assert.equal(ligne._count.dossiers, 2)
+    assert.deepEqual(ligne.dossiers.map((x: any) => x.numero).sort(), [a.numero, b.numero, c.numero].sort(), 'la liste renvoie les dossiers rattachés')
+    assert.equal(ligne._count.dossiers, 3)
     const detail = await api('honore', 'GET', `/api/di/${di.body.id}`)
-    assert.equal(detail.body.dossiers.length, 2)
+    assert.equal(detail.body.dossiers.length, 3)
 
-    // Un dossier débité sur la DI (à sa création) ne peut pas en être dissocié
-    const refus = await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: a.id })
-    expectStatus(refus, 422)
-    assert.equal(refus.body.error, 'DOSSIER_DEBITE')
+    // Montant net débité par dossier, visible dans le détail
+    assert.equal(detail.body.dossiers.find((x: any) => x.id === b.id).montantDebite, 300_000)
+
+    // Machine arrière : dissocier annule le débit (recrédit tracé) et libère le dossier
+    const annule = await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: b.id, motif: 'Erreur de DI' })
+    expectStatus(annule, 200)
+    assert.equal(annule.body.montantRecredite, 300_000)
+    assert.equal(annule.body.soldeRestant, 1_650_000)
+    assert.equal(await solde(), 1_650_000)
+    assert.equal((await prisma.dossier.findUnique({ where: { id: b.id } }))!.diId, null)
+    const credit = await prisma.mouvementDI.findFirst({ where: { dossierId: b.id, type: 'credit' } })
+    assert.equal(Number(credit!.montant), 300_000)
+    assert.ok(credit!.motif.includes('Erreur de DI'))
+    assert.ok(JSON.stringify((await api('delba', 'GET', `/api/dossiers/${b.id}/audit`)).body).includes('recrédités'))
+    // Le dossier peut être rattaché de nouveau (nouveau débit, même référence acceptée après annulation)
+    const relie = await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id, montantFacture: 200_000, referenceFacture: 'FF-LIEN-B' })
+    expectStatus(relie, 200)
+    assert.equal(await solde(), 1_450_000)
+    // Facture fournisseur déjà saisie : annulée puis re-débitée automatiquement au nouveau rattachement
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: c.id }), 200)
+    assert.equal(await solde(), 1_700_000)
+    assert.equal(((await prisma.sousEtapeDossier.findUnique({ where: { id: ff.id } }))!.metadata as any).ff_montant_debite, undefined)
+    expectStatus(await api('honore', 'POST', `/api/di/${autre0()}/lier-dossier`, { dossierId: c.id }), 200)
+    assert.equal(await solde(), 1_700_000, 'débité sur sa nouvelle DI, pas sur l\'ancienne')
+
+    // Un dossier débité ne change pas de DI sans être dissocié d'abord
     const autre = await api('honore', 'POST', '/api/di', { numero: unique('DI-AUTRE'), client: 'CLIENT AUTRE', montant: 1_000_000, dateEmission: new Date().toISOString() })
-    expectStatus(await api('honore', 'POST', `/api/di/${autre.body.id}/lier-dossier`, { dossierId: a.id }), 422, 'un dossier débité ne change pas de DI')
+    expectStatus(await api('honore', 'POST', `/api/di/${autre.body.id}/lier-dossier`, { dossierId: a.id, montantFacture: 10 }), 422, 'un dossier débité ne change pas de DI')
 
     // Dossier sans mouvement : dissociation possible et tracée
-    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: b.id }), 200)
-    const apres = await api('honore', 'GET', `/api/di/${di.body.id}`)
-    assert.deepEqual(apres.body.dossiers.map((d: any) => d.id), [a.id])
-    const audit = await api('delba', 'GET', `/api/dossiers/${b.id}/audit`)
+    const e = await ancien('CL-E')
+    await prisma.dossier.update({ where: { id: e.id }, data: { diId: di.body.id } })
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: e.id }), 200)
+    const audit = await api('delba', 'GET', `/api/dossiers/${e.id}/audit`)
     assert.ok(JSON.stringify(audit.body).includes('dissocié de la DI'))
     // Suppression d'une DI consommée refusée
     expectStatus(await api('delba', 'DELETE', `/api/di/${di.body.id}`), 422)

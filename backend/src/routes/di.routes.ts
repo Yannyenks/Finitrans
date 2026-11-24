@@ -13,6 +13,7 @@ import { zCompagnie } from '../services/compagnies'
 import { logAudit } from '../utils/audit'
 import { STATUS_LABELS } from '../services/workflow'
 import { marquerNotifies } from '../services/evenements'
+import { debiterDI, verifierDebitDI } from '../services/di'
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -274,9 +275,15 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     }, 0)
 
     const soldePrevisionnel = metrics.soldeNum - consoPrevisionnelle
+    const netParDossier = new Map<string, number>()
+    for (const m of di.mouvements) {
+      if (!m.dossierId) continue
+      netParDossier.set(m.dossierId, (netParDossier.get(m.dossierId) ?? 0) + (m.type === 'debit' ? 1 : -1) * Number(m.montant))
+    }
 
     return reply.send({
       ...di,
+      dossiers: di.dossiers.map(d => ({ ...d, montantDebite: Math.round(netParDossier.get(d.id) ?? 0) })),
       ...metrics,
       consoPrevisionnelle,
       soldePrevisionnel,
@@ -706,9 +713,15 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // ── POST /api/di/:id/lier-dossier ─────────────────────────
 
+  // Rattacher un dossier = débiter sa facture fournisseur sur le solde restant de la DI
+  // (montant saisi, ou facture fournisseur déjà saisie sur le dossier et pas encore débitée).
   fastify.post('/:id/lier-dossier', { preHandler: writeAccess }, async (request, reply) => {
     const { id }      = z.object({ id: z.string().uuid() }).parse(request.params)
-    const { dossierId } = z.object({ dossierId: z.string().uuid() }).parse(request.body)
+    const { dossierId, montantFacture, referenceFacture } = z.object({
+      dossierId:        z.string().uuid(),
+      montantFacture:   z.number().positive().optional(),
+      referenceFacture: z.string().trim().max(100).optional(),
+    }).parse(request.body)
 
     const [di, dossier] = await Promise.all([
       prisma.declarationImportation.findUnique({ where: { id } }),
@@ -725,29 +738,67 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       const debits = await prisma.mouvementDI.count({ where: { diId: dossier.diId, dossierId } })
       if (debits > 0) {
         const ancienne = await prisma.declarationImportation.findUnique({ where: { id: dossier.diId }, select: { numero: true } })
-        return reply.code(422).send({ error: 'DOSSIER_DEJA_DEBITE', message: `Le dossier ${dossier.numero} a déjà des mouvements sur la DI ${ancienne?.numero ?? ''} : il ne peut pas changer de DI.` })
+        return reply.code(422).send({ error: 'DOSSIER_DEJA_DEBITE', message: `Le dossier ${dossier.numero} a déjà des mouvements sur la DI ${ancienne?.numero ?? ''} : dissociez-le d'abord de cette DI (le débit sera annulé), puis rattachez-le à la nouvelle.` })
       }
     }
 
+    // Facture à débiter (aucune si le dossier a déjà été débité sur cette DI)
+    const mvDossier = await prisma.mouvementDI.findMany({ where: { diId: id, dossierId }, select: { type: true, montant: true } })
+    const dejaDebite = mvDossier.reduce((s, m) => s + (m.type === 'debit' ? 1 : -1) * Number(m.montant), 0) > 0
+    const tacheFF = dejaDebite ? null : await prisma.sousEtapeDossier.findFirst({ where: { dossierId, cle: 'ff_soumission' } })
+    const metaFF = (tacheFF?.metadata ?? {}) as Record<string, unknown>
+    const ffEnAttente = tacheFF && metaFF.ff_montant_debite === undefined && metaFF.enregistrement_type !== 'debit_di'
+      ? Math.round(Number(String(metaFF.ff_montant_facture ?? '').replace(/\s/g, '').replace(',', '.')) || 0) : 0
+    const montant = dejaDebite ? 0 : Math.round(montantFacture ?? ffEnAttente)
+    const reference = referenceFacture || (!montantFacture && ffEnAttente && typeof metaFF.ff_reference_facture === 'string' ? metaFF.ff_reference_facture : '') || null
+    if (!dejaDebite && !(montant > 0)) {
+      return reply.code(422).send({ error: 'MONTANT_REQUIS', message: `Indiquez le montant de la facture fournisseur de ${dossier.numero} à débiter sur la DI ${di.numero}.` })
+    }
+    if (montant) await verifierDebitDI(id, montant, reference)
+
+    const ancienneDI = dossier.diId
     await prisma.dossier.update({ where: { id: dossierId }, data: { diId: id } })
+    let debit: Awaited<ReturnType<typeof debiterDI>> | null = null
+    if (montant) {
+      try {
+        debit = await debiterDI({
+          diId: id, montant, dossierId, userId: request.user.id, referenceFacture: reference,
+          motif: `Facture fournisseur${reference ? ` ${reference}` : ''} — dossier ${dossier.numero}`,
+        })
+      } catch (e) {
+        await prisma.dossier.update({ where: { id: dossierId }, data: { diId: ancienneDI } })
+        throw e
+      }
+      // La facture déjà saisie sur le dossier est désormais débitée : pas de second débit plus tard
+      if (tacheFF && !montantFacture && ffEnAttente) {
+        await prisma.sousEtapeDossier.update({ where: { id: tacheFF.id }, data: { metadata: {
+          ...metaFF, ff_montant_debite: montant, ff_di_id: id, ff_solde_di_apres: Math.round(debit.nouveauSolde),
+          enregistrement_type: 'debit_di', enregistrement_id: debit.mouvement.id,
+        } } })
+      }
+    }
+    const detailDebit = debit ? ` — ${montant.toLocaleString('fr-FR')} FCFA débités, reste ${Math.round(debit.nouveauSolde).toLocaleString('fr-FR')} FCFA` : ''
     const destinataires = [...new Set([di.gestionnaireId, dossier.responsableId])].filter(u => u !== request.user.id)
     if (destinataires.length) {
       await prisma.notification.createMany({ data: destinataires.map(userId => ({
         userId, type: 'dossier' as const, titre: `Nouveau dossier sur la DI ${di.numero}`,
-        message: `${dossier.numero} (${dossier.client}) est rattaché à la DI ${di.numero} — ${STATUS_LABELS[dossier.status]}.`,
+        message: `${dossier.numero} (${dossier.client}) est rattaché à la DI ${di.numero}${detailDebit} — ${STATUS_LABELS[dossier.status]}.`,
         dossierId, actionUrl: `/di?di=${id}`,
       })) })
       marquerNotifies(destinataires)
     }
-    await logAudit(dossierId, request.user.id, 'DI_RATTACHEE', `Dossier rattaché à la DI ${di.numero} (${di.client})`)
-    await logActivity(request.user.id, 'DI_DOSSIER_RATTACHE', 'di', id, `${dossier.numero} → ${di.numero}`)
-    return reply.send({ message: 'Dossier lié à la DI avec succès', diNumero: di.numero })
+    await logAudit(dossierId, request.user.id, debit ? 'DEBIT_DI' : 'DI_RATTACHEE', `Dossier rattaché à la DI ${di.numero} (${di.client})${detailDebit}`)
+    await logActivity(request.user.id, 'DI_DOSSIER_RATTACHE', 'di', id, `${dossier.numero} → ${di.numero}${detailDebit}`)
+    return reply.send({
+      message: debit ? `Dossier rattaché : ${montant.toLocaleString('fr-FR')} FCFA débités sur la DI ${di.numero}` : 'Dossier lié à la DI avec succès',
+      diNumero: di.numero, montantDebite: montant, soldeRestant: debit ? Math.round(debit.nouveauSolde) : Math.round(Number(di.soldeActuel)),
+    })
   })
 
-  // ── POST /api/di/:id/delier-dossier — dissocier un dossier (sans mouvement sur la DI) ──
+  // ── POST /api/di/:id/delier-dossier — dissocier un dossier et annuler ses débits (recrédit tracé) ──
   fastify.post('/:id/delier-dossier', { preHandler: writeAccess }, async (request, reply) => {
     const { id }        = z.object({ id: z.string().uuid() }).parse(request.params)
-    const { dossierId } = z.object({ dossierId: z.string().uuid() }).parse(request.body)
+    const { dossierId, motif } = z.object({ dossierId: z.string().uuid(), motif: z.string().trim().max(300).optional() }).parse(request.body)
     const [di, dossier] = await Promise.all([
       prisma.declarationImportation.findUnique({ where: { id } }),
       prisma.dossier.findUnique({ where: { id: dossierId } }),
@@ -755,14 +806,45 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (!di)      throw new NotFoundError('DI', id)
     if (!dossier) throw new NotFoundError('Dossier', dossierId)
     if (dossier.diId !== id) return reply.code(422).send({ error: 'NON_RATTACHE', message: `Le dossier ${dossier.numero} n'est pas rattaché à la DI ${di.numero}.` })
-    const debits = await prisma.mouvementDI.count({ where: { diId: id, dossierId } })
-    if (debits > 0) {
-      return reply.code(422).send({ error: 'DOSSIER_DEBITE', message: `Impossible de dissocier ${dossier.numero} : ${debits} mouvement(s) de la DI ${di.numero} lui sont rattachés (facture fournisseur, paiement…). Corrigez ou recréditez d'abord ces mouvements.` })
+    // Annulation : tout ce que le dossier a consommé sur la DI est recrédité (mouvement tracé)
+    const mouvements = await prisma.mouvementDI.findMany({ where: { diId: id, dossierId }, select: { type: true, montant: true } })
+    const net = Math.round(mouvements.reduce((s, m) => s + (m.type === 'debit' ? 1 : -1) * Number(m.montant), 0))
+    let soldeRestant = Number(di.soldeActuel)
+    await prisma.$transaction(async tx => {
+      if (net > 0) {
+        const frais = await tx.declarationImportation.findUnique({ where: { id }, select: { soldeActuel: true } })
+        soldeRestant = Number(frais!.soldeActuel) + net
+        await tx.mouvementDI.create({ data: {
+          diId: id, type: 'credit', categorie: 'remboursement', montant: net, dossierId, createdBy: request.user.id,
+          motif: `Annulation du débit — dossier ${dossier.numero} dissocié de la DI${motif ? ` (${motif})` : ''}`,
+        } })
+        await tx.declarationImportation.update({ where: { id }, data: { soldeActuel: soldeRestant } })
+      }
+      await tx.dossier.update({ where: { id: dossierId }, data: { diId: null } })
+      // La facture fournisseur du dossier redevient « à débiter » (rattachement ultérieur)
+      const ff = await tx.sousEtapeDossier.findFirst({ where: { dossierId, cle: 'ff_soumission' } })
+      const meta = (ff?.metadata ?? null) as Record<string, unknown> | null
+      if (ff && meta && (meta.ff_di_id === id || meta.enregistrement_type === 'debit_di')) {
+        const { ff_montant_debite: _a, ff_di_id: _b, ff_solde_di_apres: _c, enregistrement_type: _d, enregistrement_id: _e, ...reste } = meta
+        await tx.sousEtapeDossier.update({ where: { id: ff.id }, data: { metadata: reste as any } })
+      }
+    })
+    const detail = net > 0 ? ` — ${net.toLocaleString('fr-FR')} FCFA recrédités, solde ${Math.round(soldeRestant).toLocaleString('fr-FR')} FCFA` : ''
+    await logAudit(dossierId, request.user.id, 'DI_DISSOCIEE', `Dossier dissocié de la DI ${di.numero}${detail}${motif ? ` — motif : ${motif}` : ''}`)
+    await logActivity(request.user.id, 'DI_DOSSIER_DISSOCIE', 'di', id, `${dossier.numero} ← ${di.numero}${detail}`)
+    const destinataires = [...new Set([di.gestionnaireId, dossier.responsableId])].filter(u => u && u !== request.user.id) as string[]
+    if (destinataires.length) {
+      await prisma.notification.createMany({ data: destinataires.map(userId => ({
+        userId, type: 'dossier' as const, titre: `Dossier retiré de la DI ${di.numero}`,
+        message: `${dossier.numero} (${dossier.client}) n'est plus rattaché à la DI ${di.numero}${detail}.`,
+        dossierId, actionUrl: `/di?di=${id}`,
+      })) })
+      marquerNotifies(destinataires)
     }
-    await prisma.dossier.update({ where: { id: dossierId }, data: { diId: null } })
-    await logAudit(dossierId, request.user.id, 'DI_DISSOCIEE', `Dossier dissocié de la DI ${di.numero}`)
-    await logActivity(request.user.id, 'DI_DOSSIER_DISSOCIE', 'di', id, `${dossier.numero} ← ${di.numero}`)
-    return reply.send({ message: 'Dossier dissocié de la DI', diNumero: di.numero })
+    return reply.send({
+      message: net > 0 ? `Dossier dissocié : ${net.toLocaleString('fr-FR')} FCFA recrédités sur la DI ${di.numero}` : 'Dossier dissocié de la DI',
+      diNumero: di.numero, montantRecredite: Math.max(0, net), soldeRestant: Math.round(soldeRestant),
+    })
   })
 
   // ── POST /api/di/:id/cloner — cloner la DI ────────────────

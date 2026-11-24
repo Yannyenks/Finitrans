@@ -25,7 +25,7 @@ const ETAPES_CLIENT: Record<string, { titre: string; texte: string; illustration
   codage:           { titre: 'Déclaration et liquidation',   texte: 'Classement tarifaire, déclaration en douane puis liquidation des droits par l’inspecteur (2 à 3 jours selon la douane).', illustration: 'douane' },
   validation:       { titre: 'Validation et liquidation',    texte: 'La douane examine la déclaration et l’inspecteur liquide les droits (délai de l’administration : 2 à 3 jours en moyenne).', illustration: 'douane' },
   paiement:         { titre: 'Droits et taxes',              texte: 'Règlement des droits et taxes de douane.',                                       illustration: 'paiement' },
-  bon_compagnie:    { titre: 'Bon de la compagnie',          texte: 'Obtention du bon de la compagnie maritime et du bon à délivrer.',                illustration: 'navire' },
+  bon_compagnie:    { titre: 'Facture de la compagnie',      texte: 'Facturation de la compagnie maritime et obtention du bon à délivrer.',                illustration: 'navire' },
   operations_douala:{ titre: 'Opérations au port de Douala', texte: 'Formalités au terminal portuaire.',                                              illustration: 'port' },
   operations_kribi: { titre: 'Opérations au port de Kribi',  texte: 'Formalités au terminal, bon de livraison et ticket de sortie.',                  illustration: 'port' },
   cloture:          { titre: 'Marchandise libérée',          texte: 'Les opérations sont terminées : votre marchandise est libérée.',                 illustration: 'camion' },

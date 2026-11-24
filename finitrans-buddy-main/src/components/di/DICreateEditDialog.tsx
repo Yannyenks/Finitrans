@@ -43,6 +43,8 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
   const [showAjust,    setShowAjust]    = useState(false);
   const [dossierSearch, setDossierSearch] = useState("");
   const [linkedIds,    setLinkedIds]    = useState<string[]>([]);
+  // Montant de la facture fournisseur à débiter pour chaque dossier nouvellement rattaché
+  const [montantsLien, setMontantsLien] = useState<Record<string, string>>({});
   const [saving,       setSaving]       = useState(false);
   const [diFile,       setDiFile]       = useState<File | null>(null);
   const [dragOver,     setDragOver]     = useState(false);
@@ -99,6 +101,7 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
       setLinkedIds([]);
     }
     setDossierSearch("");
+    setMontantsLien({});
     setShowAjust(false);
     setMontantAjust("");
     setMotifAjust("");
@@ -108,6 +111,21 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
 
   const toggleDossier = (id: string) =>
     setLinkedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  const dejaLies = (di?.dossiers ?? []).map((d: any) => d.id) as string[];
+  const nouveauxLiens = linkedIds.filter(id => !dejaLies.includes(id));
+  const rattacher = async (diCible: string) => {
+    for (const id of nouveauxLiens) {
+      const m = Math.round(Number(montantsLien[id]) || 0);
+      try {
+        await api.post(`/api/di/${diCible}/lier-dossier`, { dossierId: id, ...(m > 0 ? { montantFacture: m } : {}) });
+      } catch (e: any) {
+        const d = allDossiers.find(x => x.id === id);
+        toast({ title: `Rattachement de ${d?.numero ?? "dossier"} impossible`, description: e.message, variant: "destructive" });
+      }
+    }
+    for (const k of [["di", diCible], ["di-list"], ["di-stats-resume"], ["dossiers"]]) qc.invalidateQueries({ queryKey: k });
+  };
 
   const handleSubmit = async () => {
     if (!form.client.trim()) {
@@ -140,13 +158,8 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
         if (showAjust && montantAjust && motifAjust.trim().length >= 5) {
           await recharge.mutateAsync({ montant: parseFloat(montantAjust), motif: motifAjust });
         }
-        // Add new dossier links
-        const existingIds = (di.dossiers ?? []).map((d: any) => d.id);
-        const toAdd = linkedIds.filter(id => !existingIds.includes(id));
-        if (toAdd.length > 0) {
-          await Promise.all(toAdd.map(id => api.post(`/api/di/${di.id}/lier-dossier`, { dossierId: id })));
-          qc.invalidateQueries({ queryKey: ["di", di.id] });
-        }
+        // Nouveaux dossiers : facture fournisseur débitée sur le solde restant
+        if (nouveauxLiens.length > 0) await rattacher(di.id);
       } else {
         // Create
         const newDI = await createDI.mutateAsync({
@@ -177,10 +190,7 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
             });
           }
         }
-        if (linkedIds.length > 0) {
-          await Promise.all(linkedIds.map(id => api.post(`/api/di/${newDI.id}/lier-dossier`, { dossierId: id })));
-          qc.invalidateQueries({ queryKey: ["di-list"] });
-        }
+        if (nouveauxLiens.length > 0) await rattacher(newDI.id);
       }
       onClose();
     } catch {
@@ -361,17 +371,28 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
               <FolderOpen className="w-3.5 h-3.5 text-secondary" />
               Dossiers associés à cette DI
             </Label>
+            <p className="text-[11px] text-muted-foreground leading-tight -mt-1">
+              Pour chaque dossier ajouté, indiquez le montant de sa facture fournisseur : il est débité sur ce qui reste de la DI
+              (laisser vide si la facture est déjà saisie sur le dossier).
+            </p>
 
             {/* Chips sélectionnés */}
             {linkedIds.length > 0 && (
               <div className="flex flex-wrap gap-1.5 p-2 rounded-lg bg-secondary/5 border border-secondary/10">
                 {linkedIds.map(id => {
                   const d = allDossiers.find(x => x.id === id);
+                  const nouveau = !dejaLies.includes(id);
                   return (
                     <span key={id}
-                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary/15 text-secondary text-xs font-semibold">
+                      className="inline-flex flex-wrap items-center gap-1 px-2 py-1 rounded-lg bg-secondary/15 text-secondary text-xs font-semibold">
                       {d?.numero ?? id.slice(0, 8)}
                       <span className="text-muted-foreground font-normal ml-0.5">{d?.client ? `· ${d.client}` : ""}</span>
+                      {nouveau && (
+                        <input type="number" min={1} value={montantsLien[id] ?? ""} placeholder="Facture FCFA"
+                          onChange={e => setMontantsLien(p => ({ ...p, [id]: e.target.value }))}
+                          className="w-28 h-6 rounded-md border border-border bg-card px-1.5 font-mono text-[11px] text-foreground"
+                          aria-label={`Montant de la facture fournisseur de ${d?.numero ?? "ce dossier"}`} />
+                      )}
                       <button onClick={() => toggleDossier(id)}
                         className="ml-0.5 hover:text-destructive transition-colors">
                         <X className="w-3 h-3" />

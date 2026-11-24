@@ -159,8 +159,8 @@ export function useDI(diId: string | null | undefined) {
 
   // ── Lier un dossier ──────────────────────────────────────────
   const lierDossier = useMutation({
-    mutationFn: (dossierId: string) =>
-      api.post<any>(`/api/di/${diId}/lier-dossier`, { dossierId }),
+    mutationFn: (p: { dossierId: string; montantFacture?: number; referenceFacture?: string }) =>
+      api.post<any>(`/api/di/${diId}/lier-dossier`, p),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["di", diId] });
       qc.invalidateQueries({ queryKey: ["di-dashboard", diId] });

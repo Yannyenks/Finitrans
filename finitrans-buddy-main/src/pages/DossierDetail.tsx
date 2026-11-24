@@ -153,7 +153,9 @@ const CreateDIInline = ({
   const [diFile,   setDiFile]   = useState<File | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [factureFF, setFactureFF] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const factureXAF = Math.round(Number(factureFF) || 0);
 
   const montantXAF = montant ? Math.round(parseFloat(montant) * TAUX_CHANGE()[devise]) : 0;
 
@@ -181,7 +183,12 @@ const CreateDIInline = ({
         compagnie:    dossier.compagnie,
         dateEmission: new Date().toISOString(),
       });
-      await api.post(`/api/di/${di.id}/lier-dossier`, { dossierId: dossier.id });
+      // Rattachement = facture fournisseur débitée sur la DI (montant saisi ou facture déjà saisie sur le dossier)
+      try {
+        await api.post(`/api/di/${di.id}/lier-dossier`, { dossierId: dossier.id, ...(factureXAF > 0 ? { montantFacture: factureXAF } : {}) });
+      } catch (e: any) {
+        toast({ title: "DI créée mais non rattachée", description: `${e.message} Rattachez le dossier depuis Gestion DI.`, variant: "destructive" });
+      }
       // Upload document obligatoire
       try {
         const fd = new FormData();
@@ -242,6 +249,17 @@ const CreateDIInline = ({
         )}
       </div>
 
+      <div className="space-y-1.5">
+        <Label className="text-xs font-semibold">Montant de la facture fournisseur (FCFA)</Label>
+        <Input type="number" min={1} value={factureFF} onChange={e => setFactureFF(e.target.value)} placeholder="Débité sur la DI"
+          className="h-9 text-sm bg-muted/40 font-mono" aria-label="Montant de la facture fournisseur" />
+        <p className={`text-[11px] ${factureXAF > montantXAF && montantXAF > 0 ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+          {factureXAF > 0 && montantXAF > 0
+            ? `Reste sur la DI après débit : ${(montantXAF - factureXAF).toLocaleString("fr-FR")} FCFA`
+            : "Vide si la facture fournisseur est déjà saisie sur le dossier."}
+        </p>
+      </div>
+
       {/* Zone upload document */}
       <div className="space-y-1.5">
         <Label className="text-xs font-semibold flex items-center gap-1">
@@ -279,7 +297,7 @@ const CreateDIInline = ({
       </div>
 
       <div className="flex gap-2">
-        <Button onClick={handleCreate} disabled={creating || !montant || montantXAF <= 0 || !diFile}
+        <Button onClick={handleCreate} disabled={creating || !montant || montantXAF <= 0 || !diFile || factureXAF > montantXAF}
           className="flex-1 h-9 gap-1.5 bg-secondary text-secondary-foreground hover:opacity-90 text-sm">
           {creating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
           Créer la DI

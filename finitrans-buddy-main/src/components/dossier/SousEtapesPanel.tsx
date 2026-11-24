@@ -180,7 +180,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   bon_compagnie: [
     {
       cle: "facturation_compagnie", label: "Facturation compagnie maritime",
-      description: "Obtention de la facture de la compagnie maritime : numéro de la facture et date", partie: "A", partieLabel: "Bon de Compagnie Maritime",
+      description: "Obtention de la facture de la compagnie maritime : numéro de la facture et date", partie: "A", partieLabel: "Facture de Compagnie Maritime",
       bonCompagnie: true, outputLabel: "Facturation compagnie maritime",
       fields: [
         { key: "bc_bon_numero", label: "N° de la facture", type: "text", placeholder: "Ex : MSC-FAC-2026-0042" },
@@ -189,7 +189,7 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
     },
     {
       cle: "bon_a_delivrer", label: "Soumission & obtention du Bon à Délivrer",
-      description: "Dépôt de la quittance compagnie et obtention du Bon à Délivrer (BAD) auprès de l'armateur", partie: "A", partieLabel: "Bon de Compagnie Maritime",
+      description: "Dépôt de la quittance compagnie et obtention du Bon à Délivrer (BAD) auprès de l'armateur", partie: "A", partieLabel: "Facture de Compagnie Maritime",
       fields: [
         { key: "bad_numero",     label: "N° BAD",               type: "text", placeholder: "Ex : BAD-2025-0087" },
         { key: "bad_date_obtention", label: "Date d'obtention", type: "date" },

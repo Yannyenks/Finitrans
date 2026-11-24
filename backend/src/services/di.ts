@@ -21,10 +21,19 @@ export async function verifierDebitDI(diId: string, montant: number, referenceFa
   if (!di) throw new AppError(422, 'DI_INTROUVABLE', 'La DI liée au dossier est introuvable.')
   const ref = referenceFacture?.trim().toUpperCase() || null
   if (ref) {
-    const doublon = await prisma.mouvementDI.findFirst({
+    const debits = await prisma.mouvementDI.findMany({
       where: { diId, type: 'debit', referenceFacture: { equals: ref, mode: 'insensitive' } },
-      select: { createdAt: true },
+      select: { createdAt: true, dossierId: true },
     })
+    // Un débit annulé (dossier dissocié de la DI, recrédit tracé) ne bloque plus la facture
+    let doublon: (typeof debits)[number] | undefined
+    for (const d of debits) {
+      const annule = d.dossierId && await prisma.mouvementDI.findFirst({
+        where: { diId, dossierId: d.dossierId, type: 'credit', motif: { startsWith: 'Annulation du débit' }, createdAt: { gte: d.createdAt } },
+        select: { id: true },
+      })
+      if (!annule) { doublon = d; break }
+    }
     if (doublon) {
       throw new AppError(409, 'FACTURE_DUPLIQUEE', `La facture « ${referenceFacture!.trim()} » a déjà été débitée sur la DI ${di.numero} le ${doublon.createdAt.toLocaleDateString('fr-FR')}.`)
     }
