@@ -1184,8 +1184,12 @@ const DossierDetail = () => {
                               <Play className="w-3.5 h-3.5" /> Démarrer
                             </Button>
                           )}
+                          {/* Visible de tous : grisé pour ceux qui ne peuvent pas démarrer l'étape */}
                           {isCurrent && dossier.etapeDemarree === false && !finalise && !nextStep?.peutDemarrer && (
-                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">À démarrer</span>
+                            <Button size="sm" disabled className="h-8 gap-1.5" variant="outline"
+                              title="Démarrage réservé au responsable de l'étape, à ses intervenants et à la Direction">
+                              <Play className="w-3.5 h-3.5" /> Démarrer
+                            </Button>
                           )}
                           {(isCompleted || isCurrent) && canUpload && (
                             <button

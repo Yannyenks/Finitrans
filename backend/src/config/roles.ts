@@ -47,7 +47,8 @@ export type ModuleKey = keyof typeof MODULES
 export const ALL_MODULES = Object.keys(MODULES) as ModuleKey[]
 
 /** Modules accessibles à tout compte actif. */
-const SOCLE: ModuleKey[] = ['dashboard', 'mon_espace', 'bibliotheque', 'repertoire', 'messagerie', 'alertes']
+// Socle commun à tous les profils (Gestion DI et Gestion des sorties visibles de tous, en lecture au minimum)
+const SOCLE: ModuleKey[] = ['dashboard', 'mon_espace', 'bibliotheque', 'repertoire', 'messagerie', 'alertes', 'di', 'sorties']
 
 export interface RoleTemplate {
   profil:       Profil
@@ -84,7 +85,7 @@ export const DEFAULT_ROLES: Record<Profil, RoleTemplate> = {
     profil: 'validation', label: 'Responsable Validation', superviseur: false,
     description: 'États de codage, validation des déclarations, saisie PR, fiches conteneurs.',
     modules: [...SOCLE, 'dossiers', 'codage'],
-    permissions: P('partiel', 'complet', 'non', 'non', 'non'),
+    permissions: P('partiel', 'complet', 'lecture', 'non', 'non'),
   },
   gestion_sorties: {
     profil: 'gestion_sorties', label: 'Responsable Gestion des Sorties', superviseur: false,
@@ -114,7 +115,7 @@ export const DEFAULT_ROLES: Record<Profil, RoleTemplate> = {
     profil: 'operations', label: 'Agent d\'opérations', superviseur: false,
     description: 'Exécution des tâches opérationnelles qui lui sont attribuées.',
     modules: [...SOCLE, 'dossiers'],
-    permissions: P('partiel', 'non', 'non', 'non', 'non'),
+    permissions: P('partiel', 'non', 'lecture', 'non', 'non'),
   },
 }
 

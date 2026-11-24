@@ -2,7 +2,7 @@ import { describe, it, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import { api, closeApp, expectStatus, forgetSession, getApp, login, unique, userIds, USERS, type UserKey } from './helpers'
 
-const SOCLE = ['dashboard', 'mon_espace', 'messagerie', 'alertes']
+const SOCLE = ['dashboard', 'mon_espace', 'messagerie', 'alertes', 'di', 'sorties']
 const MODULES_ATTENDUS: Record<UserKey, string[]> = {
   delba:   ['administration', 'comptabilite_avancee', 'supervision', 'parametres', 'employes', 'performance'],
   soudi:   ['supervision', 'exploitation', 'parametres', 'employes', 'codage', 'sorties', 'kribi', 'logistique'],
@@ -22,7 +22,7 @@ const MODULES_INTERDITS: Partial<Record<UserKey, string[]>> = {
   wandala: ['kribi', 'administration', 'supervision'],
   yasmine: ['administration', 'comptabilite_avancee', 'supervision'],
   honore:  ['administration', 'supervision', 'parametres'],
-  aliou:   ['sorties', 'administration', 'supervision'],
+  aliou:   ['administration', 'supervision'],
 }
 
 describe('Authentification', () => {
