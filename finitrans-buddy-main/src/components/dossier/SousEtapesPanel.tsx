@@ -56,7 +56,7 @@ export type SousEtapeConfig = {
   fields?:             FieldDef[];
   /** Facture client à établir en terminant la tâche (lignes, TVA, PDF) */
   factureClient?:      boolean;
-  /** Bon de la compagnie : numéro et date à saisir en terminant la tâche (pas de montant) */
+  /** Facture de la compagnie : numéro et date à saisir en terminant la tâche (pas de montant) */
   bonCompagnie?:       boolean;
   /** Règlement du client à saisir en terminant la tâche (mode, client, référence…) */
   reglementClient?:    boolean;
@@ -180,11 +180,11 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   bon_compagnie: [
     {
       cle: "facturation_compagnie", label: "Facturation compagnie maritime",
-      description: "Obtention du bon de la compagnie maritime : numéro du bon et date", partie: "A", partieLabel: "Bon de Compagnie Maritime",
+      description: "Obtention de la facture de la compagnie maritime : numéro de la facture et date", partie: "A", partieLabel: "Bon de Compagnie Maritime",
       bonCompagnie: true, outputLabel: "Facturation compagnie maritime",
       fields: [
-        { key: "bc_bon_numero", label: "N° du bon", type: "text", placeholder: "Ex : MSC-BON-2026-0042" },
-        { key: "bc_bon_date",   label: "Date du bon", type: "date" },
+        { key: "bc_bon_numero", label: "N° de la facture", type: "text", placeholder: "Ex : MSC-FAC-2026-0042" },
+        { key: "bc_bon_date",   label: "Date de la facture", type: "date" },
       ],
     },
     {
@@ -639,7 +639,7 @@ const RevueInformations = ({ config, data }: { config: SousEtapeConfig; data?: S
   );
 };
 
-// ── Dialogue Bon de la compagnie maritime (numéro et date, sans montant) ──────
+// ── Dialogue Facture de la compagnie maritime (numéro et date, sans montant) ──────
 const BonCompagnieDialog = ({
   onConfirm, onCancel, loading, meta,
 }: {
@@ -653,25 +653,25 @@ const BonCompagnieDialog = ({
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.96 }} animate={{ opacity: 1, scale: 1 }}
-        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border" role="dialog" aria-label="Bon de la compagnie maritime">
+        className="bg-card rounded-2xl p-6 w-full max-w-md shadow-2xl border border-border" role="dialog" aria-label="Facture de la compagnie maritime">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center"><Stamp className="w-5 h-5 text-blue-700" /></div>
           <div>
             <h3 className="font-display font-bold text-foreground">Facturation compagnie maritime</h3>
-            <p className="text-xs text-muted-foreground">Numéro et date du bon délivré par la compagnie</p>
+            <p className="text-xs text-muted-foreground">Numéro et date de la facture émise par la compagnie</p>
           </div>
         </div>
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5"><Label className="text-xs font-semibold">N° du bon *</Label>
-              <Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" aria-label="N° du bon" autoFocus /></div>
-            <div className="space-y-1.5"><Label className="text-xs font-semibold">Date du bon *</Label>
-              <Input type="date" value={dateBon} onChange={e => setDateBon(e.target.value)} className="bg-muted/40" aria-label="Date du bon" /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">N° de la facture *</Label>
+              <Input value={numero} onChange={e => setNumero(e.target.value)} className="bg-muted/40 font-mono" aria-label="N° de la facture" autoFocus /></div>
+            <div className="space-y-1.5"><Label className="text-xs font-semibold">Date de la facture *</Label>
+              <Input type="date" value={dateBon} onChange={e => setDateBon(e.target.value)} className="bg-muted/40" aria-label="Date de la facture" /></div>
           </div>
           <div className="flex gap-2 pt-1">
             <Button onClick={() => onConfirm({ bc_bon_numero: numero.trim(), bc_bon_date: dateBon })}
               disabled={!numero.trim() || !dateBon || loading} className="flex-1 gap-1.5 bg-secondary text-secondary-foreground">
-              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer le bon
+              {loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />} Enregistrer la facture
             </Button>
             <Button variant="outline" onClick={onCancel} className="px-4">Annuler</Button>
           </div>
