@@ -589,6 +589,15 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     const di = await prisma.declarationImportation.findUnique({ where: { id } })
     if (!di) throw new NotFoundError('DI', id)
 
+    // ── Un dossier ne mouvemente que SA DI ────────────────────────
+    if (body.dossierId) {
+      const dossier = await prisma.dossier.findUnique({ where: { id: body.dossierId }, select: { numero: true, diId: true } })
+      if (!dossier) throw new NotFoundError('Dossier', body.dossierId)
+      if (dossier.diId !== id) {
+        return reply.code(422).send({ error: 'MAUVAISE_DI', message: `Le dossier ${dossier.numero} n'est pas rattaché à la DI ${di.numero} : il ne peut être débité que sur sa propre DI.` })
+      }
+    }
+
     // ── Anti-doublon facture ──────────────────────────────────────
     if (body.type === 'debit' && body.referenceFacture?.trim()) {
       const refNorm = body.referenceFacture.trim().toUpperCase()

@@ -57,7 +57,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.get('/suivi/bons-compagnie', { preHandler: [authenticate] }, async (request, reply) => {
     const user = request.user
     const DOCS: Record<string, { libelle: string; numero: string; date: string }> = {
-      facturation_compagnie: { libelle: 'Bon de la compagnie', numero: 'bc_bon_numero', date: 'bc_bon_date' },
+      facturation_compagnie: { libelle: 'Facturation compagnie maritime', numero: 'bc_bon_numero', date: 'bc_bon_date' },
       bon_a_delivrer:        { libelle: 'Bon à délivrer',      numero: 'bad_numero',    date: 'bad_date_obtention' },
       bon_livraison:         { libelle: 'Bon de livraison',    numero: 'kbl_numero',    date: 'kbl_date' },
     }

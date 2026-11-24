@@ -179,9 +179,9 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
   ],
   bon_compagnie: [
     {
-      cle: "facturation_compagnie", label: "Bon de la compagnie maritime",
+      cle: "facturation_compagnie", label: "Facturation compagnie maritime",
       description: "Obtention du bon de la compagnie maritime : numéro du bon et date", partie: "A", partieLabel: "Bon de Compagnie Maritime",
-      bonCompagnie: true, outputLabel: "Bon de la compagnie",
+      bonCompagnie: true, outputLabel: "Facturation compagnie maritime",
       fields: [
         { key: "bc_bon_numero", label: "N° du bon", type: "text", placeholder: "Ex : MSC-BON-2026-0042" },
         { key: "bc_bon_date",   label: "Date du bon", type: "date" },
@@ -657,7 +657,7 @@ const BonCompagnieDialog = ({
         <div className="flex items-center gap-3 mb-4">
           <div className="w-9 h-9 rounded-xl bg-blue-100 flex items-center justify-center"><Stamp className="w-5 h-5 text-blue-700" /></div>
           <div>
-            <h3 className="font-display font-bold text-foreground">Bon de la compagnie maritime</h3>
+            <h3 className="font-display font-bold text-foreground">Facturation compagnie maritime</h3>
             <p className="text-xs text-muted-foreground">Numéro et date du bon délivré par la compagnie</p>
           </div>
         </div>

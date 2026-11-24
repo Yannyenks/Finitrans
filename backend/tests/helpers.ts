@@ -62,6 +62,14 @@ export async function api<T = any>(who: UserKey | null, method: string, url: str
   const a = await getApp()
   const headers: Record<string, string> = {}
   if (who) headers.authorization = `Bearer ${(await login(who)).token}`
+  // Création de dossier : DI obligatoire — DI commune des tests par défaut (sauf DI fournie ou test « brut »)
+  if (method === 'POST' && url === '/api/dossiers' && payload && typeof payload === 'object') {
+    const p = { ...(payload as Record<string, unknown>) }
+    if (p._brut) delete p._brut
+    else if (!p.diId && !p.nouvelleDI) { p.diId = await diCommune(); p.montantFacture ??= 1 }
+    else p.montantFacture ??= 1
+    payload = p
+  }
   const res = await a.inject({ method: method as any, url, headers, payload: payload as any })
   let body: any = undefined
   try { body = res.body ? JSON.parse(res.body) : undefined } catch { body = res.body }
@@ -154,4 +162,16 @@ export async function demarrer(dossierId: string, who: UserKey = 'delba') {
   const r = await api(who, 'POST', `/api/dossiers/${dossierId}/demarrer`, {})
   expectStatus(r, 200, `démarrage de l'étape par ${who}`)
   return r.body
+}
+
+/** DI commune des tests (enveloppe très large) : chaque dossier de test y débite sa facture. */
+let _diCommune: string | null = null
+export async function diCommune(): Promise<string> {
+  if (_diCommune) return _diCommune
+  const { prisma } = await import('../src/config/prisma')
+  const existante = await prisma.declarationImportation.findUnique({ where: { numero: 'DI-TESTS-COMMUNE' } })
+  if (existante) { await prisma.declarationImportation.update({ where: { id: existante.id }, data: { statut: 'actif', soldeActuel: 1e12, montant: 1e12 } }); return (_diCommune = existante.id) }
+  const dg = await prisma.user.findFirst({ where: { profil: 'dg' }, select: { id: true } })
+  const di = await prisma.declarationImportation.create({ data: { numero: 'DI-TESTS-COMMUNE', client: 'TESTS', montant: 1e12, soldeActuel: 1e12, dateEmission: new Date(), gestionnaireId: dg!.id } })
+  return (_diCommune = di.id)
 }

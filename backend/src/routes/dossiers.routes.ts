@@ -13,6 +13,7 @@ import { AuthUser } from '../types'
 import { envoyerContenu, recevoirFichier } from '../services/televersement'
 import { archiverCompteRendu, genererCompteRendu } from '../services/compteRendu'
 import { finaliserDossier } from '../services/finalisation'
+import { creerDI, debiterDI, verifierDebitDI } from '../services/di'
 import { MOTIFS_IMPREVU, phaseDe, phasesDossier } from '../services/phases'
 import {
   STATUS_ORDER, STATUS_LABELS, applicableSousEtapes, assignStage, demarrerEtape, initSousEtapes, loadAttribution,
@@ -47,6 +48,13 @@ const createDossierSchema = z.object({
   priorite:          z.enum(['haute', 'moyenne', 'basse']).default('moyenne'),
   numeroDI:          z.string().optional(),
   montantDI:         z.number().nonnegative().optional(),
+  /** DI du dossier (obligatoire à la création) : DI existante… */
+  diId:              z.string().uuid().optional(),
+  /** …ou nouvelle DI ouverte avec le dossier */
+  nouvelleDI:        z.object({ numero: z.string().trim().min(3).max(50), montant: z.number().positive(), devise: z.string().max(10).default('XAF') }).optional(),
+  /** Facture fournisseur du dossier : débitée sur le solde restant de sa DI */
+  montantFacture:    z.number().positive().optional(),
+  referenceFacture:  z.string().trim().max(100).optional(),
   fournisseur:       z.string().optional(),
   numeroBL:          z.string().optional(),
   numDeclaration:    z.string().optional(),
@@ -171,8 +179,23 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
 
   // POST /api/dossiers — enregistrement + attribution automatique des tâches
   fastify.post('/', { preHandler: [authenticate, authorize('permDossier', 'partiel')] }, async (request, reply) => {
-    const body = normaliserConteneurs(createDossierSchema.parse(request.body))
+    const { diId: diChoisie, nouvelleDI, montantFacture, referenceFacture, ...body } = normaliserConteneurs(createDossierSchema.parse(request.body))
     if (!body.conteneur) return reply.code(422).send({ error: 'CONTENEUR_REQUIS', message: 'Indiquez au moins un conteneur.' })
+    // Chaque dossier est rattaché à une DI et débite sa facture fournisseur sur le solde restant de celle-ci
+    if (!diChoisie && !nouvelleDI) {
+      return reply.code(422).send({ error: 'DI_REQUISE', message: 'Rattachez le dossier à une DI (existante ou nouvelle).' })
+    }
+    if (!montantFacture) {
+      return reply.code(422).send({ error: 'MONTANT_REQUIS', message: 'Indiquez le montant de la facture fournisseur à débiter sur la DI.' })
+    }
+    if (diChoisie) {
+      const di = await prisma.declarationImportation.findUnique({ where: { id: diChoisie } })
+      if (!di) return reply.code(422).send({ error: 'DI_INTROUVABLE', message: 'DI introuvable.' })
+      if (di.statut !== 'actif') return reply.code(422).send({ error: 'DI_INACTIVE', message: `La DI ${di.numero} est clôturée ou suspendue.` })
+      await verifierDebitDI(di.id, montantFacture, referenceFacture)
+    } else if (montantFacture > nouvelleDI!.montant) {
+      return reply.code(422).send({ error: 'SOLDE_DI_INSUFFISANT', message: 'Le montant de la facture dépasse le montant de la nouvelle DI.' })
+    }
     if (body.compagnie && !(await compagnieConnue(body.compagnie))) {
       return reply.code(422).send({ error: 'COMPAGNIE_INCONNUE', message: `Compagnie « ${body.compagnie} » inconnue : la Direction peut l'ajouter dans Paramètres > Compagnies maritimes.` })
     }
@@ -187,6 +210,12 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       responsableId = (await resolveAssignee(attribution.reception.owner, body)) ?? user.id
     }
 
+    // Nouvelle DI ouverte avec le dossier
+    const diId = diChoisie ?? (await creerDI({
+      numero: nouvelleDI!.numero, client: body.client, montant: nouvelleDI!.montant, devise: nouvelleDI!.devise,
+      compagnie: body.compagnie, gestionnaireId: user.id,
+    })).id
+
     const year = new Date().getFullYear()
     const dossier = await withUniqueRetry(async () => {
       const numero = await nextSequence(`DOS-${year}-`, async prefix =>
@@ -194,6 +223,7 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       return prisma.dossier.create({
         data: {
           ...body,
+          diId,
           conteneur: body.conteneur!,
           responsableId: responsableId!,
           numero,
@@ -209,8 +239,22 @@ const dossiersRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
       data: { dossierId: dossier.id, etape: 'reception', dateDebut: new Date(), dureePrevueJours: 1, responsableId },
     })
 
+    // Débit de la facture fournisseur sur le solde restant de la DI du dossier
+    let debit: Awaited<ReturnType<typeof debiterDI>>
+    try {
+      debit = await debiterDI({
+        diId, montant: montantFacture, dossierId: dossier.id, userId: user.id, referenceFacture: referenceFacture ?? null,
+        motif: `Facture fournisseur${referenceFacture ? ` ${referenceFacture}` : ''} — dossier ${dossier.numero}`,
+      })
+    } catch (err) {
+      // Débit impossible (solde consommé entre-temps) : le dossier n'est pas créé
+      await prisma.dossier.delete({ where: { id: dossier.id } }).catch(() => null)
+      throw err
+    }
+
     await initSousEtapes(dossier.id)
     await demarrerEtape(dossier.id, 'reception')
+    await logAudit(dossier.id, user.id, 'DEBIT_DI', `Rattaché à la DI ${debit.numero} : ${montantFacture.toLocaleString('fr-FR')} FCFA débités (facture fournisseur${referenceFacture ? ` ${referenceFacture}` : ''}) — solde restant ${Math.round(debit.nouveauSolde).toLocaleString('fr-FR')} FCFA`)
     await rattacherClient(dossier.id, dossier.client, user.id)
 
     // Chaque titulaire est prévenu avec l'échéance de sa tâche : le compte à rebours démarre aussitôt

@@ -250,7 +250,7 @@ const Parametres = () => {
             </p>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
-              {Object.entries(slaConfig).filter(([step]) => step !== "operations_douala" && step !== "validation").map(([step, h]) => (
+              {Object.entries(slaConfig).filter(([step]) => step !== "operations_douala" && step !== "validation" && step !== "soumission_sgs").map(([step, h]) => (
                 <div key={step} className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl bg-muted/40 border border-border/50" data-testid={`sla-etape-${step}`}>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{STEP_LABELS[step] ?? step}</p>

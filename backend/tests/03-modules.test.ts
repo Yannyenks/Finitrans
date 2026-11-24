@@ -52,9 +52,13 @@ describe('Déclarations d\'importation (DI)', () => {
     const c = await api('yasmine', 'POST', '/api/di', { numero, client: 'CLIENT MODULES', montant: 1_000_000, dateEmission: new Date().toISOString(), compagnie: 'COSCO' })
     expectStatus(c, 201)
     diId = c.body.id
-    expectStatus(await api('yasmine', 'POST', `/api/di/${diId}/lier-dossier`, { dossierId }), 200)
+    // Le dossier est rattaché à sa DI dès sa création (facture fournisseur débitée sur la DI)
+    const surDI = await api('yasmine', 'POST', '/api/dossiers', { client: 'CLIENT MODULES', compagnie: 'COSCO', conteneur: 'COSU1111112', marchandise: 'Matériel', site: 'Douala', dateArrivee: new Date().toISOString(), diId, montantFacture: 1 })
+    expectStatus(surDI, 201)
+    const dossierDI = surDI.body.id
+    expectStatus(await api('yasmine', 'POST', `/api/di/${diId}/lier-dossier`, { dossierId: dossierDI }), 200)
 
-    const deb = await api('yasmine', 'POST', `/api/di/${diId}/mouvements`, { type: 'debit', montant: 920_000, motif: 'Droits de douane', referenceFacture: 'FAC-X-1', dossierId, categorie: 'droits_douane' })
+    const deb = await api('yasmine', 'POST', `/api/di/${diId}/mouvements`, { type: 'debit', montant: 920_000, motif: 'Droits de douane', referenceFacture: 'FAC-X-1', dossierId: dossierDI, categorie: 'droits_douane' })
     expectStatus(deb, 201)
     assert.equal(deb.body.di.alerteNiveau, 'critical')
     const dbl = await api('yasmine', 'POST', `/api/di/${diId}/mouvements`, { type: 'debit', montant: 1_000, motif: 'Doublon', referenceFacture: 'fac-x-1' })

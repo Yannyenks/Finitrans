@@ -71,7 +71,7 @@ describe('Chronométrage et SLA des tâches', () => {
     const l = await api('yasmine', 'GET', '/api/parametres/sla-sous-etapes')
     expectStatus(l, 200)
     assert.equal(l.body.find((x: any) => x.cle === 'codage.declaration').heures, 2.5)
-    assert.ok(l.body.some((x: any) => x.label === 'Obtention du RVC'))
+    assert.ok(!l.body.some((x: any) => x.cle.startsWith('soumission_sgs.')), 'étape Soumission SGS retirée')
     // La sous-étape SGS de la réception a été retirée
     assert.ok(!l.body.some((x: any) => x.cle === 'reception.traitement_sgs'))
   })
@@ -121,30 +121,29 @@ describe('Passage de relais au niveau des tâches', () => {
     }
     expectStatus(await upload('yasmine', `/api/dossiers/${dossierId}/upload`, { name: 'r.pdf', type: 'application/pdf', content: `%PDF ${Date.now()}` }, { etape: 'reception' }), 201)
     const avance = await api('yasmine', 'PATCH', `/api/dossiers/${dossierId}/status`, {
-      status: 'soumission_sgs', responsableId: ids.soudi, taches: { pvc: ids.delba },
+      status: 'codage', responsableId: ids.odette, taches: { declaration: ids.delba },
     })
     expectStatus(avance, 200)
     // Pas de chronomètre avant le démarrage de l'étape
-    assert.ok((await taches('soumission_sgs')).every(x => !x.deadline), 'étape en attente de démarrage')
-    expectStatus(await api('soudi', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'valide' }), 422)
-    await demarrer(dossierId, 'soudi')
-    const sgs = await taches('soumission_sgs')
-    assert.equal(nom(sgs.find(x => x.cle === 'pvc').responsableId), 'delba')
-    assert.equal(nom(sgs.find(x => x.cle === 'ff_soumission').responsableId), 'soudi')
-    // Seule la première tâche de l'étape tourne ; l'obtention du RVC attend la soumission
-    assert.ok(sgs.find(x => x.cle === 'ff_soumission').deadline)
-    assert.equal(sgs.find(x => x.cle === 'pvc').deadline, null)
+    assert.ok((await taches('codage')).every(x => !x.deadline), 'étape en attente de démarrage')
+    expectStatus(await api('odette', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/codage/etat_codage`, { statut: 'valide' }), 422)
+    await demarrer(dossierId, 'odette')
+    const cod = await taches('codage')
+    assert.equal(nom(cod.find(x => x.cle === 'declaration').responsableId), 'delba')
+    assert.equal(nom(cod.find(x => x.cle === 'etat_codage').responsableId), 'odette')
+    // Seule la première tâche de l'étape tourne ; la déclaration attend l'état de codage
+    assert.ok(cod.find(x => x.cle === 'etat_codage').deadline)
+    assert.equal(cod.find(x => x.cle === 'declaration').deadline, null)
     // Une tâche inconnue est refusée
-    const bad = await api('soudi', 'PATCH', `/api/dossiers/${dossierId}/status`, { status: 'codage', taches: { inexistante: ids.odette } })
+    const bad = await api('odette', 'PATCH', `/api/dossiers/${dossierId}/status`, { status: 'paiement', taches: { inexistante: ids.odette } })
     expectStatus(bad, 422)
   })
 })
 
 describe('Alerte Direction Générale', () => {
   it('un blocage signalé par un titulaire est notifié au DG', async () => {
-    const ff = (await taches('soumission_sgs')).find(x => x.cle === 'ff_soumission')
-    expectStatus(await api('soudi', 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'en_cours' }), 200)
-    expectStatus(await api(nom(ff.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/soumission_sgs/ff_soumission`, { statut: 'rejete' }), 200)
+    const ec = (await taches('codage')).find(x => x.cle === 'etat_codage')
+    expectStatus(await api(nom(ec.responsableId), 'PUT', `/api/dossiers/${dossierId}/sous-etapes/codage/etat_codage`, { statut: 'rejete' }), 200)
     const n = await api('delba', 'GET', '/api/notifications?limit=30')
     assert.ok(n.body.data.some((x: any) => x.dossierId === dossierId && x.type === 'alerte' && x.titre === 'Blocage signalé sur un dossier'))
   })
@@ -301,68 +300,46 @@ describe('Conteneurs, sous-étapes retirées et bon de compagnie sans montant', 
   })
 })
 
-describe('Facture fournisseur (FF et soumission) débitée sur la DI', () => {
-  it('le montant saisi est décrémenté du solde de la DI ; solde insuffisant refusé ; sans DI refusé', async () => {
-    const d = await api('yasmine', 'POST', '/api/dossiers', {
-      client: unique('CLIENT DI'), compagnie: 'MSC', conteneur: 'MSCU4545454', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
-    })
-    const id = d.body.id
-    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
-    await aSonTour(id, 'soumission_sgs', 'ff_soumission')
-    // Sans DI liée : refus explicite
-    const sansDi = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
-      statut: 'valide', metadata: { ff_montant_facture: 100000, ff_reference_facture: unique('PI') },
-    })
+describe('DI obligatoire : la facture fournisseur est débitée à la création du dossier', () => {
+  const base = () => ({ client: unique('CLIENT DI'), compagnie: 'MSC', conteneur: 'MSCU4545454', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString() })
+
+  it('sans DI ou sans montant : refusé ; DI existante : débit sur ce qui reste ; solde insuffisant : refusé', async () => {
+    const sansDi = await api('yasmine', 'POST', '/api/dossiers', { ...base(), _brut: true })
     expectStatus(sansDi, 422)
     assert.equal(sansDi.body.error, 'DI_REQUISE')
+    const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-OBL'), client: 'CLIENT DI', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    const sansMontant = await api('yasmine', 'POST', '/api/dossiers', { ...base(), _brut: true, diId: di.body.id })
+    expectStatus(sansMontant, 422)
+    assert.equal(sansMontant.body.error, 'MONTANT_REQUIS')
 
-    const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-FF'), client: 'CLIENT DI', montant: 1_000_000, dateEmission: new Date().toISOString() })
-    expectStatus(await api('yasmine', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: id }), 200)
-
-    // Solde insuffisant : refus, la tâche reste ouverte
-    const trop = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
-      statut: 'valide', metadata: { ff_montant_facture: 5_000_000, ff_reference_facture: unique('PI') },
-    })
+    // 1er dossier : 600 000 débités ; 2e dossier sur la même DI : débite le reste (400 000)
+    const d1 = await api('yasmine', 'POST', '/api/dossiers', { ...base(), diId: di.body.id, montantFacture: 600_000, referenceFacture: unique('PI') })
+    expectStatus(d1, 201)
+    assert.equal(d1.body.diId, di.body.id)
+    assert.equal(Number((await api('yasmine', 'GET', `/api/di/${di.body.id}`)).body.soldeActuel), 400_000)
+    const trop = await api('yasmine', 'POST', '/api/dossiers', { ...base(), diId: di.body.id, montantFacture: 500_000 })
     expectStatus(trop, 422)
     assert.equal(trop.body.error, 'SOLDE_DI_INSUFFISANT')
-
-    const ok = await api('delba', 'PUT', `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`, {
-      statut: 'valide', metadata: { ff_montant_facture: '250 000', ff_reference_facture: unique('PI') },
-    })
-    expectStatus(ok, 200)
-    assert.equal(ok.body.metadata.enregistrement_type, 'debit_di')
+    const d2 = await api('yasmine', 'POST', '/api/dossiers', { ...base(), diId: di.body.id, montantFacture: 400_000 })
+    expectStatus(d2, 201)
     const apres = await api('yasmine', 'GET', `/api/di/${di.body.id}`)
-    assert.equal(Number(apres.body.soldeActuel), 750_000)
+    assert.equal(Number(apres.body.soldeActuel), 0)
+    assert.equal(apres.body.dossiers.length, 2)
+    const mvts = apres.body.mouvements.filter((m: any) => m.type === 'debit')
+    assert.deepEqual(mvts.map((m: any) => m.dossier?.numero).sort(), [d1.body.numero, d2.body.numero].sort(), 'chaque débit porte son dossier')
   })
 
-  it('montant saisi dans les informations de l\'étape (sans validation) : débité aussitôt ; correction = écart seulement', async () => {
-    const d = await api('yasmine', 'POST', '/api/dossiers', {
-      client: unique('CLIENT DI2'), compagnie: 'MSC', conteneur: 'MSCU4545455', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
-    })
-    const id = d.body.id
-    await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
-    await aSonTour(id, 'soumission_sgs', 'ff_soumission')
-    const di = await api('yasmine', 'POST', '/api/di', { numero: unique('DI-FF2'), client: 'CLIENT DI2', montant: 1_000_000, dateEmission: new Date().toISOString() })
-    expectStatus(await api('yasmine', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: id }), 200)
-    const url = `/api/dossiers/${id}/sous-etapes/soumission_sgs/ff_soumission`
-    const solde = async () => Number((await api('yasmine', 'GET', `/api/di/${di.body.id}`)).body.soldeActuel)
-
-    const saisie = await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '300000', ff_reference_facture: unique('PI') } })
-    expectStatus(saisie, 200)
-    assert.equal(saisie.body.metadata.ff_montant_debite, 300_000)
-    assert.equal(await solde(), 700_000)
-
-    // Réenregistrer le même montant (ex. validation) ne débite pas deux fois ; un client ne peut pas falsifier le montant débité
-    expectStatus(await api('soudi', 'PUT', url, { statut: 'valide', metadata: { ff_montant_facture: '300000', ff_montant_debite: 0 } }), 200)
-    assert.equal(await solde(), 700_000)
-
-    // Correction à la hausse puis à la baisse : seul l'écart est appliqué
-    expectStatus(await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '450000' } }), 200)
-    assert.equal(await solde(), 550_000)
-    const baisse = await api('soudi', 'PUT', url, { metadata: { ff_montant_facture: '200000' } })
-    expectStatus(baisse, 200)
-    assert.equal(baisse.body.metadata.ff_montant_debite, 200_000)
-    assert.equal(await solde(), 800_000)
+  it('nouvelle DI ouverte avec le dossier ; un dossier ne débite que sa propre DI', async () => {
+    const numero = unique('DI-NEW')
+    const d = await api('yasmine', 'POST', '/api/dossiers', { ...base(), nouvelleDI: { numero, montant: 2_000_000 }, montantFacture: 750_000 })
+    expectStatus(d, 201)
+    const di = (await api('yasmine', 'GET', '/api/di?limit=100')).body.data.find((x: any) => x.numero === numero)
+    assert.equal(Number(di.soldeActuel), 1_250_000)
+    assert.equal(d.body.diId, di.id)
+    const autre = await api('honore', 'POST', '/api/di', { numero: unique('DI-AUTRE'), client: 'CLIENT AUTRE', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    const mauvaise = await api('honore', 'POST', `/api/di/${autre.body.id}/mouvements`, { type: 'debit', montant: 1000, motif: 'Essai débit croisé', dossierId: d.body.id })
+    expectStatus(mauvaise, 422)
+    assert.equal(mauvaise.body.error, 'MAUVAISE_DI')
   })
 })
 
@@ -426,7 +403,7 @@ describe('Validation obligatoire d\'une étape avant la suivante', () => {
     const id = d.body.id
     await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)
     for (const who of ['delba', 'soudi'] as const) {
-      const r = await api(who, 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs' })
+      const r = await api(who, 'PATCH', `/api/dossiers/${id}/status`, { status: 'codage' })
       expectStatus(r, 422)
       assert.equal(r.body.error, 'SOUS_ETAPES_INCOMPLETES')
     }
@@ -434,8 +411,8 @@ describe('Validation obligatoire d\'une étape avant la suivante', () => {
     expectStatus(saut, 422)
     assert.equal(saut.body.error, 'ETAPE_INVALIDE')
 
-    await placerEtape(id, 'codage')
-    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs' }), 200)
+    await placerEtape(id, 'paiement')
+    expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'codage' }), 200)
   })
 })
 
@@ -598,8 +575,7 @@ describe('Deux phases : pré-dédouanement et dédouanement', () => {
     assert.deepEqual(f.body.phases.map((p: any) => [p.cle, p.etat]), [['pre_dedouanement', 'en_cours'], ['dedouanement', 'a_venir']])
 
     // Fin du pré-dédouanement : passage au codage → la phase Dédouanement attend son démarrage
-    await placerEtape(id, 'soumission_sgs')
-    await preparerPassage(id, 'soumission_sgs')
+    await preparerPassage(id, 'reception')
     expectStatus(await api('delba', 'PATCH', `/api/dossiers/${id}/status`, { status: 'codage' }), 200)
     f = await api('delba', 'GET', `/api/dossiers/${id}`)
     assert.deepEqual(f.body.phases.map((p: any) => p.etat), ['terminee', 'en_attente'])
@@ -698,8 +674,16 @@ describe('Gestion des DI : dossiers rattachés', () => {
     const mk = async (n: string) => (await api('yasmine', 'POST', '/api/dossiers', {
       client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
     })).body
-    const [a, b] = [await mk('CL-A'), await mk('CL-B')]
-    for (const d of [a, b]) expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: d.id }), 200)
+    const mkSur = async (n: string) => (await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+      diId: di.body.id, montantFacture: 100_000,
+    })).body
+    const a = await mkSur('CL-A')
+    // Ancien dossier sans DI (créé avant la règle) : rattachable puis dissociable
+    const { prisma } = await import('../src/config/prisma')
+    const b = await prisma.dossier.update({ where: { id: (await mk('CL-B')).id }, data: { diId: null } })
+    await prisma.mouvementDI.deleteMany({ where: { dossierId: b.id } })
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: b.id }), 200)
 
     const liste = await api('honore', 'GET', '/api/di?limit=50')
     const ligne = liste.body.data.find((x: any) => x.id === di.body.id)
@@ -708,9 +692,7 @@ describe('Gestion des DI : dossiers rattachés', () => {
     const detail = await api('honore', 'GET', `/api/di/${di.body.id}`)
     assert.equal(detail.body.dossiers.length, 2)
 
-    // Un dossier débité sur la DI ne peut pas en être dissocié
-    await aSonTour(a.id, 'soumission_sgs', 'ff_soumission')
-    expectStatus(await api('delba', 'PUT', `/api/dossiers/${a.id}/sous-etapes/soumission_sgs/ff_soumission`, { metadata: { ff_montant_facture: '100000', ff_reference_facture: unique('PI') } }), 200)
+    // Un dossier débité sur la DI (à sa création) ne peut pas en être dissocié
     const refus = await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: a.id })
     expectStatus(refus, 422)
     assert.equal(refus.body.error, 'DOSSIER_DEBITE')

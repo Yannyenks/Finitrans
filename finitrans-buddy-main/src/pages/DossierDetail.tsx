@@ -53,7 +53,7 @@ const STATUS_COLORS: Record<string, string> = {
   cloture:          "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 const STATUS_ORDER = [
-  "reception", "soumission_sgs", "codage",
+  "reception", "codage",
   "paiement", "bon_compagnie", "operations_kribi", "cloture", "facturation",
 ];
 

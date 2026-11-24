@@ -6,9 +6,10 @@ import { DossierStatus, Profil, Site, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { marquerNotifies } from './evenements'
 
-// L'étape « Validation » est retirée du parcours : sa liquidation se fait à la fin du Codage
+// Étapes retirées du parcours : « Soumission SGS » (la facture fournisseur est débitée sur la DI à la création
+// du dossier) et « Validation » (sa liquidation se fait à la fin du Codage)
 export const STATUS_ORDER: DossierStatus[] = [
-  'reception', 'soumission_sgs', 'codage',
+  'reception', 'codage',
   'paiement', 'bon_compagnie', 'operations_kribi', 'cloture', 'facturation',
 ]
 
@@ -52,10 +53,8 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'paiement_client',  label: 'Paiement par le client' },
     { cle: 'di',               label: 'DI' },
   ],
-  soumission_sgs: [
-    { cle: 'ff_soumission', label: 'FF et soumission des documents fournisseurs' },
-    { cle: 'pvc',           label: 'Obtention du RVC' },
-  ],
+  // Étape retirée du parcours (facture fournisseur débitée sur la DI à la création du dossier)
+  soumission_sgs: [],
   codage: [
     { cle: 'etat_codage', label: 'État de codage et validation' },
     { cle: 'declaration', label: 'Déclaration' },
@@ -68,7 +67,7 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
     { cle: 'paiement_droits', label: 'Paiement des droits et taxes' },
   ],
   bon_compagnie: [
-    { cle: 'facturation_compagnie', label: 'Bon de la compagnie maritime' },
+    { cle: 'facturation_compagnie', label: 'Facturation compagnie maritime' },
     { cle: 'bon_a_delivrer',        label: 'Soumission & obtention du Bon à Délivrer' },
   ],
   // Étape retirée du parcours (les opérations de Douala relèvent du « Bon compagnie (Douala) »)

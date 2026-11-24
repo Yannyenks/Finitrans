@@ -117,13 +117,13 @@ describe('Passation : celui qui termine l\'étape choisit qui continue', () => {
     expectStatus(await upload('yasmine', `/api/dossiers/${id}/upload`, { name: 'p.pdf', type: 'application/pdf', content: `%PDF ${Date.now()}` }, { etape: 'reception' }), 201)
 
     // Mme Yasmine confie la soumission SGS à Mme Odette au lieu de l'attribution automatique
-    const d = await api('yasmine', 'PATCH', `/api/dossiers/${id}/status`, { status: 'soumission_sgs', responsableId: ids.odette, note: 'Odette prend la suite' })
+    const d = await api('yasmine', 'PATCH', `/api/dossiers/${id}/status`, { status: 'codage', responsableId: ids.odette, note: 'Odette prend la suite' })
     expectStatus(d, 200)
     assert.equal(d.body.responsableId, ids.odette)
     assert.equal(d.body.etapeDemarree, false, 'la nouvelle étape attend son démarrage')
     await demarrer(id, 'odette')
     const apres = await api('odette', 'GET', `/api/dossiers/${id}/sous-etapes`)
-    const sgs = apres.body.filter((x: any) => x.etape === 'soumission_sgs')
+    const sgs = apres.body.filter((x: any) => x.etape === 'codage')
     assert.ok(sgs.length > 0 && sgs.every((x: any) => x.responsableId === ids.odette))
     const ns = await api('odette', 'GET', `/api/employe/mes-taches`)
     assert.ok(ns.body.taches.some((t: any) => t.dossier.id === id && t.actionnable))

@@ -74,10 +74,12 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.ok(!all.some(t => t.etape === 'operations_douala'), 'étape Opérations Douala retirée')
     assert.equal(owner('cloture', 'rapport_final'), 'yasmine')
     assert.ok(!all.some(t => t.etape === 'operations_kribi'), 'pas d\'étape Kribi pour Douala')
-    // Fournisseur & soumission + RVC : M. Soudi ; ailleurs, la Direction supervise
-    assert.equal(owner('soumission_sgs', 'ff_soumission'), 'soudi')
-    assert.equal(owner('soumission_sgs', 'pvc'), 'soudi')
-    assert.ok(all.filter(t => t.etape !== 'soumission_sgs').every(t => t.responsableId !== ids.delba && t.responsableId !== ids.soudi), 'DG/Exploitation supervisent seulement')
+    // Étape Soumission SGS retirée ; la Direction supervise sans tâche attribuée
+    assert.ok(!all.some(t => t.etape === 'soumission_sgs'), 'étape Soumission SGS retirée')
+    assert.ok(all.every(t => t.responsableId !== ids.delba && t.responsableId !== ids.soudi), 'DG/Exploitation supervisent seulement')
+    // La facture fournisseur est débitée sur la DI à la création
+    const d = await api('delba', 'GET', `/api/dossiers/${dossierId}`)
+    assert.ok(d.body.diId, 'dossier rattaché à une DI')
   })
 
   it('les tâches apparaissent dans « Mon espace » de chaque compte', async () => {
@@ -104,7 +106,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
   })
 
   it('l\'étape ne peut pas être terminée tant que les tâches ne sont pas validées', async () => {
-    const r = await advance('yasmine', dossierId, 'soumission_sgs', 422)
+    const r = await advance('yasmine', dossierId, 'codage', 422)
     assert.equal(r.error, 'SOUS_ETAPES_INCOMPLETES')
     const ns = await api('yasmine', 'GET', `/api/dossiers/${dossierId}/next-step`)
     assert.equal(ns.body.peutAvancer, false)
@@ -113,7 +115,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
 
   it('chaque titulaire valide ses tâches de réception ; la preuve est exigée', async () => {
     await completeStage(dossierId, 'reception')
-    const r = await advance('yasmine', dossierId, 'soumission_sgs', 422)
+    const r = await advance('yasmine', dossierId, 'codage', 422)
     assert.equal(r.error, 'PREUVE_REQUISE')
     // Le comptable joint la preuve de paiement client sur SA tâche
     const p = await upload('honore', `/api/dossiers/${dossierId}/sous-etapes/reception/paiement_client/preuve`,
@@ -126,21 +128,17 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
   })
 
   it('un compte non concerné ne peut pas terminer l\'étape ; on ne saute pas d\'étape', async () => {
-    await advance('yaya', dossierId, 'soumission_sgs', 403)
-    const skip = await advance('yasmine', dossierId, 'codage', 422)
+    await advance('yaya', dossierId, 'codage', 403)
+    const skip = await advance('yasmine', dossierId, 'paiement', 422)
     assert.equal(skip.error, 'ETAPE_INVALIDE')
   })
 
-  it('Réception → Soumission SGS → Codage (passation automatique à la Validation)', async () => {
+  it('Réception → Codage (étape Soumission SGS retirée)', async () => {
     const ns = await api('yasmine', 'GET', `/api/dossiers/${dossierId}/next-step`)
     assert.equal(ns.body.peutAvancer, true, JSON.stringify(ns.body.raisons))
-    const d1 = await advance('yasmine', dossierId, 'soumission_sgs')
-    assert.equal(d1.status, 'soumission_sgs')
-    // Fournisseur & soumission + RVC : M. Soudi (Exploitation)
-    assert.equal(d1.responsableId, ids.soudi, 'soumission SGS → Mr Soudi')
-    await completeStage(dossierId, 'soumission_sgs')
-    await preuve('soudi', dossierId, 'soumission_sgs')
-    const d2 = await advance('soudi', dossierId, 'codage')
+    assert.equal(ns.body.etapeSuivante, 'codage')
+    await advance('yasmine', dossierId, 'soumission_sgs', 400)
+    const d2 = await advance('yasmine', dossierId, 'codage')
     assert.equal(d2.responsableId, ids.odette, 'codage → Mme Odette')
     const notifs = await api('odette', 'GET', '/api/notifications?limit=50')
     assert.ok(notifs.body.data.some((n: any) => n.dossierId === dossierId && n.type === 'action_requise'))
@@ -183,7 +181,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(traitePar.paiement, 'yaya')
     assert.equal(traitePar.bon_compagnie, 'wandala')
     const audit = await api('delba', 'GET', `/api/dossiers/${dossierId}/audit`)
-    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 14)
+    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 12)
   })
 })
 

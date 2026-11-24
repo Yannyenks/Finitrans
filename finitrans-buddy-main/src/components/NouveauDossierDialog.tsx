@@ -45,6 +45,24 @@ const NouveauDossierDialog = () => {
     fournisseur: "",
     numeroBL: "",
   });
+  // DI obligatoire : DI existante (débit sur son solde restant) ou nouvelle DI ouverte avec le dossier
+  const [modeDI, setModeDI] = useState<"existante" | "nouvelle">("existante");
+  const [diId, setDiId] = useState("");
+  const [numeroNouvelleDI, setNumeroNouvelleDI] = useState("");
+  const [montantFacture, setMontantFacture] = useState("");
+  const [referenceFacture, setReferenceFacture] = useState("");
+  const { data: disData } = useQuery({
+    queryKey: ["di-actives-creation"],
+    queryFn: () => api.get<any>("/api/di?limit=100&statut=actif"),
+    enabled: open,
+    staleTime: 30_000,
+  });
+  const disActives: any[] = disData?.data ?? [];
+  const diSelectionnee = disActives.find(d => d.id === diId);
+  const facture = Math.round(Number(montantFacture) || 0);
+  const soldeAvant = modeDI === "existante" ? (diSelectionnee ? Number(diSelectionnee.soldeNum ?? diSelectionnee.soldeActuel) : null) : montantEnXAFNouvelle();
+  function montantEnXAFNouvelle() { return form.montantDI ? Math.round(parseFloat(form.montantDI) * TAUX_CHANGE[diDevise]) : null; }
+  const soldeApres = soldeAvant !== null ? soldeAvant - facture : null;
 
   const montantEnXAF = form.montantDI
     ? Math.round(parseFloat(form.montantDI) * TAUX_CHANGE[diDevise])
@@ -63,28 +81,14 @@ const NouveauDossierDialog = () => {
   const createDossier = useMutation({
     mutationFn: async (payload: any) => {
       const dossier = await api.post<any>("/api/dossiers", payload);
-      // Si un montant DI a été saisi, créer la DI et la lier immédiatement
-      if (payload.montantDI) {
-        try {
-          const di = await api.post<any>("/api/di", {
-            numero:       `DI-${dossier.numero}`,
-            client:       dossier.client,
-            montant:      payload.montantDI,
-            devise:       "XAF",
-            compagnie:    dossier.compagnie,
-            dateEmission: new Date().toISOString(),
-          });
-          await api.post(`/api/di/${di.id}/lier-dossier`, { dossierId: dossier.id });
-        } catch {
-          // DI non bloquante — le dossier est créé même si la DI échoue
-          toast({ title: "Dossier créé", description: "La DI n'a pas pu être liée, à compléter depuis le dossier." });
-        }
-      }
       return dossier;
     },
     onSuccess: (res: any) => {
       qc.invalidateQueries({ queryKey: ["dossiers"] });
-      toast({ title: "Dossier créé", description: `${res.numero} — ${res.client}${montantEnXAF ? ` · DI ${montantEnXAF.toLocaleString("fr-FR")} FCFA` : ""}` });
+      toast({ title: "Dossier créé", description: `${res.numero} — ${res.client} · facture débitée sur sa DI` });
+      qc.invalidateQueries({ queryKey: ["di-list"] });
+      qc.invalidateQueries({ queryKey: ["di-actives-creation"] });
+      setDiId(""); setNumeroNouvelleDI(""); setMontantFacture(""); setReferenceFacture(""); setModeDI("existante");
       setOpen(false);
       setDiDevise("XAF");
       setConteneurs([{ numero: "", taille: "" }]);
@@ -105,6 +109,18 @@ const NouveauDossierDialog = () => {
       toast({ title: "Champs requis", description: "Veuillez remplir tous les champs obligatoires", variant: "destructive" });
       return;
     }
+    if (modeDI === "existante" ? !diId : (numeroNouvelleDI.trim().length < 3 || !(montantEnXAF > 0))) {
+      toast({ title: "DI requise", description: "Chaque dossier doit être rattaché à une DI (existante ou nouvelle).", variant: "destructive" });
+      return;
+    }
+    if (!(facture > 0)) {
+      toast({ title: "Montant requis", description: "Indiquez le montant de la facture fournisseur à débiter sur la DI.", variant: "destructive" });
+      return;
+    }
+    if (soldeApres !== null && soldeApres < 0) {
+      toast({ title: "Solde de la DI insuffisant", description: `Il reste ${(soldeAvant ?? 0).toLocaleString("fr-FR")} FCFA sur la DI.`, variant: "destructive" });
+      return;
+    }
     createDossier.mutate({
       client:        form.client,
       compagnie:     form.compagnie,
@@ -117,7 +133,11 @@ const NouveauDossierDialog = () => {
       notes:         form.notes || undefined,
       fournisseur:   form.fournisseur || undefined,
       numeroBL:      form.numeroBL || undefined,
-      montantDI:     montantEnXAF > 0 ? montantEnXAF : undefined,
+      ...(modeDI === "existante"
+        ? { diId }
+        : { nouvelleDI: { numero: numeroNouvelleDI.trim(), montant: montantEnXAF, devise: "XAF" } }),
+      montantFacture: facture,
+      referenceFacture: referenceFacture.trim() || undefined,
     });
   };
 
@@ -254,38 +274,63 @@ const NouveauDossierDialog = () => {
             </div>
           </div>
 
-          {/* Montant DI */}
-          <div className="rounded-xl border border-dashed border-secondary/40 bg-secondary/5 p-4 space-y-2">
-            <Label className="text-xs font-semibold text-secondary flex items-center gap-1.5">
-              <Banknote className="w-3.5 h-3.5" /> Montant DI — Déclaration d'Importation (optionnel)
-            </Label>
-            <div className="flex gap-2 items-center">
-              <Select value={diDevise} onValueChange={(v: any) => setDiDevise(v)}>
-                <SelectTrigger className="bg-card h-9 text-sm w-24 flex-shrink-0">
-                  <SelectValue />
-                </SelectTrigger>
+          {/* DI obligatoire : la facture fournisseur du dossier est débitée sur le solde restant */}
+          <div className="rounded-xl border border-secondary/40 bg-secondary/5 p-4 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-xs font-semibold text-secondary flex items-center gap-1.5">
+                <Banknote className="w-3.5 h-3.5" /> DI — Déclaration d'Importation *
+              </Label>
+              <div className="inline-flex rounded-lg bg-muted p-0.5 text-[11px] font-semibold" role="radiogroup" aria-label="DI du dossier">
+                {([["existante", "DI existante"], ["nouvelle", "Nouvelle DI"]] as const).map(([v, l]) => (
+                  <button key={v} type="button" role="radio" aria-checked={modeDI === v} onClick={() => setModeDI(v)}
+                    className={`px-2.5 py-1 rounded-md ${modeDI === v ? "bg-card shadow text-foreground" : "text-muted-foreground"}`}>{l}</button>
+                ))}
+              </div>
+            </div>
+            {modeDI === "existante" ? (
+              <Select value={diId} onValueChange={setDiId}>
+                <SelectTrigger className="bg-card" aria-label="DI existante"><SelectValue placeholder="Choisir la DI du dossier…" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="XAF">FCFA</SelectItem>
-                  <SelectItem value="EUR">EUR €</SelectItem>
-                  <SelectItem value="USD">USD $</SelectItem>
+                  {disActives.map(d => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.numero} — {d.client} · reste {Math.round(Number(d.soldeNum ?? d.soldeActuel)).toLocaleString("fr-FR")} FCFA{d._count?.dossiers ? ` · ${d._count.dossiers} dossier(s)` : ""}
+                    </SelectItem>
+                  ))}
+                  {disActives.length === 0 && <div className="px-3 py-2 text-xs text-muted-foreground">Aucune DI active : créez-en une nouvelle.</div>}
                 </SelectContent>
               </Select>
-              <Input
-                type="number"
-                min={1}
-                placeholder={diDevise === "XAF" ? "Ex : 45 000 000" : diDevise === "EUR" ? "Ex : 68 600" : "Ex : 74 300"}
-                value={form.montantDI}
-                onChange={e => setForm({...form, montantDI: e.target.value})}
-                className="bg-card h-9 text-sm font-mono flex-1"
-              />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_1fr] gap-2">
+                <Input placeholder="N° de la DI" value={numeroNouvelleDI} onChange={e => setNumeroNouvelleDI(e.target.value)} className="bg-card font-mono" aria-label="Numéro de la nouvelle DI" />
+                <Select value={diDevise} onValueChange={(v: any) => setDiDevise(v)}>
+                  <SelectTrigger className="bg-card w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="XAF">FCFA</SelectItem>
+                    <SelectItem value="EUR">EUR €</SelectItem>
+                    <SelectItem value="USD">USD $</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Input type="number" min={1} placeholder="Montant de la DI" value={form.montantDI} onChange={e => setForm({...form, montantDI: e.target.value})} className="bg-card font-mono" aria-label="Montant de la nouvelle DI" />
+              </div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px]">Montant de la facture fournisseur (FCFA) *</Label>
+                <Input type="number" min={1} value={montantFacture} onChange={e => setMontantFacture(e.target.value)} placeholder="Ex : 12 500 000" className="bg-card font-mono" aria-label="Montant de la facture fournisseur" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[11px]">N° de la facture fournisseur</Label>
+                <Input value={referenceFacture} onChange={e => setReferenceFacture(e.target.value)} placeholder="Ex : PI-2026-0042" className="bg-card" />
+              </div>
             </div>
-            {form.montantDI && diDevise !== "XAF" && montantEnXAF > 0 && (
-              <p className="text-[11px] text-secondary font-semibold">
-                ≈ {montantEnXAF.toLocaleString("fr-FR")} FCFA (taux : 1 {diDevise} = {TAUX_CHANGE[diDevise]} XAF)
+            {soldeAvant !== null && (
+              <p className={`text-[11px] font-semibold ${soldeApres !== null && soldeApres < 0 ? "text-destructive" : "text-secondary"}`}>
+                Solde de la DI : {soldeAvant.toLocaleString("fr-FR")} FCFA
+                {facture > 0 && soldeApres !== null && <> → après débit : {soldeApres.toLocaleString("fr-FR")} FCFA{soldeApres < 0 ? " (insuffisant)" : ""}</>}
               </p>
             )}
             <p className="text-[11px] text-muted-foreground leading-tight">
-              Budget enveloppe autorisé pour ce dossier — stocké en FCFA. Une alerte sera déclenchée à 20% restant.
+              Le dossier débite uniquement sa DI. Si la DI a déjà servi à d'autres dossiers, la facture est débitée sur le montant qui reste.
             </p>
           </div>
 

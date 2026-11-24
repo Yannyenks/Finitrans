@@ -9,7 +9,7 @@ import { DossierStatus, Site } from '@prisma/client'
 import { stagesForSite } from './workflow'
 
 export const PHASES = [
-  { cle: 'pre_dedouanement', libelle: 'Pré-dédouanement', description: 'De la réception du dossier à l\'obtention du RVC', etapes: ['reception', 'soumission_sgs'] as DossierStatus[] },
+  { cle: 'pre_dedouanement', libelle: 'Pré-dédouanement', description: 'Réception et enregistrement du dossier', etapes: ['reception', 'soumission_sgs'] as DossierStatus[] },
   { cle: 'dedouanement',     libelle: 'Dédouanement',     description: 'Du codage à la libération et à la facturation',  etapes: ['codage', 'validation', 'paiement', 'bon_compagnie', 'operations_douala', 'operations_kribi', 'cloture', 'facturation'] as DossierStatus[] },
 ] as const
 

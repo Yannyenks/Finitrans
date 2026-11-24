@@ -154,3 +154,24 @@ export async function appliquerFactureFournisseur(sousEtapeId: string, userId: s
     `${ecart > 0 ? 'Débit' : 'Crédit'} de ${Math.abs(ecart).toLocaleString('fr-FR')} FCFA sur la DI ${numero} (facture fournisseur${ref ? ` ${ref}` : ''}) — solde ${Math.round(solde).toLocaleString('fr-FR')} FCFA`)
   return ajout
 }
+
+/** Ouverture d'une DI (enveloppe + mouvement d'ouverture). */
+export async function creerDI(p: {
+  numero: string; client: string; montant: number; devise?: string; compagnie?: string | null
+  dateEmission?: Date; gestionnaireId: string
+}) {
+  const numero = p.numero.trim()
+  if (await prisma.declarationImportation.findFirst({ where: { numero: { equals: numero, mode: 'insensitive' } }, select: { id: true } })) {
+    throw new AppError(409, 'DI_EXISTANTE', `La DI ${numero} existe déjà : choisissez-la dans la liste des DI existantes.`)
+  }
+  const di = await prisma.declarationImportation.create({
+    data: {
+      numero, client: p.client, montant: p.montant, soldeActuel: p.montant, devise: p.devise ?? 'XAF',
+      compagnie: p.compagnie ?? undefined, dateEmission: p.dateEmission ?? new Date(), gestionnaireId: p.gestionnaireId,
+    },
+  })
+  await prisma.mouvementDI.create({
+    data: { diId: di.id, type: 'credit', categorie: 'ouverture', montant: p.montant, motif: 'Ouverture DI', createdBy: p.gestionnaireId },
+  })
+  return di
+}
