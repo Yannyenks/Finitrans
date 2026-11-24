@@ -16,6 +16,7 @@ const Alertes = lazy(() => import("./pages/Alertes"));
 const Finance = lazy(() => import("./pages/Finance"));
 const Kribi = lazy(() => import("./pages/Kribi"));
 const SuiviClient = lazy(() => import("./pages/SuiviClient"));
+const Notifications = lazy(() => import("./pages/Notifications"));
 const Exploitation = lazy(() => import("./pages/Exploitation"));
 const Parametres = lazy(() => import("./pages/Parametres"));
 const Messagerie = lazy(() => import("./pages/Messagerie"));
@@ -138,6 +139,7 @@ const App = () => (
           <Route path="/employes"             element={R("employes", <Employes />)} />
           <Route path="/employes/:name"       element={R("employes", <EmployeDetail />)} />
           <Route path="/alertes"              element={R("alertes", <Alertes />)} />
+          <Route path="/notifications"        element={R("mon_espace", <Notifications />)} />
           <Route path="/finance"              element={R("finance", <Finance />)} />
           <Route path="/di"                   element={R("di", <GestionDI />)} />
           <Route path="/kribi"                element={R("kribi", <Kribi />)} />

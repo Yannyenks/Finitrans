@@ -5,7 +5,7 @@ import {
   MapPin, ChevronLeft, ChevronRight, LogOut, Settings,
   ClipboardList, MessageSquare, BarChart3, Banknote,
   CheckSquare, PackageOpen, Truck, BookOpen, Trophy,
-  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library, Gem, Menu,
+  ListTodo, Radar, Building2, Calculator, FileStack, BookUser, Library, Gem, Menu, BellRing,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
@@ -70,6 +70,7 @@ const NAV: NavGroup[] = [
   {
     titre: "Communication",
     items: [
+      { label: "Notifications", icon: BellRing,   path: "/notifications", module: "mon_espace" },
       { label: "Messagerie", icon: MessageSquare, path: "/messagerie", module: "messagerie" },
       { label: "Bibliothèque", icon: Library,     path: "/bibliotheque", module: "bibliotheque" },
       { label: "Répertoire", icon: BookUser,      path: "/repertoire", module: "repertoire" },

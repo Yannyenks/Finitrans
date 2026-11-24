@@ -83,6 +83,7 @@ async function dejaDebite(meta: Record<string, unknown>): Promise<number> {
 
 /** Contrôle avant enregistrement : DI liée et solde suffisant pour l'écart à débiter. */
 export async function verifierFactureFournisseur(diId: string | null, meta: Record<string, unknown>) {
+  diId = (typeof meta.ff_di_id === "string" ? meta.ff_di_id : null) ?? diId
   const montant = montantSaisi(meta.ff_montant_facture)
   const ecart = montant - await dejaDebite(meta)
   if (ecart === 0 || montant === 0 && ecart <= 0) return
@@ -110,7 +111,9 @@ export async function appliquerFactureFournisseur(sousEtapeId: string, userId: s
   const montant = montantSaisi(meta.ff_montant_facture)
   const deja = await dejaDebite(meta)
   const ecart = montant - deja
-  if (ecart === 0 || !t.dossier.diId) return null
+  // Les corrections s'appliquent toujours à la DI débitée la première fois
+  const diId = (typeof meta.ff_di_id === "string" ? meta.ff_di_id : null) ?? t.dossier.diId
+  if (ecart === 0 || !diId) return null
   const ref = typeof meta.ff_reference_facture === 'string' && meta.ff_reference_facture.trim() ? meta.ff_reference_facture.trim() : null
 
   let mouvementId: string
@@ -118,7 +121,7 @@ export async function appliquerFactureFournisseur(sousEtapeId: string, userId: s
   let numero: string
   if (ecart > 0) {
     const r = await debiterDI({
-      diId: t.dossier.diId, montant: ecart, dossierId: t.dossier.id, userId,
+      diId, montant: ecart, dossierId: t.dossier.id, userId,
       referenceFacture: deja === 0 ? ref : null,
       motif: deja === 0
         ? `Facture fournisseur${ref ? ` ${ref}` : ''} — dossier ${t.dossier.numero}`
@@ -126,7 +129,7 @@ export async function appliquerFactureFournisseur(sousEtapeId: string, userId: s
     })
     mouvementId = r.mouvement.id; solde = r.nouveauSolde; numero = r.numero
   } else {
-    const di = await prisma.declarationImportation.findUnique({ where: { id: t.dossier.diId } })
+    const di = await prisma.declarationImportation.findUnique({ where: { id: diId } })
     if (!di) return null
     solde = Number(di.soldeActuel) - ecart
     numero = di.numero
@@ -142,7 +145,7 @@ export async function appliquerFactureFournisseur(sousEtapeId: string, userId: s
     mouvementId = mv.id
   }
   const ajout = {
-    ff_montant_debite: montant, ff_solde_di_apres: Math.round(solde),
+    ff_montant_debite: montant, ff_solde_di_apres: Math.round(solde), ff_di_id: diId,
     enregistrement_type: 'debit_di', enregistrement_id: (meta.enregistrement_id as string | undefined) ?? mouvementId,
   }
   await prisma.sousEtapeDossier.update({ where: { id: t.id }, data: { metadata: { ...meta, ...ajout } } })

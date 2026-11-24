@@ -2,6 +2,7 @@ import { FastifyRequest, FastifyReply } from 'fastify'
 import { prisma } from '../config/prisma'
 import { effectivePermissions, getRoleTemplate, isSupervisor } from '../config/roles'
 import { AuthUser } from '../types'
+import { definirAuteur } from '../services/evenements'
 
 export async function authenticate(request: FastifyRequest, reply: FastifyReply) {
   // Étape 1 : vérification JWT pure (pas de DB, ne peut pas causer de faux 401)
@@ -44,6 +45,7 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
       modules: template.modules,
     }
     request.user = authUser
+    definirAuteur(authUser.nom)
   } catch {
     // Erreur DB (Neon en cours de réveil, connexion coupée) — ce n'est PAS une erreur de token.
     // On retourne 503 pour que le frontend garde la session et réessaie.

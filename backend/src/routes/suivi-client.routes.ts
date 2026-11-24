@@ -22,7 +22,7 @@ export const ILLUSTRATIONS = ['info', 'navire', 'port', 'douane', 'document', 'p
 const ETAPES_CLIENT: Record<string, { titre: string; texte: string; illustration: string }> = {
   reception:        { titre: 'Dossier reçu',                 texte: 'Nous avons reçu vos documents et ouvert votre dossier.',                         illustration: 'document' },
   soumission_sgs:   { titre: 'Inspection SGS',               texte: 'Les documents sont soumis pour l’inspection et l’obtention du RVC.',             illustration: 'douane' },
-  codage:           { titre: 'Déclaration en douane',        texte: 'Classement tarifaire et préparation de la déclaration.',                         illustration: 'document' },
+  codage:           { titre: 'Déclaration et liquidation',   texte: 'Classement tarifaire, déclaration en douane puis liquidation des droits par l’inspecteur (2 à 3 jours selon la douane).', illustration: 'douane' },
   validation:       { titre: 'Validation et liquidation',    texte: 'La douane examine la déclaration et l’inspecteur liquide les droits (délai de l’administration : 2 à 3 jours en moyenne).', illustration: 'douane' },
   paiement:         { titre: 'Droits et taxes',              texte: 'Règlement des droits et taxes de douane.',                                       illustration: 'paiement' },
   bon_compagnie:    { titre: 'Bon de la compagnie',          texte: 'Obtention du bon de la compagnie maritime et du bon à délivrer.',                illustration: 'navire' },

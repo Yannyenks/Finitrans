@@ -16,6 +16,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { toast } from "@/hooks/use-toast";
+import BonsCompagnie from "@/components/BonsCompagnie";
 
 const STATUS_COLORS: Record<string, string> = {
   paiement: "bg-orange-100 text-orange-700",
@@ -347,6 +348,7 @@ const GestionSorties = () => {
           <TabsTrigger value="interchanges" className="gap-1.5"><ArrowRightLeft className="w-3.5 h-3.5" /> Interchanges ({ics.length})</TabsTrigger>
           <TabsTrigger value="detentions" className="gap-1.5"><Timer className="w-3.5 h-3.5" /> Détentions ({detEnCours.length})</TabsTrigger>
           <TabsTrigger value="penalites" className="gap-1.5"><Ban className="w-3.5 h-3.5" /> Pénalités</TabsTrigger>
+          <TabsTrigger value="bons" className="gap-1.5"><FileText className="w-3.5 h-3.5" /> Bons compagnie</TabsTrigger>
           <TabsTrigger value="facturation" className="gap-1.5"><FileText className="w-3.5 h-3.5" /> Facturation ({fermes.length})</TabsTrigger>
         </TabsList>
 
@@ -473,6 +475,8 @@ const GestionSorties = () => {
             {(penalitesCie?.data ?? []).length === 0 && <div className="text-center py-10 text-muted-foreground"><CheckCircle2 className="w-8 h-8 text-success/50 mx-auto mb-2" />Aucune pénalité</div>}
           </div>
         </TabsContent>
+
+        <TabsContent value="bons"><BonsCompagnie /></TabsContent>
 
         <TabsContent value="facturation">
           <div className="stat-card p-0 overflow-x-auto">

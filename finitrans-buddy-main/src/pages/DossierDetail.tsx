@@ -53,7 +53,7 @@ const STATUS_COLORS: Record<string, string> = {
   cloture:          "bg-gray-100 text-gray-600", facturation: "bg-violet-100 text-violet-700",
 };
 const STATUS_ORDER = [
-  "reception", "soumission_sgs", "codage", "validation",
+  "reception", "soumission_sgs", "codage",
   "paiement", "bon_compagnie", "operations_kribi", "cloture", "facturation",
 ];
 
@@ -65,7 +65,7 @@ const STEP_CONFIG: Record<string, {
 }> = {
   reception:        { icon: Package,       description: "Réception et enregistrement du dossier — vérification des documents d'arrivée",             iconBg: "bg-blue-100",   iconText: "text-blue-700",   iconRing: "ring-blue-300",   borderActive: "border-blue-200/60",   bgActive: "from-blue-50/60"   },
   soumission_sgs:   { icon: ClipboardList, description: "Soumission au Système de Gestion des Services — en attente d'approbation SGS",               iconBg: "bg-indigo-100", iconText: "text-indigo-700", iconRing: "ring-indigo-300", borderActive: "border-indigo-200/60", bgActive: "from-indigo-50/60" },
-  codage:           { icon: Code2,         description: "Codage douanier et classification tarifaire de la marchandise importée",                     iconBg: "bg-purple-100", iconText: "text-purple-700", iconRing: "ring-purple-300", borderActive: "border-purple-200/60", bgActive: "from-purple-50/60" },
+  codage:           { icon: Code2,         description: "Codage, déclaration puis liquidation des droits par l'inspecteur des douanes (2 à 3 jours selon la douane)",                     iconBg: "bg-purple-100", iconText: "text-purple-700", iconRing: "ring-purple-300", borderActive: "border-purple-200/60", bgActive: "from-purple-50/60" },
   validation:       { icon: ShieldCheck,   description: "Validation de la déclaration puis liquidation des droits par l'inspecteur des douanes (2 à 3 jours selon la douane)",            iconBg: "bg-amber-100",  iconText: "text-amber-700",  iconRing: "ring-amber-300",  borderActive: "border-amber-200/60",  bgActive: "from-amber-50/60"  },
   paiement:         { icon: Landmark,      description: "Paiement des droits de douane et taxes réglementaires au Trésor Public",                     iconBg: "bg-orange-100", iconText: "text-orange-700", iconRing: "ring-orange-300", borderActive: "border-orange-200/60", bgActive: "from-orange-50/60" },
   bon_compagnie:    { icon: Ship,          description: "Obtention du bon de livraison auprès de la compagnie maritime concernée",                   iconBg: "bg-green-100",  iconText: "text-green-700",  iconRing: "ring-green-300",  borderActive: "border-green-200/60",  bgActive: "from-green-50/60"  },
@@ -1009,13 +1009,9 @@ const DossierDetail = () => {
                     {dossier.etapeEnAttenteDepuis ? `Depuis le ${dateHeure(dossier.etapeEnAttenteDepuis)} — ` : ""}le chronomètre de l'étape part au démarrage. En cas d'imprévu, indiquez le motif.
                   </p>
                 </div>
-                {nextStep?.peutDemarrer ? (
-                  <Button className="gap-1.5 bg-secondary text-secondary-foreground" onClick={() => setDlgPhase("demarrer")} data-testid="bouton-demarrer">
-                    <Play className="w-4 h-4" /> Démarrer l'étape
-                  </Button>
-                ) : (
-                  <span className="text-[11px] text-muted-foreground">Démarrage par le responsable de l'étape</span>
-                )}
+                <span className="text-[11px] font-medium text-amber-800">
+                  {nextStep?.peutDemarrer ? "↓ Bouton « Démarrer » sur la ligne de l'étape" : "Démarrage par le responsable de l'étape"}
+                </span>
               </div>
             )}
 
@@ -1181,6 +1177,16 @@ const DossierDetail = () => {
 
                         {/* Actions droite */}
                         <div className="flex items-center gap-1 flex-shrink-0">
+                          {/* Démarrer : directement sur la ligne de l'étape à lancer */}
+                          {isCurrent && dossier.etapeDemarree === false && !finalise && nextStep?.peutDemarrer && (
+                            <Button size="sm" className="h-8 gap-1.5 bg-secondary text-secondary-foreground shadow-sm animate-pulse hover:animate-none"
+                              onClick={e => { e.stopPropagation(); setDlgPhase("demarrer"); }} data-testid="bouton-demarrer">
+                              <Play className="w-3.5 h-3.5" /> Démarrer
+                            </Button>
+                          )}
+                          {isCurrent && dossier.etapeDemarree === false && !finalise && !nextStep?.peutDemarrer && (
+                            <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">À démarrer</span>
+                          )}
                           {(isCompleted || isCurrent) && canUpload && (
                             <button
                               title="Ajouter une preuve"

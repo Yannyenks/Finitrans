@@ -205,6 +205,8 @@ export async function refreshSessionUser(): Promise<AuthUser | null> {
 
 export async function logout() {
   const refreshToken = localStorage.getItem('ft_refresh_token') ?? undefined
+  // Ce navigateur ne reçoit plus les notifications du compte
+  try { await (await import('./push')).desactiverPush() } catch { /* ignore */ }
   try { await api.post('/api/auth/logout', { refreshToken }) } catch { /* ignore */ }
   clearTokens()
   window.location.href = '/'

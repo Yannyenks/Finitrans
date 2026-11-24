@@ -12,13 +12,20 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { prisma } from '../config/prisma'
 import { PROFILS_TOUS_DOSSIERS } from '../config/roles'
 
-/** Personnes déjà notifiées pendant la requête en cours. */
-const notifiesDansLaRequete = new AsyncLocalStorage<Set<string>>()
+/** Personnes déjà notifiées pendant la requête en cours (et auteur de l'action). */
+const notifiesDansLaRequete = new AsyncLocalStorage<Set<string> & { auteur?: string }>()
 
 /** Crochet onRequest : ouvre le contexte de la requête (modèle de @fastify/request-context). */
 export function ouvrirContexteNotifications(_request: FastifyRequest, _reply: FastifyReply, done: () => void) {
   notifiesDansLaRequete.run(new Set(), done)
 }
+
+/** Auteur de l'action en cours (affiché dans le centre de notifications). */
+export function definirAuteur(nom: string) {
+  const s = notifiesDansLaRequete.getStore()
+  if (s) s.auteur = nom
+}
+export const auteurCourant = () => notifiesDansLaRequete.getStore()?.auteur
 
 /** Enregistre les destinataires d'une notification ciblée envoyée pendant la requête. */
 export function marquerNotifies(ids: string[]) {

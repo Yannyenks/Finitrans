@@ -257,6 +257,7 @@ export function useDIDelete() {
       qc.invalidateQueries({ queryKey: ["di-list"] });
       qc.invalidateQueries({ queryKey: ["di-stats-resume"] });
       qc.invalidateQueries({ queryKey: ["di-stats"] });
+      qc.invalidateQueries({ queryKey: ["dossiers"] });
       toast({ title: "DI supprimée avec succès" });
     },
     onError: (err: any) =>

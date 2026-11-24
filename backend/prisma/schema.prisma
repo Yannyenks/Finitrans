@@ -28,6 +28,7 @@ model User {
   updatedAt                DateTime                  @updatedAt @map("updated_at")
   compagniesAssignees      String[]                  @default([]) @map("compagnies_assignees")
   alertesLues              Alerte[]                  @relation("AlerteLuePar")
+  pushAbonnements          PushAbonnement[]
   auditEntries             AuditEntry[]
   bonsKribi                BonKribi[]
   bonsLivraison            BonLivraison[]
@@ -658,11 +659,35 @@ model Notification {
   actionUrl String?          @map("action_url") @db.VarChar(500)
   /// Échéance de la tâche notifiée : le compte à rebours démarre dès la réception
   echeance  DateTime?
+  /// Priorité : critique (alerte), haute (action à mener, message), normale
+  priorite        String    @default("normale") @db.VarChar(10)
+  /// Auteur de l'action à l'origine de la notification
+  origineNom      String?   @map("origine_nom") @db.VarChar(255)
+  /// Prise en compte (accusé de réception) : arrête les relances
+  acquitteLe      DateTime? @map("acquitte_le")
+  relances        Int       @default(0)
+  derniereRelance DateTime? @map("derniere_relance")
   createdAt DateTime         @default(now()) @map("created_at")
   dossier   Dossier?         @relation(fields: [dossierId], references: [id], onDelete: Cascade)
   user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, lu, createdAt])
   @@map("notifications")
+}
+
+/// Abonnement Web Push d'un navigateur (notifications système même plateforme fermée)
+model PushAbonnement {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  endpoint    String    @unique
+  p256dh      String
+  auth        String
+  navigateur  String?   @db.VarChar(255)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  dernierEnvoi DateTime? @map("dernier_envoi")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("push_abonnements")
 }
 
 model CompteRenduKribi {
@@ -952,6 +977,8 @@ model SousEtapeDossier {
   startedAt     DateTime?       @map("started_at")
   completedAt   DateTime?       @map("completed_at")
   completedById String?         @map("completed_by_id") @db.Uuid
+  /// Retard déjà signalé (alerte envoyée au titulaire et au responsable)
+  retardSignaleLe DateTime?     @map("retard_signale_le")
   metadata      Json?
   notes         String?         @db.Text
 

@@ -11,7 +11,9 @@ import { DEFAULT_SLA_SOUS_ETAPES, SOUS_ETAPES_CONFIG, STATUS_LABELS, invalidateA
 /** Clés gérées par des écrans dédiés (rôles, attribution, entreprise) : DG uniquement. */
 const CLES_DG = ['roles_config', 'attribution_etapes', 'entreprise']
 /** Délais et SLA : définis par la Direction (DG) et le Responsable Exploitation. */
-const CLES_SUPERVISION = ['sla_jours', 'sla_sous_etapes', 'taux_change']
+const CLES_SUPERVISION = ['sla_jours', 'sla_sous_etapes', 'taux_change', 'relances_notifications']
+/** Paramètres internes : jamais renvoyés ni modifiables par l'API */
+const CLES_INTERNES = ['vapid', 'relances_passage']
 
 const jsonValue = z.custom<Prisma.InputJsonValue>(v => v !== undefined, { message: 'Valeur requise' })
 
@@ -19,7 +21,7 @@ const parametresRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
 
   // GET /api/parametres
   fastify.get('/', { preHandler: [authenticate] }, async (_request, reply) => {
-    const params = await prisma.parametre.findMany({ orderBy: { cle: 'asc' } })
+    const params = await prisma.parametre.findMany({ where: { cle: { notIn: CLES_INTERNES } }, orderBy: { cle: 'asc' } })
     // Retourner comme map clé→valeur pour facilité frontend
     const map = params.reduce<Record<string, unknown>>((acc, p) => {
       acc[p.cle] = p.valeur
@@ -41,6 +43,7 @@ const parametresRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // GET /api/parametres/:cle
   fastify.get('/:cle', { preHandler: [authenticate] }, async (request, reply) => {
     const { cle } = z.object({ cle: z.string() }).parse(request.params)
+    if (CLES_INTERNES.includes(cle)) return reply.code(404).send({ error: 'NOT_FOUND', message: `Paramètre ${cle} introuvable` })
     const param = await prisma.parametre.findUnique({ where: { cle } })
     if (!param) return reply.code(404).send({ error: 'NOT_FOUND', message: `Paramètre ${cle} introuvable` })
     return reply.send(param)
@@ -61,6 +64,7 @@ const parametresRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   fastify.patch('/:cle', { preHandler: [authenticate, authorize('permAdministration', 'partiel')] }, async (request, reply) => {
     const { cle }    = z.object({ cle: z.string().min(1).max(100) }).parse(request.params)
     const { valeur } = z.object({ valeur: jsonValue }).parse(request.body)
+    if (CLES_INTERNES.includes(cle)) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Paramètre interne' })
     if (CLES_DG.includes(cle) && request.user.profil !== 'dg') {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Paramètre réservé au Directeur Général' })
     }
@@ -75,6 +79,7 @@ const parametresRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   // PATCH /api/parametres — mise à jour en masse
   fastify.patch('/', { preHandler: [authenticate, authorize('permAdministration', 'complet')] }, async (request, reply) => {
     const body = z.record(jsonValue).parse(request.body)
+    if (Object.keys(body).some(k => CLES_INTERNES.includes(k))) return reply.code(403).send({ error: 'FORBIDDEN', message: 'Paramètre interne' })
     if (Object.keys(body).some(k => CLES_DG.includes(k)) && request.user.profil !== 'dg') {
       return reply.code(403).send({ error: 'FORBIDDEN', message: 'Paramètre réservé au Directeur Général' })
     }

@@ -6,8 +6,9 @@ import { DossierStatus, Profil, Site, Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma'
 import { marquerNotifies } from './evenements'
 
+// L'étape « Validation » est retirée du parcours : sa liquidation se fait à la fin du Codage
 export const STATUS_ORDER: DossierStatus[] = [
-  'reception', 'soumission_sgs', 'codage', 'validation',
+  'reception', 'soumission_sgs', 'codage',
   'paiement', 'bon_compagnie', 'operations_kribi', 'cloture', 'facturation',
 ]
 
@@ -58,11 +59,11 @@ export const SOUS_ETAPES_CONFIG: Record<DossierStatus, SousEtapeDef[]> = {
   codage: [
     { cle: 'etat_codage', label: 'État de codage et validation' },
     { cle: 'declaration', label: 'Déclaration' },
-  ],
-  // Liquidation des droits par l'inspecteur des douanes (étape externe : 2 à 3 jours selon la douane)
-  validation: [
+    // Liquidation des droits par l'inspecteur des douanes (externe : 2 à 3 jours selon la douane)
     { cle: 'liquidation', label: 'Liquidation de la déclaration (douane)' },
   ],
+  // Étape retirée du parcours (sa liquidation est passée au Codage)
+  validation: [],
   paiement: [
     { cle: 'paiement_droits', label: 'Paiement des droits et taxes' },
   ],
@@ -110,7 +111,7 @@ export const DEFAULT_ATTRIBUTION: AttributionConfig = {
   },
   // Fournisseur & soumission : M. Soudi (et Mme Samira) ; RVC : M. Delba et M. Soudi
   soumission_sgs:   { owner: 'exploitation', sousEtapes: { ff_soumission: 'exploitation', pvc: 'exploitation' } },
-  codage:           { owner: 'validation', sousEtapes: { etat_codage: 'validation', declaration: 'validation' } },
+  codage:           { owner: 'validation', sousEtapes: { etat_codage: 'validation', declaration: 'validation', liquidation: 'validation' } },
   // Liquidation : responsable la douane (inspecteur) ; suivie et enregistrée par la validation
   validation:       { owner: 'validation', sousEtapes: { liquidation: 'validation' } },
   paiement:         { owner: 'logistique', sousEtapes: { paiement_droits: 'logistique' } },
@@ -286,7 +287,7 @@ export const DEFAULT_SLA_SOUS_ETAPES: Record<string, number> = {
   'reception.di': 24,
   'soumission_sgs.ff_soumission': 24, 'soumission_sgs.pvc': 48,
   'codage.etat_codage': 8, 'codage.declaration': 8,
-  'validation.liquidation': 72,
+  'codage.liquidation': 72,
   'paiement.paiement_droits': 24,
   'bon_compagnie.facturation_compagnie': 24, 'bon_compagnie.bon_a_delivrer': 24,
   'operations_douala.facturation_terminal': 24, 'operations_douala.bad_terminal': 24,

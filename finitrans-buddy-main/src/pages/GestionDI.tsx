@@ -18,6 +18,12 @@ import DIHistoriqueGlobal from "@/components/di/DIHistoriqueGlobal";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { History } from "lucide-react";
 import DICreateEditDialog from "@/components/di/DICreateEditDialog";
+import DIDossiers from "@/components/di/DIDossiers";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useSearchParams } from "react-router-dom";
 import FactureDialog from "@/components/di/FactureDialog";
 
 const alerteClasses = (n: string) =>
@@ -41,7 +47,9 @@ const GestionDI = () => {
   const [search,       setSearch]       = useState("");
   const [filterAlerte, setFilterAlerte] = useState("all");
   const [page,         setPage]         = useState(1);
-  const [expandedId,   setExpandedId]   = useState<string | null>(null);
+  // Lien direct vers une DI (notifications) : /di?di=<id>
+  const [searchParams] = useSearchParams();
+  const [expandedId,   setExpandedId]   = useState<string | null>(() => searchParams.get("di"));
   const [createOpen,   setCreateOpen]   = useState(false);
   const [editDI,       setEditDI]       = useState<DIEnriched | null>(null);
   const [factureDI,    setFactureDI]    = useState<DIEnriched | null>(null);
@@ -63,9 +71,9 @@ const GestionDI = () => {
   const handleDelete = async (id: string) => {
     try {
       await deleteDI.mutateAsync(id);
-      setConfirmDel(null);
       if (expandedId === id) setExpandedId(null);
-    } catch { /* handled */ }
+    } catch { /* message d'erreur affiché par le hook */ }
+    setConfirmDel(null);
   };
 
   const totalMontantM = ((diStats?.totalMontant ?? 0) / 1_000_000).toFixed(1);
@@ -234,6 +242,7 @@ const GestionDI = () => {
                       {/* Dossiers */}
                       <td className="px-4 py-3.5">
                         <div className="flex flex-wrap gap-1">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-muted text-foreground" title="Dossiers rattachés">{(di as any)._count?.dossiers ?? (di.dossiers ?? []).length}</span>
                           {(di.dossiers ?? []).slice(0, 2).map((d: any) => (
                             <span
                               key={d.id}
@@ -318,30 +327,13 @@ const GestionDI = () => {
                             </button>
                           )}
                           {canDelete && (
-                            confirmDel === di.id ? (
-                              <div className="flex items-center gap-1 bg-destructive/10 rounded-lg px-2 py-1">
-                                <span className="text-[10px] text-destructive font-medium">Confirmer ?</span>
-                                <button
-                                  onClick={() => handleDelete(di.id)}
-                                  disabled={deleteDI.isPending}
-                                  className="text-[10px] font-bold text-destructive hover:underline"
-                                >
-                                  {deleteDI.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : "Oui"}
-                                </button>
-                                <button
-                                  onClick={() => setConfirmDel(null)}
-                                  className="text-[10px] text-muted-foreground hover:underline"
-                                >Non</button>
-                              </div>
-                            ) : (
-                              <button
-                                title="Supprimer"
-                                onClick={() => setConfirmDel(di.id)}
-                                className="w-7 h-7 rounded-lg hover:bg-destructive/10 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )
+                            <button
+                              title="Supprimer"
+                              onClick={() => setConfirmDel(di.id)}
+                              className="w-7 h-7 rounded-lg hover:bg-destructive/10 flex items-center justify-center text-muted-foreground hover:text-destructive transition-colors"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           )}
                         </div>
                       </td>
@@ -356,6 +348,7 @@ const GestionDI = () => {
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ duration: 0.22 }}
                           >
+                            <DIDossiers diId={di.id} diNumero={di.numero} canEdit={canEdit} />
                             <DIBlock
                               diId={di.id}
                               canEdit={canEdit}
@@ -406,6 +399,32 @@ const GestionDI = () => {
 
         </TabsContent>
       </Tabs>
+
+      {/* ── Confirmation de suppression ───────────────────────────── */}
+      {(() => {
+        const cible = items.find(x => x.id === confirmDel);
+        const nb = (cible as any)?._count?.dossiers ?? 0;
+        return (
+          <AlertDialog open={!!confirmDel} onOpenChange={o => { if (!o) setConfirmDel(null); }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Supprimer la DI {cible?.numero} ?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Cette action est définitive. {nb > 0 ? `Les ${nb} dossier(s) rattaché(s) seront dissociés (ils ne sont pas supprimés). ` : ""}
+                  Une DI déjà consommée (débits) ne peut pas être supprimée : clôturez-la ou suspendez-la.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Annuler</AlertDialogCancel>
+                <AlertDialogAction className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={e => { e.preventDefault(); if (confirmDel) handleDelete(confirmDel); }}>
+                  {deleteDI.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Supprimer"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        );
+      })()}
 
       {/* ── Dialogs ───────────────────────────────────────────────── */}
       <DICreateEditDialog

@@ -147,9 +147,6 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
         { key: "decl_bureau",  label: "Bureau de douane", type: "text", placeholder: "Ex : Douala Port" },
       ],
     },
-  ],
-  // Plus de sous-étape : la validation se termine avec une preuve jointe à l'étape
-  validation: [
     {
       cle: "liquidation", label: "Liquidation de la déclaration (douane)",
       description: "L'inspecteur des douanes liquide les droits et taxes de la déclaration. Étape dépendant de la douane : elle peut prendre 2 à 3 jours. Le suivi FINITRANS enregistre la liquidation dès qu'elle est obtenue.",
@@ -164,8 +161,10 @@ export const SOUS_ETAPES_CONFIG: Record<string, SousEtapeConfig[]> = {
         { key: "liq_date",        label: "Date de liquidation",            type: "date" },
         { key: "liq_montant",     label: "Droits et taxes liquidés (XAF)", type: "number", placeholder: "0" },
       ],
-    },
+    }
   ],
+  // Étape « Validation » retirée : la liquidation se fait à la fin du Codage
+  validation: [],
   paiement: [
     {
       cle: "paiement_droits", label: "Paiement des droits et taxes",

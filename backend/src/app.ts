@@ -46,8 +46,14 @@ import compagniesRoutes    from './routes/compagnies.routes'
 import facturationRoutes   from './routes/facturation.routes'
 import suiviClientRoutes, { suiviPublicRoutes } from './routes/suivi-client.routes'
 import sauvegardesRoutes from './routes/sauvegardes.routes'
+import pushRoutes from './routes/push.routes'
+import { prisma } from './config/prisma'
+import { installerPushNotifications } from './services/push'
 
 export async function buildApp(opts: { serverless?: boolean } = {}): Promise<FastifyInstance> {
+  // Chaque notification enregistrée part aussi en Web Push (installé une seule fois)
+  const g = globalThis as { __pushInstalle?: boolean }
+  if (!g.__pushInstalle) { installerPushNotifications(prisma); g.__pushInstalle = true }
   const fastify = Fastify({
     logger: {
       level: env.LOG_LEVEL,
@@ -176,6 +182,7 @@ export async function buildApp(opts: { serverless?: boolean } = {}): Promise<Fas
   fastify.register(suiviClientRoutes,   { prefix: '/api/dossiers' })
   fastify.register(suiviPublicRoutes,   { prefix: '/api/public' })
   fastify.register(sauvegardesRoutes,   { prefix: '/api/sauvegardes' })
+  fastify.register(pushRoutes,          { prefix: '/api/push' })
 
   // ─── Gestion d'erreurs globale ────────────────────────────
 

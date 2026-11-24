@@ -10,6 +10,7 @@ import { api, getStoredUser } from "@/lib/api";
 import { playSound, SoundType } from "@/lib/sound";
 import { useNavigate } from "react-router-dom";
 import CompteARebours from "@/components/CompteARebours";
+import { activerPush, pushActif, synchroniserPush } from "@/lib/push";
 
 const typeIcons: Record<string, any> = {
   detention: AlertTriangle,
@@ -25,6 +26,10 @@ interface Notif {
   lu: boolean; createdAt: string; dossierId?: string | null; actionUrl?: string | null;
   /** Échéance de la tâche notifiée : compte à rebours affiché dès la réception */
   echeance?: string | null;
+  priorite?: "critique" | "haute" | "normale";
+  origineNom?: string | null;
+  acquitteLe?: string | null;
+  relances?: number;
   dossier?: { numero: string; client: string } | null;
 }
 
@@ -104,9 +109,10 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
       return;
     }
     premierPassage.current = false;
-    const nouvelles = liste.filter(n => !vues.has(n.id));
+    const cleVue = (n: Notif) => (n.relances && !n.lu ? `${n.id}#${n.relances}` : n.id);
+    const nouvelles = liste.filter(n => !vues.has(cleVue(n)) && !(n.relances && vues.has(n.id) && n.lu));
     if (nouvelles.length === 0) return;
-    nouvelles.forEach(n => vues.add(n.id));
+    nouvelles.forEach(n => { vues.add(n.id); vues.add(cleVue(n)); });
     memoriserVues(userId, vues);
     nouvelles.slice(0, 6).reverse().forEach((n, i) => afficher(n, i === 0));
     if (nouvelles.length > 6) toast(`${nouvelles.length - 6} autre(s) notification(s)`, { description: "Ouvrez la cloche pour tout voir." });
@@ -114,6 +120,22 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
     qc.invalidateQueries({ predicate: q => q.queryKey[0] !== "mes-notifications" });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query.data]);
+
+  // Notifications système (Web Push) : abonnement de ce navigateur + échanges avec le service worker
+  useEffect(() => {
+    if (!userId) return;
+    synchroniserPush();
+    if (!("serviceWorker" in navigator)) return;
+    const recevoir = (e: MessageEvent) => {
+      const m = e.data ?? {};
+      if (m.type === "ft-push") qc.invalidateQueries({ queryKey: ["mes-notifications"] });
+      if (m.type === "ft-acquitter" && m.id) api.post(`/api/notifications/${m.id}/acquitter`, {}).then(() => qc.invalidateQueries({ queryKey: ["mes-notifications"] })).catch(() => null);
+      if (m.type === "ft-lue" && m.id) api.patch(`/api/notifications/${m.id}/lire`).then(() => qc.invalidateQueries({ queryKey: ["mes-notifications"] })).catch(() => null);
+      if (m.type === "ft-naviguer" && m.url) window.location.assign(m.url);
+    };
+    navigator.serviceWorker.addEventListener("message", recevoir);
+    return () => navigator.serviceWorker.removeEventListener("message", recevoir);
+  }, [userId, qc]);
 
   // Compteur dans le titre de l'onglet
   useEffect(() => {
@@ -165,6 +187,12 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
                   Ouvrir
                 </button>
               )}
+              {(n.priorite === "critique" || n.priorite === "haute") && (
+                <button className="text-xs font-semibold px-3 py-1.5 rounded-lg border border-border hover:bg-muted"
+                  onClick={() => { toast.dismiss(id); api.post(`/api/notifications/${n.id}/acquitter`, {}).then(() => qc.invalidateQueries({ queryKey: ["mes-notifications"] })).catch(() => null); }}>
+                  Pris en compte
+                </button>
+              )}
               <button className="text-xs px-3 py-1.5 rounded-lg border border-border hover:bg-muted" onClick={() => toast.dismiss(id)}>
                 Plus tard
               </button>
@@ -177,7 +205,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
       </div>
     ), {
       // Un message reste affiché tant qu'il n'est pas ouvert ou fermé
-      duration: n.type === "message" ? Infinity : n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000,
+      duration: n.type === "message" || n.priorite === "critique" ? Infinity : n.echeance ? 20_000 : n.type === "dossier" ? 9_000 : 12_000,
       position: window.matchMedia?.("(max-width: 1023px)").matches ? "bottom-center" : "top-right",
     });
 
@@ -186,7 +214,7 @@ function useNotificationsLive(onOuvrir: (n: Notif) => void) {
       try { navigator.vibrate?.([250, 120, 250, 120, 400]); } catch { /* pas de vibreur */ }
     }
     // Notification du système : onglet en arrière-plan, ou toujours pour un message
-    if ((document.hidden || estMessage) && "Notification" in window && Notification.permission === "granted") {
+    if (!pushActif() && (document.hidden || estMessage) && "Notification" in window && Notification.permission === "granted") {
       try {
         const sys = new Notification(n.titre, { body: n.message, tag: n.id, icon: "/icon-192.png", requireInteraction: estMessage } as NotificationOptions);
         sys.onclick = () => { window.focus(); onOuvrir(n); sys.close(); };
@@ -212,7 +240,7 @@ const NotificationPanel = () => {
       toast("Activez les notifications", {
         description: "Pour être alerté de chaque message et de chaque tâche, même quand la plateforme est en arrière-plan.",
         duration: 30_000,
-        action: { label: "Activer", onClick: () => Notification.requestPermission().then(setPermission) },
+        action: { label: "Activer", onClick: () => activerPush().then(ok => { setPermission(Notification.permission); if (ok) api.post("/api/push/test", {}).catch(() => null); }) },
       });
     }, 2500);
     return () => clearTimeout(t);
@@ -278,12 +306,16 @@ const NotificationPanel = () => {
 
         {onglet === "moi" && (
           <div className="mt-2 flex items-center justify-between gap-2">
-            {permission === "default" ? (
+            {permission !== "granted" || !pushActif() ? (
               <button className="text-[11px] font-semibold text-secondary hover:underline"
-                onClick={() => Notification.requestPermission().then(setPermission)}>
-                Activer les notifications du navigateur
+                onClick={() => activerPush().then(ok => { setPermission(Notification.permission); if (ok) api.post("/api/push/test", {}).catch(() => null); })}>
+                Activer les notifications sur ce PC
               </button>
-            ) : <span />}
+            ) : (
+              <button className="text-[11px] font-semibold text-secondary hover:underline" onClick={() => { setOpen(false); navigate("/notifications"); }}>
+                Centre de notifications →
+              </button>
+            )}
             {nonLuesMoi > 0 && (
               <button className="text-[11px] text-muted-foreground hover:text-foreground flex items-center gap-1" onClick={() => toutLire.mutate()}>
                 <Check className="w-3 h-3" /> Tout marquer comme lu
@@ -303,10 +335,13 @@ const NotificationPanel = () => {
                   <Icon className="w-4 h-4" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className={`text-sm leading-snug ${n.lu ? "text-muted-foreground" : "text-foreground font-semibold"}`}>{n.titre}</p>
+                  <p className={`text-sm leading-snug ${n.lu ? "text-muted-foreground" : "text-foreground font-semibold"}`}>
+                    {n.priorite === "critique" && !n.lu && <span className="mr-1 text-[9px] font-bold uppercase px-1.5 py-0.5 rounded bg-destructive text-destructive-foreground align-middle">Urgent</span>}
+                    {n.titre}
+                  </p>
                   <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">{n.message}</p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
-                    <span className="text-[10px] text-muted-foreground/70">{quand(n.createdAt)}</span>
+                    <span className="text-[10px] text-muted-foreground/70">{quand(n.createdAt)}{n.origineNom ? ` · ${n.origineNom}` : ""}{n.relances ? ` · ${n.relances} rappel(s)` : ""}</span>
                     {n.echeance && !n.lu && <CompteARebours echeance={n.echeance} debut={n.createdAt} />}
                   </div>
                 </div>

@@ -285,7 +285,8 @@ describe('Conteneurs, sous-étapes retirées et bon de compagnie sans montant', 
     assert.equal(r.body.tailleConteneur, '40\' HC')
     const t = (await api('delba', 'GET', `/api/dossiers/${r.body.id}/sous-etapes`)).body
     assert.ok(!t.some((x: any) => x.cle === 'regulation' || x.cle === 'validation_docs'))
-    assert.deepEqual(t.filter((x: any) => x.etape === 'validation').map((x: any) => x.cle), ['liquidation'], 'Validation : liquidation par la douane')
+    assert.ok(!t.some((x: any) => x.etape === 'validation'), 'étape Validation retirée')
+    assert.deepEqual(t.filter((x: any) => x.etape === 'codage').map((x: any) => x.cle).sort(), ['declaration', 'etat_codage', 'liquidation'], 'liquidation à la fin du Codage')
 
     // Bon de la compagnie : numéro et date, aucun paiement créé
     await aSonTour(r.body.id, 'bon_compagnie', 'facturation_compagnie')
@@ -651,18 +652,18 @@ describe('Sauvegardes hebdomadaires', () => {
 })
 
 describe('Liquidation de la déclaration (douane)', () => {
-  it('sous-étape de la Validation : responsable la douane, montant liquidé repris sur le dossier', async () => {
+  it('fin du Codage : responsable la douane, montant liquidé repris sur le dossier', async () => {
     const d = await api('yasmine', 'POST', '/api/dossiers', {
       client: unique('CLIENT LIQ'), compagnie: 'MSC', conteneur: 'MSCU6060606', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
     })
     const id = d.body.id
-    const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.find((x: any) => x.etape === 'validation' && x.cle === 'liquidation')
+    const t = (await api('delba', 'GET', `/api/dossiers/${id}/sous-etapes`)).body.find((x: any) => x.etape === 'codage' && x.cle === 'liquidation')
     assert.ok(t, 'tâche de liquidation créée')
     assert.equal(nom(t.responsableId), 'odette', 'suivie par la validation')
     const sla = await api('delba', 'GET', '/api/parametres/sla-sous-etapes')
-    assert.equal(sla.body.find((x: any) => x.cle === 'validation.liquidation').heures, 72, '3 jours')
-    await aSonTour(id, 'validation', 'liquidation')
-    const r = await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/validation/liquidation`, {
+    assert.equal(sla.body.find((x: any) => x.cle === 'codage.liquidation').heures, 72, '3 jours')
+    await aSonTour(id, 'codage', 'liquidation')
+    const r = await api('odette', 'PUT', `/api/dossiers/${id}/sous-etapes/codage/liquidation`, {
       statut: 'valide', metadata: { liq_responsable: 'Douane — Inspecteur vérificateur', liq_inspecteur: 'M. ESSOMBA', liq_numero: 'L-2026-0045', liq_montant: '1 840 000' },
     })
     expectStatus(r, 200)
@@ -687,5 +688,105 @@ describe('Messagerie : chaque message reçu est notifié', () => {
     assert.ok(!y.body.data.some((x: any) => x.type === 'message' && x.actionUrl?.includes(conv)), 'pas de notification pour l\'auteur')
     const l = await api('odette', 'PATCH', '/api/notifications/messages-lus', { conversationId: conv })
     assert.equal(l.body.lues, 1)
+  })
+})
+
+describe('Gestion des DI : dossiers rattachés', () => {
+  it('la liste et le détail montrent les dossiers ; rattacher, dissocier, intégrité des débits', async () => {
+    const di = await api('honore', 'POST', '/api/di', { numero: unique('DI-LIEN'), client: 'CLIENT LIEN', montant: 2_000_000, dateEmission: new Date().toISOString() })
+    expectStatus(di, 201)
+    const mk = async (n: string) => (await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique(n), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+    })).body
+    const [a, b] = [await mk('CL-A'), await mk('CL-B')]
+    for (const d of [a, b]) expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: d.id }), 200)
+
+    const liste = await api('honore', 'GET', '/api/di?limit=50')
+    const ligne = liste.body.data.find((x: any) => x.id === di.body.id)
+    assert.deepEqual(ligne.dossiers.map((d: any) => d.numero).sort(), [a.numero, b.numero].sort(), 'la liste renvoie les dossiers rattachés')
+    assert.equal(ligne._count.dossiers, 2)
+    const detail = await api('honore', 'GET', `/api/di/${di.body.id}`)
+    assert.equal(detail.body.dossiers.length, 2)
+
+    // Un dossier débité sur la DI ne peut pas en être dissocié
+    await aSonTour(a.id, 'soumission_sgs', 'ff_soumission')
+    expectStatus(await api('delba', 'PUT', `/api/dossiers/${a.id}/sous-etapes/soumission_sgs/ff_soumission`, { metadata: { ff_montant_facture: '100000', ff_reference_facture: unique('PI') } }), 200)
+    const refus = await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: a.id })
+    expectStatus(refus, 422)
+    assert.equal(refus.body.error, 'DOSSIER_DEBITE')
+    const autre = await api('honore', 'POST', '/api/di', { numero: unique('DI-AUTRE'), client: 'CLIENT AUTRE', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    expectStatus(await api('honore', 'POST', `/api/di/${autre.body.id}/lier-dossier`, { dossierId: a.id }), 422, 'un dossier débité ne change pas de DI')
+
+    // Dossier sans mouvement : dissociation possible et tracée
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: b.id }), 200)
+    const apres = await api('honore', 'GET', `/api/di/${di.body.id}`)
+    assert.deepEqual(apres.body.dossiers.map((d: any) => d.id), [a.id])
+    const audit = await api('delba', 'GET', `/api/dossiers/${b.id}/audit`)
+    assert.ok(JSON.stringify(audit.body).includes('dissocié de la DI'))
+    // Suppression d'une DI consommée refusée
+    expectStatus(await api('delba', 'DELETE', `/api/di/${di.body.id}`), 422)
+  })
+})
+
+describe('Notifications : Push, priorités, prise en compte, relances, retards', () => {
+  it('abonnement Push, clé publique, clé privée jamais exposée', async () => {
+    const cle = await api('yaya', 'GET', '/api/push/cle')
+    expectStatus(cle, 200)
+    assert.ok(cle.body.publicKey.length > 40)
+    const p = await api('yaya', 'GET', '/api/parametres')
+    assert.equal(p.body.vapid, undefined, 'clé privée masquée')
+    expectStatus(await api('delba', 'GET', '/api/parametres/vapid'), 404)
+    expectStatus(await api('delba', 'PATCH', '/api/parametres/vapid', { valeur: {} }), 403)
+    const ab = await api('yaya', 'POST', '/api/push/abonnements', { endpoint: 'https://fcm.googleapis.com/fcm/send/test-' + unique('ep'), keys: { p256dh: 'B'.repeat(87), auth: 'a'.repeat(22) }, navigateur: 'Chrome test' })
+    expectStatus(ab, 201)
+    const etat = await api('yaya', 'GET', '/api/push/etat')
+    assert.ok(etat.body.appareils >= 1)
+  })
+
+  it('priorité, auteur, prise en compte et relances progressives', async () => {
+    const { prisma } = await import('../src/config/prisma')
+    const n = await prisma.notification.create({ data: { userId: ids.yaya, type: 'alerte', titre: 'Blocage test relance', message: 'x' } })
+    assert.equal(n.priorite, 'critique')
+    const { relancerNotifications, signalerRetards } = await import('../src/services/relances')
+    // 31 min plus tard : première relance ; juste après : pas de nouvelle relance (intervalle doublé)
+    await relancerNotifications(new Date(Date.now() + 31 * 60_000))
+    let r = await prisma.notification.findUnique({ where: { id: n.id } })
+    assert.equal(r!.relances, 1)
+    await relancerNotifications(new Date(Date.now() + 40 * 60_000))
+    r = await prisma.notification.findUnique({ where: { id: n.id } })
+    assert.equal(r!.relances, 1, 'relance progressive : 30 min puis 60 min')
+    expectStatus(await api('yaya', 'POST', `/api/notifications/${n.id}/acquitter`, {}), 200)
+    await relancerNotifications(new Date(Date.now() + 10 * 3600_000))
+    r = await prisma.notification.findUnique({ where: { id: n.id } })
+    assert.equal(r!.relances, 1, 'plus de relance après prise en compte')
+    assert.ok(r!.acquitteLe && r!.lu)
+    const urg = await api('yaya', 'GET', '/api/notifications?filtre=urgentes')
+    expectStatus(urg, 200)
+    assert.equal(typeof urg.body.urgentes, 'number')
+
+    // Retard : une alerte unique au titulaire et au responsable
+    const d = await api('yasmine', 'POST', '/api/dossiers', { client: unique('CL RETARD'), compagnie: 'MSC', conteneur: 'MSCU8080808', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString() })
+    const bl = await prisma.sousEtapeDossier.findFirst({ where: { dossierId: d.body.id, cle: 'bl' } })
+    await prisma.sousEtapeDossier.update({ where: { id: bl!.id }, data: { deadline: new Date(Date.now() - 3600_000) } })
+    assert.ok(await signalerRetards() >= 1)
+    assert.equal(await signalerRetards(), 0, 'pas de doublon')
+    const alertes = await prisma.notification.findMany({ where: { dossierId: d.body.id, titre: { startsWith: '⏱ Retard' } } })
+    assert.ok(alertes.length >= 1 && alertes.every(a => a.priorite === 'critique'))
+  })
+})
+
+describe('Gestion des sorties : bons de la compagnie (M. Wandala)', () => {
+  it('le suivi liste le bon de la compagnie, son numéro, son état et son document', async () => {
+    const d = await api('yasmine', 'POST', '/api/dossiers', { client: unique('CL BON'), compagnie: 'MSC', conteneur: 'MSCU9090909', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString() })
+    await api('delba', 'GET', `/api/dossiers/${d.body.id}/sous-etapes`)
+    await aSonTour(d.body.id, 'bon_compagnie', 'facturation_compagnie')
+    expectStatus(await api('wandala', 'PUT', `/api/dossiers/${d.body.id}/sous-etapes/bon_compagnie/facturation_compagnie`, { statut: 'valide', metadata: { bc_bon_numero: 'MSC-BON-77', bc_bon_date: '2026-11-20' } }), 200)
+    const r = await api('wandala', 'GET', '/api/dossiers/suivi/bons-compagnie')
+    expectStatus(r, 200)
+    const ligne = r.body.find((x: any) => x.dossier.id === d.body.id)
+    assert.ok(ligne, 'dossier présent dans le suivi')
+    const bon = ligne.documents.find((x: any) => x.cle === 'facturation_compagnie')
+    assert.equal(bon.numero, 'MSC-BON-77')
+    assert.equal(bon.statut, 'valide')
   })
 })

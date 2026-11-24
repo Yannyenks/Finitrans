@@ -10,6 +10,9 @@ import { logActivity } from '../utils/audit'
 import { createHash } from 'crypto'
 import { differenceInDays, subDays, format, eachDayOfInterval } from 'date-fns'
 import { zCompagnie } from '../services/compagnies'
+import { logAudit } from '../utils/audit'
+import { STATUS_LABELS } from '../services/workflow'
+import { marquerNotifies } from '../services/evenements'
 
 // ── Helpers ──────────────────────────────────────────────────
 
@@ -62,6 +65,7 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
         include: {
           gestionnaire: { select: { nom: true } },
           _count: { select: { dossiers: true, mouvements: true } },
+          dossiers: { select: { id: true, numero: true, client: true, status: true, finaliseLe: true }, orderBy: { dateCreation: 'desc' } },
         },
       }),
       prisma.declarationImportation.count({ where }),
@@ -245,8 +249,11 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
           },
         },
         dossiers: {
+          orderBy: { dateCreation: 'desc' },
           select: {
-            id: true, numero: true, client: true, status: true, priorite: true,
+            id: true, numero: true, client: true, status: true, priorite: true, site: true, conteneur: true,
+            dateCreation: true, finaliseLe: true, responsable: { select: { nom: true } },
+            _count: { select: { mouvementsDI: { where: { diId: id } } } },
             compagnie: true, montantTaxes: true, montantHonoraires: true,
             bonsLivraison: { where: { statut: 'valide' }, select: { montant: true } },
             paiementsDouane: { select: { montant: true, statut: true } },
@@ -703,9 +710,50 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (di.statut !== 'actif') {
       return reply.code(422).send({ error: 'DI_INACTIVE', message: 'Impossible de lier à une DI clôturée ou suspendue' })
     }
+    if (dossier.diId === id) return reply.send({ message: 'Dossier déjà rattaché à cette DI', diNumero: di.numero })
+    // Un dossier déjà débité sur une autre DI ne peut pas en changer (les mouvements resteraient sur l'ancienne)
+    if (dossier.diId) {
+      const debits = await prisma.mouvementDI.count({ where: { diId: dossier.diId, dossierId } })
+      if (debits > 0) {
+        const ancienne = await prisma.declarationImportation.findUnique({ where: { id: dossier.diId }, select: { numero: true } })
+        return reply.code(422).send({ error: 'DOSSIER_DEJA_DEBITE', message: `Le dossier ${dossier.numero} a déjà des mouvements sur la DI ${ancienne?.numero ?? ''} : il ne peut pas changer de DI.` })
+      }
+    }
 
     await prisma.dossier.update({ where: { id: dossierId }, data: { diId: id } })
+    const destinataires = [...new Set([di.gestionnaireId, dossier.responsableId])].filter(u => u !== request.user.id)
+    if (destinataires.length) {
+      await prisma.notification.createMany({ data: destinataires.map(userId => ({
+        userId, type: 'dossier' as const, titre: `Nouveau dossier sur la DI ${di.numero}`,
+        message: `${dossier.numero} (${dossier.client}) est rattaché à la DI ${di.numero} — ${STATUS_LABELS[dossier.status]}.`,
+        dossierId, actionUrl: `/di?di=${id}`,
+      })) })
+      marquerNotifies(destinataires)
+    }
+    await logAudit(dossierId, request.user.id, 'DI_RATTACHEE', `Dossier rattaché à la DI ${di.numero} (${di.client})`)
+    await logActivity(request.user.id, 'DI_DOSSIER_RATTACHE', 'di', id, `${dossier.numero} → ${di.numero}`)
     return reply.send({ message: 'Dossier lié à la DI avec succès', diNumero: di.numero })
+  })
+
+  // ── POST /api/di/:id/delier-dossier — dissocier un dossier (sans mouvement sur la DI) ──
+  fastify.post('/:id/delier-dossier', { preHandler: writeAccess }, async (request, reply) => {
+    const { id }        = z.object({ id: z.string().uuid() }).parse(request.params)
+    const { dossierId } = z.object({ dossierId: z.string().uuid() }).parse(request.body)
+    const [di, dossier] = await Promise.all([
+      prisma.declarationImportation.findUnique({ where: { id } }),
+      prisma.dossier.findUnique({ where: { id: dossierId } }),
+    ])
+    if (!di)      throw new NotFoundError('DI', id)
+    if (!dossier) throw new NotFoundError('Dossier', dossierId)
+    if (dossier.diId !== id) return reply.code(422).send({ error: 'NON_RATTACHE', message: `Le dossier ${dossier.numero} n'est pas rattaché à la DI ${di.numero}.` })
+    const debits = await prisma.mouvementDI.count({ where: { diId: id, dossierId } })
+    if (debits > 0) {
+      return reply.code(422).send({ error: 'DOSSIER_DEBITE', message: `Impossible de dissocier ${dossier.numero} : ${debits} mouvement(s) de la DI ${di.numero} lui sont rattachés (facture fournisseur, paiement…). Corrigez ou recréditez d'abord ces mouvements.` })
+    }
+    await prisma.dossier.update({ where: { id: dossierId }, data: { diId: null } })
+    await logAudit(dossierId, request.user.id, 'DI_DISSOCIEE', `Dossier dissocié de la DI ${di.numero}`)
+    await logActivity(request.user.id, 'DI_DOSSIER_DISSOCIE', 'di', id, `${dossier.numero} ← ${di.numero}`)
+    return reply.send({ message: 'Dossier dissocié de la DI', diNumero: di.numero })
   })
 
   // ── POST /api/di/:id/cloner — cloner la DI ────────────────

@@ -146,12 +146,10 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.ok(notifs.body.data.some((n: any) => n.dossierId === dossierId && n.type === 'action_requise'))
   })
 
-  it('Codage → Validation → Paiement (Mme Odette termine elle-même)', async () => {
+  it('Codage (avec liquidation) → Paiement des droits et taxes (la validation termine elle-même)', async () => {
     await completeStage(dossierId, 'codage')
     await preuve('odette', dossierId, 'codage')
-    await advance('odette', dossierId, 'validation')
-    await completeStage(dossierId, 'validation')
-    await preuve('odette', dossierId, 'validation')
+    await advance('odette', dossierId, 'validation', 400)
     const d = await advance('odette', dossierId, 'paiement')
     assert.equal(d.responsableId, ids.yaya, 'paiement → Mr Yaya')
     await advance('odette', dossierId, 'bon_compagnie', 403)
@@ -185,7 +183,7 @@ describe('Workflow Douala (MSC) — chaque responsable termine son étape', () =
     assert.equal(traitePar.paiement, 'yaya')
     assert.equal(traitePar.bon_compagnie, 'wandala')
     const audit = await api('delba', 'GET', `/api/dossiers/${dossierId}/audit`)
-    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 13)
+    assert.ok(audit.body.filter((a: any) => a.action === 'SOUS_ETAPE_VALIDEE').length >= 14)
   })
 })
 

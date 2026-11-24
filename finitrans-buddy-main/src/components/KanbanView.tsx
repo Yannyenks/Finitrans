@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 
-const columns = ["reception", "soumission_sgs", "codage", "validation", "paiement", "bon_compagnie", "operations_kribi", "cloture", "facturation"];
+const columns = ["reception", "soumission_sgs", "codage", "paiement", "bon_compagnie", "operations_kribi", "cloture", "facturation"];
 
 const STATUS_LABELS: Record<string, string> = {
   reception:        "Réception",

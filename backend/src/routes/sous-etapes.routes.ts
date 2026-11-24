@@ -53,6 +53,43 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
   }
 
   // GET /api/dossiers/:id/sous-etapes
+  // GET /api/dossiers/suivi/bons-compagnie — suivi des bons de la compagnie maritime (gestion des sorties)
+  fastify.get('/suivi/bons-compagnie', { preHandler: [authenticate] }, async (request, reply) => {
+    const user = request.user
+    const DOCS: Record<string, { libelle: string; numero: string; date: string }> = {
+      facturation_compagnie: { libelle: 'Bon de la compagnie', numero: 'bc_bon_numero', date: 'bc_bon_date' },
+      bon_a_delivrer:        { libelle: 'Bon à délivrer',      numero: 'bad_numero',    date: 'bad_date_obtention' },
+      bon_livraison:         { libelle: 'Bon de livraison',    numero: 'kbl_numero',    date: 'kbl_date' },
+    }
+    const voitTout = user.superviseur || ['gestion_sorties', 'comptabilite', 'administration'].includes(user.profil)
+    const taches = await prisma.sousEtapeDossier.findMany({
+      where: {
+        cle: { in: Object.keys(DOCS) },
+        dossier: { finaliseLe: null, status: { in: ['bon_compagnie', 'operations_kribi', 'cloture', 'facturation'] } },
+        ...(voitTout ? {} : { OR: [{ responsableId: user.id }, { dossier: { responsableId: user.id } }] }),
+      },
+      include: {
+        responsable: { select: { nom: true } },
+        dossier: { select: { id: true, numero: true, client: true, compagnie: true, site: true, status: true, conteneur: true } },
+      },
+      orderBy: { updatedAt: 'desc' },
+      take: 300,
+    })
+    const parDossier = new Map<string, { dossier: (typeof taches)[number]['dossier']; documents: unknown[] }>()
+    for (const t of taches) {
+      const meta = (t.metadata ?? {}) as Record<string, unknown>
+      const d = DOCS[t.cle]
+      const entree = parDossier.get(t.dossierId) ?? { dossier: t.dossier, documents: [] }
+      entree.documents.push({
+        cle: t.cle, etape: t.etape, libelle: d.libelle, statut: t.statut, responsable: t.responsable?.nom ?? null,
+        numero: meta[d.numero] ?? null, date: meta[d.date] ?? null,
+        preuveUrl: meta.preuve_url ?? null, preuveNom: meta.preuve_nom ?? null, terminee: t.completedAt,
+      })
+      parDossier.set(t.dossierId, entree)
+    }
+    return reply.send([...parDossier.values()])
+  })
+
   fastify.get('/:id/sous-etapes', { preHandler: [authenticate] }, async (request, reply) => {
     const { id } = z.object({ id: z.string().uuid() }).parse(request.params)
     const dossier = await prisma.dossier.findUnique({ where: { id }, select: { id: true, status: true } })
@@ -123,7 +160,7 @@ const sousEtapesRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) =>
     if (body.notes         !== undefined) data.notes         = body.notes
     if (body.metadata      !== undefined) {
       // Champs calculés par le serveur (débit DI, enregistrement métier) : jamais fournis par le client
-      for (const k of ['ff_montant_debite', 'ff_solde_di_apres', 'enregistrement_type', 'enregistrement_id']) delete body.metadata[k]
+      for (const k of ['ff_montant_debite', 'ff_solde_di_apres', 'ff_di_id', 'enregistrement_type', 'enregistrement_id']) delete body.metadata[k]
       // Fusion : préserve preuve_url et les autres champs déjà saisis
       const existingMeta = (existing?.metadata ?? {}) as Record<string, unknown>
       data.metadata = { ...existingMeta, ...body.metadata } as Prisma.InputJsonValue

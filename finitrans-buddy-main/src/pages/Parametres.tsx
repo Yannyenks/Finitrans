@@ -5,7 +5,7 @@ import { api } from "@/lib/api";
 import { DureeJHM } from "@/components/DureeJHM";
 import { TAUX_DEFAUT } from "@/lib/devise";
 import { delaiJHM } from "@/lib/temps";
-import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship, Coins } from "lucide-react";
+import { Bell, Shield, Globe, Save, Timer, Link2, Plus, Trash2, CheckCircle2, Ship, Coins, BellRing } from "lucide-react";
 import CompagniesMaritimes from "@/components/CompagniesMaritimes";
 import { useNavigate } from "react-router-dom";
 import { Label } from "@/components/ui/label";
@@ -35,7 +35,6 @@ const DEFAULT_SLA: Record<string, number> = {
   reception:        1,
   soumission_sgs:   2,
   codage:           1,
-  validation:       2,
   paiement:         3,
   bon_compagnie:    2,
   operations_kribi: 3,
@@ -92,6 +91,16 @@ const Parametres = () => {
     onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
   });
 
+  // Relances des notifications prioritaires non traitées (paramètre « relances_notifications »)
+  const RELANCES_DEFAUT = { actif: true, critiqueMinutes: 30, hauteMinutes: 120, maxRelances: 5 };
+  const [relances, setRelances] = useState(RELANCES_DEFAUT);
+  useEffect(() => { if (params?.relances_notifications) setRelances({ ...RELANCES_DEFAUT, ...params.relances_notifications }); }, [params]);
+  const saveRelances = useMutation({
+    mutationFn: () => api.patch("/api/parametres/relances_notifications", { valeur: relances }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["parametres"] }); toast({ title: "Relances enregistrées" }); },
+    onError: (e: any) => toast({ title: "Erreur", description: e.message, variant: "destructive" }),
+  });
+
   // Liens externes (portails ouverts depuis une sous-étape)
   const { data: attribution } = useQuery({ queryKey: ["roles-attribution"], queryFn: () => api.get<any>("/api/roles/attribution") });
   const sousEtapes: { cle: string; label: string }[] = (attribution?.etapes ?? []).flatMap((e: any) =>
@@ -128,6 +137,7 @@ const Parametres = () => {
           <TabsTrigger value="sla"      className="gap-1.5"><Timer  className="w-3.5 h-3.5" /> SLA &amp; Délais</TabsTrigger>
           <TabsTrigger value="compagnies" className="gap-1.5"><Ship className="w-3.5 h-3.5" /> Compagnies maritimes</TabsTrigger>
           <TabsTrigger value="devises"  className="gap-1.5"><Coins  className="w-3.5 h-3.5" /> Devises</TabsTrigger>
+          <TabsTrigger value="relances" className="gap-1.5"><BellRing className="w-3.5 h-3.5" /> Notifications</TabsTrigger>
           <TabsTrigger value="liens"    className="gap-1.5"><Link2  className="w-3.5 h-3.5" /> Liens &amp; portails</TabsTrigger>
           <TabsTrigger value="securite" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Sécurité</TabsTrigger>
           <TabsTrigger value="general"  className="gap-1.5"><Globe  className="w-3.5 h-3.5" /> Général</TabsTrigger>
@@ -174,6 +184,32 @@ const Parametres = () => {
           </motion.div>
         </TabsContent>
 
+        <TabsContent value="relances">
+          <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card space-y-4">
+            <div>
+              <h3 className="font-display font-semibold text-foreground mb-1">Relances des notifications non traitées</h3>
+              <p className="text-sm text-muted-foreground">
+                Une notification urgente ou importante, ni ouverte ni « prise en compte », est relancée sur l'ordinateur du destinataire
+                après le délai choisi, puis à intervalles doublés (ex. 30 min, 1 h, 2 h…). Les tâches en retard déclenchent une alerte urgente.
+                {!superviseur && <strong> Modifiable par la Direction et le Responsable Exploitation.</strong>}
+              </p>
+            </div>
+            <label className="flex items-center gap-2 text-sm"><Switch checked={relances.actif} disabled={!superviseur} onCheckedChange={v => setRelances(r => ({ ...r, actif: v }))} /> Relances automatiques activées</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {([["critiqueMinutes", "Urgentes : 1re relance après (min)"], ["hauteMinutes", "Importantes : 1re relance après (min)"], ["maxRelances", "Nombre maximal de relances"]] as const).map(([k, l]) => (
+                <div key={k} className="space-y-1.5 p-3 rounded-xl bg-muted/40 border border-border/50">
+                  <Label className="text-xs">{l}</Label>
+                  <Input type="number" min={1} max={k === "maxRelances" ? 20 : 1440} value={relances[k]} disabled={!superviseur}
+                    onChange={e => setRelances(r => ({ ...r, [k]: Math.max(1, Math.round(Number(e.target.value) || 1)) }))} className="bg-card font-mono" />
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={() => saveRelances.mutate()} disabled={!superviseur || saveRelances.isPending} className="gap-2 bg-primary text-primary-foreground"><Save className="w-4 h-4" /> Enregistrer</Button>
+            </div>
+          </motion.div>
+        </TabsContent>
+
         <TabsContent value="devises">
           <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} className="stat-card">
             <h3 className="font-display font-semibold text-foreground mb-1">Taux de change</h3>
@@ -214,7 +250,7 @@ const Parametres = () => {
             </p>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 mb-6">
-              {Object.entries(slaConfig).filter(([step]) => step !== "operations_douala").map(([step, h]) => (
+              {Object.entries(slaConfig).filter(([step]) => step !== "operations_douala" && step !== "validation").map(([step, h]) => (
                 <div key={step} className="flex flex-wrap items-center justify-between gap-2 p-3.5 rounded-xl bg-muted/40 border border-border/50" data-testid={`sla-etape-${step}`}>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-foreground">{STEP_LABELS[step] ?? step}</p>
