@@ -30,7 +30,8 @@ export default function DIDossiers({ diId, diNumero, canEdit }: { diId: string; 
     enabled: canEdit && recherche.trim().length >= 2,
   });
   const rafraichir = () => {
-    for (const k of [["di", diId], ["di-dashboard", diId], ["di-list"], ["di-stats-resume"], ["dossiers"]]) qc.invalidateQueries({ queryKey: k });
+    // Solde, historique, ventilation, listes : tous les écrans DI et dossiers se mettent à jour
+    qc.invalidateQueries({ predicate: q => { const k = String(q.queryKey[0] ?? ""); return k.startsWith("di") || k.startsWith("dossier"); } });
   };
   const lier = useMutation({
     mutationFn: (p: { dossierId: string; montantFacture?: number; referenceFacture?: string }) => api.post<any>(`/api/di/${diId}/lier-dossier`, p),

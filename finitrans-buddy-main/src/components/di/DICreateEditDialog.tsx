@@ -124,7 +124,21 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
         toast({ title: `Rattachement de ${d?.numero ?? "dossier"} impossible`, description: e.message, variant: "destructive" });
       }
     }
-    for (const k of [["di", diCible], ["di-list"], ["di-stats-resume"], ["dossiers"]]) qc.invalidateQueries({ queryKey: k });
+    qc.invalidateQueries({ predicate: q => { const k = String(q.queryKey[0] ?? ""); return k.startsWith("di") || k.startsWith("dossier"); } });
+  };
+  // Dossiers retirés de la DI : dissociation avec annulation du débit (recrédit tracé)
+  const retires = dejaLies.filter(id => !linkedIds.includes(id));
+  const dissocier = async (diCible: string) => {
+    for (const id of retires) {
+      const d = (di?.dossiers ?? []).find((x: any) => x.id === id) ?? allDossiers.find(x => x.id === id);
+      try {
+        const r = await api.post<any>(`/api/di/${diCible}/delier-dossier`, { dossierId: id });
+        toast({ title: `${d?.numero ?? "Dossier"} dissocié`, description: r?.montantRecredite ? `Débit annulé : ${Number(r.montantRecredite).toLocaleString("fr-FR")} FCFA recrédités sur la DI` : "Aucun débit à annuler" });
+      } catch (e: any) {
+        toast({ title: `Dissociation de ${d?.numero ?? "dossier"} impossible`, description: e.message, variant: "destructive" });
+      }
+    }
+    qc.invalidateQueries({ predicate: q => { const k = String(q.queryKey[0] ?? ""); return k.startsWith("di") || k.startsWith("dossier"); } });
   };
 
   const handleSubmit = async () => {
@@ -159,6 +173,7 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
           await recharge.mutateAsync({ montant: parseFloat(montantAjust), motif: motifAjust });
         }
         // Nouveaux dossiers : facture fournisseur débitée sur le solde restant
+        if (retires.length > 0) await dissocier(di.id);
         if (nouveauxLiens.length > 0) await rattacher(di.id);
       } else {
         // Create
@@ -375,6 +390,11 @@ export default function DICreateEditDialog({ open, onClose, di }: Props) {
               Pour chaque dossier ajouté, indiquez le montant de sa facture fournisseur : il est débité sur ce qui reste de la DI
               (laisser vide si la facture est déjà saisie sur le dossier).
             </p>
+            {isEdit && retires.length > 0 && (
+              <p className="text-[11px] font-semibold text-destructive leading-tight">
+                {retires.length} dossier{retires.length > 1 ? "s" : ""} retiré{retires.length > 1 ? "s" : ""} : à l'enregistrement, {retires.length > 1 ? "leurs débits seront annulés" : "son débit sera annulé"} et le montant recrédité sur la DI.
+              </p>
+            )}
 
             {/* Chips sélectionnés */}
             {linkedIds.length > 0 && (

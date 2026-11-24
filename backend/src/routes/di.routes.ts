@@ -341,11 +341,12 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     // ── Ventilation par catégorie OHADA ─────────────────────
     const ventilationCategorie: Record<string, number> = {}
     di.mouvements
-      .filter(m => m.type === 'debit')
+      .filter(m => m.type === 'debit' || m.motif.startsWith('Annulation du débit'))
       .forEach(m => {
-        const cat = m.categorie ?? 'frais_divers'
-        ventilationCategorie[cat] = (ventilationCategorie[cat] ?? 0) + Number(m.montant)
+        const cat = m.categorie === 'remboursement' ? 'frais_divers' : (m.categorie ?? 'frais_divers')
+        ventilationCategorie[cat] = (ventilationCategorie[cat] ?? 0) + (m.type === 'debit' ? 1 : -1) * Number(m.montant)
       })
+    for (const k of Object.keys(ventilationCategorie)) if (ventilationCategorie[k] <= 0) delete ventilationCategorie[k]
 
     // ── Dossiers liés avec consommation ────────────────────
     const dossiersDetail = di.dossiers.map(d => {
@@ -807,17 +808,38 @@ const diRoutes: FastifyPluginAsync = async (fastify: FastifyInstance) => {
     if (!dossier) throw new NotFoundError('Dossier', dossierId)
     if (dossier.diId !== id) return reply.code(422).send({ error: 'NON_RATTACHE', message: `Le dossier ${dossier.numero} n'est pas rattaché à la DI ${di.numero}.` })
     // Annulation : tout ce que le dossier a consommé sur la DI est recrédité (mouvement tracé)
-    const mouvements = await prisma.mouvementDI.findMany({ where: { diId: id, dossierId }, select: { type: true, montant: true } })
+    const mouvements = await prisma.mouvementDI.findMany({ where: { diId: id, dossierId }, select: { type: true, montant: true, categorie: true, motif: true } })
     const net = Math.round(mouvements.reduce((s, m) => s + (m.type === 'debit' ? 1 : -1) * Number(m.montant), 0))
+    // Net à recréditer par catégorie (débits − annulations déjà faites)
+    const parCategorie = new Map<string, number>()
+    for (const m of mouvements) {
+      const annulation = m.type === 'credit' && m.motif.startsWith('Annulation du débit')
+      if (m.type !== 'debit' && !annulation) continue
+      const cat = m.type === 'debit' ? (m.categorie ?? 'frais_divers') : (m.categorie === 'remboursement' ? 'frais_divers' : m.categorie ?? 'frais_divers')
+      parCategorie.set(cat, (parCategorie.get(cat) ?? 0) + (m.type === 'debit' ? 1 : -1) * Number(m.montant))
+    }
     let soldeRestant = Number(di.soldeActuel)
     await prisma.$transaction(async tx => {
       if (net > 0) {
         const frais = await tx.declarationImportation.findUnique({ where: { id }, select: { soldeActuel: true } })
         soldeRestant = Number(frais!.soldeActuel) + net
-        await tx.mouvementDI.create({ data: {
-          diId: id, type: 'credit', categorie: 'remboursement', montant: net, dossierId, createdBy: request.user.id,
-          motif: `Annulation du débit — dossier ${dossier.numero} dissocié de la DI${motif ? ` (${motif})` : ''}`,
-        } })
+        let reste = net
+        const lignes = [...parCategorie.entries()].filter(([, v]) => v > 0)
+        for (const [i, [cat, v]] of lignes.entries()) {
+          const montant = i === lignes.length - 1 ? reste : Math.min(Math.round(v), reste)
+          if (montant <= 0) continue
+          reste -= montant
+          await tx.mouvementDI.create({ data: {
+            diId: id, type: 'credit', categorie: cat as any, montant, dossierId, createdBy: request.user.id,
+            motif: `Annulation du débit — dossier ${dossier.numero} dissocié de la DI${motif ? ` (${motif})` : ''}`,
+          } })
+        }
+        if (reste > 0) {
+          await tx.mouvementDI.create({ data: {
+            diId: id, type: 'credit', categorie: 'frais_divers', montant: reste, dossierId, createdBy: request.user.id,
+            motif: `Annulation du débit — dossier ${dossier.numero} dissocié de la DI${motif ? ` (${motif})` : ''}`,
+          } })
+        }
         await tx.declarationImportation.update({ where: { id }, data: { soldeActuel: soldeRestant } })
       }
       await tx.dossier.update({ where: { id: dossierId }, data: { diId: null } })

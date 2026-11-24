@@ -780,6 +780,38 @@ describe('Gestion des DI : dossiers rattachés', () => {
   })
 })
 
+describe('DI : machine arrière à la dissociation', () => {
+  it('dissocier un dossier remet la DI exactement dans son état initial (solde, ventilation, dossiers)', async () => {
+    const di = await api('honore', 'POST', '/api/di', { numero: unique('DI-ARR'), client: 'CLIENT ARR', montant: 1_000_000, dateEmission: new Date().toISOString() })
+    expectStatus(di, 201)
+    const dos = await api('yasmine', 'POST', '/api/dossiers', {
+      client: unique('CL-ARR'), compagnie: 'MSC', conteneur: 'MSCU7070707', marchandise: 'Divers', site: 'Douala', dateArrivee: new Date().toISOString(),
+      diId: di.body.id, montantFacture: 400_000, referenceFacture: 'FF-ARR-1',
+    })
+    expectStatus(dos, 201)
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/mouvements`, { type: 'debit', montant: 150_000, motif: 'Droits de douane', categorie: 'droits_douane', dossierId: dos.body.id }), 201)
+    const avant = await api('honore', 'GET', `/api/di/${di.body.id}`)
+    assert.equal(avant.body.soldeNum, 450_000)
+    assert.equal(avant.body.dossiers[0].montantDebite, 550_000)
+
+    const r = await api('honore', 'POST', `/api/di/${di.body.id}/delier-dossier`, { dossierId: dos.body.id })
+    expectStatus(r, 200)
+    assert.equal(r.body.montantRecredite, 550_000)
+    const apres = await api('honore', 'GET', `/api/di/${di.body.id}`)
+    assert.equal(apres.body.soldeNum, 1_000_000, 'solde intégralement restauré')
+    assert.equal(apres.body.utiliseNum, 0)
+    assert.equal(apres.body.dossiers.length, 0, 'le dossier ne figure plus sur la DI')
+    const tdb = await api('honore', 'GET', `/api/di/${di.body.id}/tableau-de-bord`)
+    expectStatus(tdb, 200)
+    assert.deepEqual(tdb.body.ventilationCategorie, [], 'plus aucune consommation ventilée')
+    const doss = await api('delba', 'GET', `/api/dossiers/${dos.body.id}`)
+    assert.equal(doss.body.diId, null)
+    // Rattachement à nouveau possible, avec la même facture
+    expectStatus(await api('honore', 'POST', `/api/di/${di.body.id}/lier-dossier`, { dossierId: dos.body.id, montantFacture: 400_000, referenceFacture: 'FF-ARR-1' }), 200)
+    assert.equal((await api('honore', 'GET', `/api/di/${di.body.id}`)).body.soldeNum, 600_000)
+  })
+})
+
 describe('Notifications : Push, priorités, prise en compte, relances, retards', () => {
   it('abonnement Push, clé publique, clé privée jamais exposée', async () => {
     const cle = await api('yaya', 'GET', '/api/push/cle')
